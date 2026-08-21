@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="220" fill="#17483f"/>
+  <path d="M0 720L304 1024H804C925 1024 1024 925 1024 804V624L750 350Z" fill="#103b34" opacity=".72"/>
+
+  <path d="M160 360c0-44 36-80 80-80h210l78 94h256c44 0 80 36 80 80v358c0 44-36 80-80 80H240c-44 0-80-36-80-80Z" fill="#e9f1ed"/>
+  <path d="M160 454c0-44 36-80 80-80h544c44 0 80 36 80 80v358c0 44-36 80-80 80H240c-44 0-80-36-80-80Z" fill="#ffffff"/>
+  <path d="M160 454c0-44 36-80 80-80h544c44 0 80 36 80 80v30H160Z" fill="#d65f3b"/>
+
+  <rect x="292" y="202" width="440" height="498" rx="54" fill="#ffffff"/>
+  <path d="M604 202h74c30 0 54 24 54 54v74Z" fill="#f1b09c"/>
+  <path d="M604 202v86c0 23 19 42 42 42h86Z" fill="#d65f3b"/>
+  <rect x="368" y="402" width="288" height="34" rx="17" fill="#17483f"/>
+  <rect x="368" y="480" width="224" height="26" rx="13" fill="#7b9c92"/>
+  <rect x="368" y="544" width="250" height="26" rx="13" fill="#7b9c92"/>
+
+  <circle cx="708" cy="718" r="130" fill="#d65f3b"/>
+  <path d="M640 716l44 46 94-108" fill="none" stroke="#fff" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

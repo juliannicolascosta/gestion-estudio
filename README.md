@@ -1,24 +1,54 @@
-# Delivery para SISFE — MVP para Windows
+# Gestor de documental
 
-**Delivery para SISFE** es una aplicación de escritorio pequeña para trabajar por caso: crear escritos Word, reunir documental, ordenarla, convertirla a PDF y dejar una presentación controlada en `PARA PRESENTAR`.
+Aplicación de escritorio para organizar los casos de un estudio, trabajar sus archivos y compilar presentaciones judiciales con la menor navegación posible.
 
-## Qué incluye
+## Modelo de trabajo
 
-- Crear un caso nuevo o vincular una carpeta existente.
-- Estructura simple: `01 Escritos`, `02 Documental`, `PARA PRESENTAR`.
-- `+ NUEVO ESCRITO`: genera un `.docx` nombrado por fecha y tipo, y lo abre en Word.
-- Documental por selector o *drag & drop*, con ordenamiento en pantalla.
-- Conversión de imágenes, PDF y documentos de Word/LibreOffice.
-- Unificación de documental según el orden visible.
-- Control de **3 MB** para escritos comunes y **6 MB** para demanda/contestación.
-- Compresión automática y, si todavía excede, división por páginas.
-- Apertura de `PARA PRESENTAR` para firmar con Xólido y subir manualmente a SISFE.
+El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta hija directa de una ubicación es un caso. Las ubicaciones pueden ser locales, de red o carpetas sincronizadas por Google Drive para escritorio. La aplicación no crea automáticamente `01 Escritos`, `02 Documental` ni `PARA PRESENTAR`; si el usuario crea carpetas internas o incorpora un caso que ya las tiene, las reconoce y muestra su contenido en el mismo panel.
 
-No incluye agenda, clientes, expedientes ni gestión jurídica. SISFE y Xólido no se automatizan: el MVP prepara y abre la carpeta final.
+## Funciones actuales
 
-## Instalación rápida
+- Buscador conjunto en todas las Ubicaciones del Estudio por nombre, actor, demandado, causa, número de expediente, radicación, abogado o contraparte.
+- Árbol con una carpeta raíz azul por ubicación, todos sus casos e iconos de tipo; permite renombrar los casos desde el menú contextual.
+- Iconografía vectorial moderna para ubicaciones, casos, tipos de archivo y acciones; los comandos secundarios repetitivos usan iconos con ayuda emergente y las acciones principales conservan su nombre.
+- Ubicación activa seleccionable: determina dónde se crea el próximo caso y qué biblioteca de Acceso rápido se muestra.
+- Las ubicaciones temporalmente desconectadas permanecen visibles como **Ubicación no disponible** y pueden quitarse del Gestor sin borrar sus archivos.
+- **Acceso rápido** siempre visible para DNI, matrícula, CBU, constancias y documental reutilizable.
+- Cada ubicación tiene su propia biblioteca en `00 - ACCESO RÁPIDO`, pero esa carpeta no aparece como si fuera un caso.
+- Creación de casos vacíos, sin subcarpetas automáticas; reconocimiento, importación y renombrado de carpetas creadas por el usuario.
+- Datos del caso protegidos contra cambios involuntarios: se muestran en modo lectura y sólo se modifican mediante **Editar datos**, con Guardar/Cancelar y aviso si se intenta cambiar de caso con cambios pendientes.
+- **Más datos** incorpora jurisdicción, fuero, juzgado, secretaría, domicilios, matrícula y campos personalizados reutilizables por los modelos Word. Todo se guarda en el archivo oculto `.gestor-caso.json`.
+- Archivos del caso con arrastre hacia adentro y hacia otras aplicaciones, iconos de tipo y navegación interna por subcarpetas mediante doble clic, `Enter` y **Atrás**.
+- Normalización de nombre al importar, con conversión opcional de Word o imagen a PDF.
+- Apertura de archivos con doble clic o `Enter`, renombrado con `F2` y envío recuperable a la Papelera con `Supr`.
+- Escritos nuevos desde el modelo oficio provisto por el usuario, editable externamente en Word, y escritos desde modelos precargables mediante una lista moderna con búsqueda y título editable en el mismo paso.
+- Inserción automática del profesional seleccionado y de la carátula `ACTOR C/ DEMANDADO S/ CAUSA` con CUIJ.
+- Modelo precargado **Cedula LABVC**, basado en el formulario aportado por el usuario: completa fecha extensa, Actor, Demandado, Causa y Número de expediente.
+- Idioma predeterminado del modelo base: Español (Argentina).
+- Cuadro ordenable de documental y escrito; el escrito nuevo se coloca al final y puede moverse con arrastre o con **Subir/Bajar**.
+- Compilación de todos los elementos en un único PDF, respetando el orden visible.
+- Al pulsar **Compilar PDF** propone un nombre identificable `ACTOR_FECHA_TÍTULO.pdf`, editable antes de comenzar. Si ya existe, permite reemplazarlo de forma segura o crear `_V2`, `_V3`, etc.
+- Los Word de trabajo se identifican como **EDITABLE**, los PDF de salida como **PARA FIRMAR** y los archivos cuyo nombre indica firma como **FIRMADO**. No se crean carpetas ni copias auxiliares permanentes.
+- Perfiles de tamaño:
 
-Requiere Windows 10/11 y Python 3.11 o posterior. En PowerShell, dentro de esta carpeta:
+  - SRT: 1 MB.
+  - SISFE común: 3 MB.
+  - SISFE demanda o contestación: 6 MB.
+  - Provincia de Buenos Aires: 20 MB.
+
+- Compresión automática. Si el resultado todavía excede el límite, pregunta antes de dividirlo.
+- Compilación en segundo plano con una ventana de progreso, cancelación segura y sin mostrar PowerShell.
+- Liberación inmediata de los PDF leídos: al terminar de compilar o dividir, las carpetas del caso pueden renombrarse o eliminarse desde el Explorador de Windows.
+- Conversión de Word aislada del proceso principal, con tiempo máximo y caché local para no reconvertir escritos sin cambios.
+- Optimización de PDF que conserva el texto y evita rasterizar todas las páginas.
+- Firma externa: reutiliza la sesión abierta de Xólido y muestra el PDF listo para arrastrar a su cuadro de documentos.
+- Selector ampliable de profesionales.
+
+## Iniciar
+
+En esta instalación local, hacé doble clic en `Iniciar Gestor de documental.cmd`.
+
+Para preparar el entorno desde cero:
 
 ```powershell
 py -m venv .venv
@@ -26,39 +56,32 @@ py -m venv .venv
 .venv\Scripts\python run.py
 ```
 
-Para convertir `.doc`/`.docx`, debe estar instalado Microsoft Word o LibreOffice. Con Word, instale además la integración opcional:
+Microsoft Word o LibreOffice es necesario para convertir documentos Word. La integración opcional más directa con Word se instala con `pywin32`.
 
-```powershell
-.venv\Scripts\python -m pip install pywin32
-```
+## Primer uso
 
-## Crear un `.exe`
+1. Pulsá **Agregar ubicación** y elegí la carpeta que contiene tus casos. Podés repetirlo para sumar una ubicación local, de red o sincronizada por Google Drive.
+2. Elegí una carpeta existente del árbol o creá **Nuevo caso**.
+3. Arrastrá a **Acceso rápido** los documentos que usás en distintos casos o correos.
+4. Pulsá **Editar datos**, completá lo necesario y guardá. **Más datos** contiene la ficha ampliada.
+5. Creá o elegí un escrito y agregá la documental a la compilación.
+6. Ordená los elementos, elegí el límite y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.
+7. Abrí o enviá el resultado a la aplicación de firma.
 
-```powershell
-.venv\Scripts\python -m pip install pyinstaller
-.venv\Scripts\pyinstaller --noconfirm --windowed --name "Preparador SISFE" run.py
-```
+Atajos: `Ctrl+Shift+N` crea un caso, `Ctrl+N` abre las opciones de escrito, `Ctrl+O` agrega archivos, `Ctrl+P` compila, `F2` renombra, `Enter` abre y `Supr` envía a la Papelera (o quita de la compilación, según el panel activo).
 
-El ejecutable queda en `dist\Preparador SISFE\Preparador SISFE.exe`. Las conversiones Word siguen requiriendo Word o LibreOffice instalado.
+Para cambiar lo que genera **Escrito nuevo**, elegí **+ Escrito → Modificar modelo base en Word**. El archivo es `%APPDATA%\GestorDocumental\Modelos\Modelo base - Escrito nuevo.docx`; se edita como cualquier Word y los cambios se aplican a los escritos nuevos posteriores. **Ver campos automáticos…** muestra las variables disponibles, entre ellas `{{PROFESIONAL}}`, `{{CARATULA}}`, `{{CUIJ_COMPLETO}}`, `{{ACTOR}}`, `{{DEMANDADO}}`, `{{CAUSA}}`, `{{NOMBRE_CORTO}}` y `{{TITULO}}`. Los campos creados en **Más datos** también se convierten en variables. La guía completa está en `docs/MODELOS_WORD.md`.
 
-## Uso
+## Datos y seguridad
 
-1. Pulse **Crear caso** o **Vincular carpeta**.
-2. Pulse **+ NUEVO ESCRITO**, elija el tipo y edítelo en Word.
-3. Agregue documental y arrástrela para ordenar.
-4. Seleccione el escrito y pulse **PREPARAR PARA SISFE**.
-5. Revise los archivos finales, firme el escrito con Xólido y súbalos a SISFE.
+- Configuración general y modelos: `%APPDATA%\GestorDocumental`.
+- Caché local de conversiones Word: `%LOCALAPPDATA%\GestorDocumental\conversion-cache`; se invalida automáticamente al cambiar el archivo original.
+- Metadatos de cada caso: `.gestor-caso.json`, dentro de su carpeta.
+- Los archivos importados se copian; el original externo no se modifica.
+- Quitar una Ubicación del Estudio sólo la desconecta de la aplicación: nunca elimina la carpeta ni sus casos.
+- Quitar un elemento de la compilación no borra el archivo del caso. `Supr` en **Archivos del caso** pide confirmación y lo envía a la Papelera de Windows.
+- La app no elimina ni migra automáticamente la estructura usada por versiones anteriores.
 
-## Arquitectura e integración futura
+## Estado
 
-- `models.py`: contrato mínimo de caso y límites.
-- `services.py`: almacenamiento, conversión y preparación; no depende de la interfaz.
-- `app.py`: interfaz PyQt6.
-
-El núcleo recibe rutas y devuelve archivos finales, de modo que el futuro Gestor Jurídico puede reutilizarlo como servicio sin incorporar esta ventana. La configuración de casos se guarda en `%APPDATA%\PreparadorSISFE\config.json`.
-
-## Precauciones del MVP
-
-- La compresión rasteriza el PDF: revise legibilidad y firmas antes de subir.
-- Una página individual excepcionalmente pesada puede seguir excediendo el límite; la app lo advierte.
-- Cada preparación reemplaza solamente los PDF que la propia aplicación registró como generados; no borra otros archivos ni modifica los originales de `01 Escritos` o `02 Documental`.
+La versión actual es la `0.11.0`, una evolución local del MVP `delivery-sisfe`. Incorpora nombres inteligentes de PDF, edición protegida y ampliada de metadatos, selector moderno de modelos y estados claros para Word/PDF. Conserva las varias **Ubicaciones del Estudio** y su búsqueda conjunta. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio. No hay commit, push ni publicación.
