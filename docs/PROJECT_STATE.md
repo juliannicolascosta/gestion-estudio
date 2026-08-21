@@ -22,7 +22,11 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Entrada con normalización/conversión, arrastre al caso y salida hacia correo u otras aplicaciones desde Acceso rápido.
 - Creación y renombrado contextual de casos.
 - Metadatos básicos protegidos en modo lectura, con edición explícita, Guardar/Cancelar y confirmación al cambiar de caso o cerrar.
-- Ficha ampliada con datos judiciales, personales, domicilios, matrícula y campos personalizados; cada dato queda disponible para modelos Word.
+- Ficha ampliada organizada por uso en **Datos generales**, **Entrevista inicial** y **RAEO**, para mantener breve la pantalla cotidiana.
+- Datos personales, laborales, procesales, médicos y probatorios, con filas repetibles para testigos, documentación, responsables, antecedentes LRT, afecciones, atenciones y estudios.
+- Carátula y número de expediente derivados de los datos ya existentes; identificación interna, fecha de creación y profesional creador generados por el sistema.
+- Cálculos de edad, antigüedad, intervalos entre hitos y remuneraciones, más alertas contextuales y control de datos faltantes para RAEO.
+- Las credenciales ARCA/AFIP y ANSES no se almacenan: sólo se registra si el acceso fue informado o verificado.
 - Indicador visible de ubicación y estado de carga de datos del caso actual.
 - Archivos del caso con drag & drop de entrada y salida.
 - Reconocimiento recursivo, importación, apertura, renombrado y eliminación recuperable de carpetas creadas por el usuario.
@@ -55,7 +59,10 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Compresión y pregunta antes de dividir si continúa excedido.
 - Límites de 1, 3, 6 y 20 MB.
 - Selección ampliable de profesionales.
-- Apertura o preparación del PDF para una aplicación externa de firma configurable.
+- Firma PAdES interna mediante token SafeNet y PKCS#11, con SHA-256, validación inmediata y conservación del PDF original.
+- Inicio de sesión del token una sola vez por ejecución: el PIN no se persiste y la sesión puede cerrarse manualmente desde el menú Firmar.
+- Nombre `_FIRMADO` con versiones legibles y advertencia si el tamaño posterior a la firma supera el perfil seleccionado.
+- Apertura o preparación del PDF para una aplicación externa de firma configurable como alternativa.
 - Reutilización de la sesión abierta de Xólido y archivo arrastrable hacia su grilla.
 - Registro local de errores y aviso visible ante fallos inesperados.
 - Guardado atómico de metadatos ocultos; `Tab` sólo cambia de campo y nunca guarda accidentalmente.
@@ -64,8 +71,11 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 
 ## Límites actuales
 
-- La firma criptográfica no ocurre dentro de la app. Se delega en Xólido u otro firmador hasta definir proveedor, certificados y validación.
-- Xólido no ofrece una interfaz de línea de comandos documentada para precargar el archivo; por eso la app lo deja listo para arrastrar en un solo gesto.
+- La firma interna requiere SafeNet Authentication Client, el token conectado y un certificado vigente. La versión inicial produce PAdES básico; todavía no incorpora sellado de tiempo ni información de revocación para preservación de largo plazo (PAdES-LT/LTA).
+- La validación inmediata comprueba la integridad criptográfica del PDF. La confianza jurídica completa depende de la cadena reconocida por el sistema receptor.
+- Xólido no ofrece una interfaz de línea de comandos documentada para precargar el archivo; por eso la alternativa externa lo deja listo para arrastrar en un solo gesto.
+- El cuadro RAEO valida y prepara los datos, pero la emisión automática del oficio y del formulario queda para la siguiente iteración.
+- El monto reclamado permanece manual hasta acordar una regla de cálculo jurídico; la aplicación no inventa una fórmula.
 - No se migran automáticamente casos creados con la estructura anterior.
 - Google Drive se usa a través de una carpeta visible en Windows y sincronizada o montada por Google Drive para escritorio; no existe todavía una conexión directa con la web de Drive.
 

@@ -141,10 +141,15 @@ class AppSmokeTests(unittest.TestCase):
             second.touch()
 
             metadata_dialog = ExtendedMetadataDialog({"Jurisdicción": "Santa Fe"})
+            self.assertEqual(metadata_dialog.tabs.count(), 3)
+            self.assertEqual(metadata_dialog.tabs.tabText(0), "Datos generales")
+            self.assertEqual(metadata_dialog.tabs.tabText(1), "Entrevista inicial")
+            self.assertIn("RAEO", metadata_dialog.tabs.tabText(2))
             metadata_dialog.add_custom_row("Mediador", "María López")
             values = metadata_dialog.values()
             self.assertEqual(values["Jurisdicción"], "Santa Fe")
             self.assertEqual(values["Mediador"], "María López")
+            self.assertIn("Identificación interna del expediente", values)
             metadata_dialog.close()
 
             picker = ModelPickerDialog([first, second])
@@ -154,6 +159,30 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(picker.selected_model, second)
             self.assertEqual(picker.title, "Cédula LABVC")
             picker.close()
+
+    def test_extended_metadata_keeps_repeated_rows_and_reuses_case_data_for_raeo(self):
+        dialog = ExtendedMetadataDialog(
+            {
+                "Actor": "Pérez, Juan",
+                "Demandado": "Empresa SA",
+                "Causa": "Accidente laboral",
+                "CUIJ": "21-123",
+                "Posibles testigos": "Ana | 341 111\nLuis | 341 222",
+            },
+            case_name="Pérez c/ Empresa",
+            professional="Dra. Ana López",
+        )
+        self.assertEqual(len(dialog.repeated["Posibles testigos"].rows), 2)
+        values = dialog.values()
+        self.assertEqual(values["Actor"], "Pérez, Juan")
+        self.assertEqual(values["CUIJ"], "21-123")
+        self.assertEqual(
+            values["Posibles testigos"],
+            "Ana | 341 111\nLuis | 341 222",
+        )
+        self.assertIn("PÉREZ, JUAN C/ EMPRESA SA", dialog.system_summary.text())
+        self.assertEqual(values["Profesional creador"], "Dra. Ana López")
+        dialog.close()
 
     def test_multiple_study_locations_appear_as_roots_and_search_together(self):
         with tempfile.TemporaryDirectory() as directory:

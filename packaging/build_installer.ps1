@@ -10,7 +10,7 @@ $Payload = Join-Path $Build "payload"
 $Runtime = Join-Path $Payload "runtime"
 $App = Join-Path $Payload "app"
 $SfxSource = Join-Path $Build "sfx-source"
-$Version = "0.11.0"
+$Version = "0.12.0"
 
 function Assert-ProjectPath([string]$Path) {
     $FullPath = [IO.Path]::GetFullPath($Path)

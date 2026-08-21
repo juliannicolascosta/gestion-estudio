@@ -151,6 +151,31 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(values["{{JURISDICCION}}"], "Santa Fe")
             self.assertEqual(values["{{NOMBRE_DEL_MEDIADOR}}"], "María López")
 
+    def test_new_case_data_and_calculations_are_available_to_word_models(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            save_case_metadata(
+                case,
+                {
+                    "Actor": "Pérez, Ana",
+                    "DNI del actor": "30111222",
+                    "Domicilio real": "Calle 1",
+                    "Fecha de nacimiento": "10/05/1990",
+                    "Fecha del accidente": "10/05/2026",
+                    "Fecha de ingreso": "10/05/2020",
+                    "Posibles testigos": "María | 341 111\nLuis | 341 222",
+                },
+            )
+            values = writing_template_values(case, "Demanda")
+            self.assertEqual(values["{{DOCUMENTO_ACTOR}}"], "30111222")
+            self.assertEqual(values["{{DOMICILIO_ACTOR}}"], "Calle 1")
+            self.assertEqual(values["{{EDAD_RAEO}}"], "36")
+            self.assertEqual(values["{{ANTIGUEDAD_LABORAL}}"], "6 años")
+            self.assertEqual(
+                values["{{POSIBLES_TESTIGOS}}"],
+                "María | 341 111\nLuis | 341 222",
+            )
+
     def test_settings_roundtrip(self):
         with tempfile.TemporaryDirectory() as directory:
             app_dir = Path(directory) / "app"

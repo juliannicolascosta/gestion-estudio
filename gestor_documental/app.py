@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFrame,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QInputDialog,
@@ -29,10 +30,12 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressDialog,
+    QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
     QSplitter,
     QStatusBar,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -40,15 +43,41 @@ from PyQt6.QtWidgets import (
 )
 
 from .models import (
-    ADVANCED_CASE_FIELDS,
-    ADVANCED_FIELD_VARIABLES,
     CASE_FIELDS,
     CASE_FIELD_LABELS,
     DEFAULT_PROFILE,
     PRESENTATION_PROFILES,
     Case,
 )
+from .case_data import (
+    GENERAL_REPEATED,
+    GENERAL_SECTIONS,
+    INTERVIEW_REPEATED,
+    INTERVIEW_SECTIONS,
+    RAEO_REPEATED,
+    RAEO_SECTIONS,
+    SYSTEM_METADATA_KEYS,
+    FieldSpec,
+    RepeatedSpec,
+    all_defined_keys,
+    build_case_caption,
+    case_suggestions,
+    computed_values,
+    ensure_system_metadata,
+    field_initial_value,
+    raeo_effective_values,
+    raeo_missing_fields,
+)
 from .icons import file_icon_name, ui_icon
+from .signing import (
+    DigitalSignatureSession,
+    SigningCertificate,
+    SigningError,
+    SigningUnavailable,
+    discover_signing_certificates,
+    select_current_certificates,
+    signed_output_path,
+)
 from .services import (
     SettingsStore,
     CompilationCancelled,
@@ -135,6 +164,12 @@ QListWidget#modelList::item:selected { background: #DCEAE4; color: #173F37; bord
 QFrame#actionCard QComboBox, QFrame#actionCard QLineEdit { background: #FFFFFF; color: #17211F; border: 0; }
 QSplitter::handle { background: transparent; width: 8px; }
 QScrollArea { border: 0; background: transparent; }
+QTabWidget::pane { border: 0; background: transparent; top: -1px; }
+QTabBar::tab { background: #E7ECE9; color: #53635E; border: 0; border-radius: 8px; padding: 9px 14px; margin: 0 5px 7px 0; font-weight: 600; }
+QTabBar::tab:hover { background: #DDE7E2; color: #173F37; }
+QTabBar::tab:selected { background: #2B7564; color: white; }
+QPlainTextEdit { background: #FFFFFF; border: 1px solid #C9D3CE; border-radius: 8px; padding: 8px 10px; }
+QPlainTextEdit:focus { border: 1px solid #2C7767; }
 QMenu { background: white; border: 1px solid #D6DDD9; padding: 5px; }
 QMenu::item { padding: 8px 24px 8px 10px; border-radius: 6px; }
 QMenu::item:selected { background: #DCEAE4; color: #164D41; }
@@ -234,66 +269,110 @@ class ImportFileDialog(QDialog):
         return can_convert_to_pdf(self.source) and self.convert.isChecked()
 
 
-class ExtendedMetadataDialog(QDialog):
-    def __init__(self, metadata: dict[str, str], parent=None):
+class RepeatedRowsWidget(QFrame):
+    changed = pyqtSignal()
+
+    def __init__(self, spec: RepeatedSpec, value: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Más datos del caso")
-        self.setMinimumSize(620, 650)
-        self._custom_rows: list[tuple[QWidget, QLineEdit, QLineEdit]] = []
+        self.spec = spec
+        self.setObjectName("softCard")
+        self.rows: list[tuple[QWidget, list[QLineEdit]]] = []
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(12)
-        layout.addLayout(section_heading(
-            "Datos ampliados",
-            "Son opcionales y quedan disponibles para completar futuros modelos Word.",
-        ))
+        layout.setContentsMargins(13, 11, 13, 11)
+        layout.setSpacing(7)
+        title_row = QHBoxLayout()
+        title = QLabel(spec.title)
+        title.setObjectName("sectionTitle")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        add = icon_button("plus", f"Agregar {spec.title.casefold()}", self.add_row)
+        title_row.addWidget(add)
+        layout.addLayout(title_row)
+        if spec.description:
+            note = QLabel(spec.description)
+            note.setObjectName("muted")
+            note.setWordWrap(True)
+            layout.addWidget(note)
+        self.rows_layout = QVBoxLayout()
+        self.rows_layout.setSpacing(6)
+        layout.addLayout(self.rows_layout)
+        for line in str(value or "").splitlines():
+            if not line.strip():
+                continue
+            parts = [part.strip() for part in re.split(r"\s*[|│]\s*", line)]
+            self.add_row(parts)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(4, 4, 10, 4)
-        content_layout.setSpacing(10)
-        fields = QGridLayout()
-        fields.setHorizontalSpacing(12)
-        fields.setVerticalSpacing(8)
-        self.edits: dict[str, QLineEdit] = {}
-        for row, field in enumerate(ADVANCED_CASE_FIELDS):
-            variable = ADVANCED_FIELD_VARIABLES[field]
-            label = QLabel(f"{field}\n{{{{{variable}}}}}")
-            label.setObjectName("muted")
-            edit = QLineEdit(metadata.get(field, ""))
-            if field == "Nombre corto para archivos":
-                edit.setPlaceholderText("Ej.: YOCCA")
-            self.edits[field] = edit
-            fields.addWidget(label, row, 0)
-            fields.addWidget(edit, row, 1)
-        fields.setColumnStretch(1, 1)
-        content_layout.addLayout(fields)
+    def add_row(self, values=None):
+        row_widget = QWidget()
+        row = QHBoxLayout(row_widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        supplied = list(values) if isinstance(values, (list, tuple)) else []
+        edits = []
+        for index, column in enumerate(self.spec.columns):
+            edit = QLineEdit(supplied[index] if index < len(supplied) else "")
+            edit.setPlaceholderText(column)
+            edit.textChanged.connect(self.changed.emit)
+            edits.append(edit)
+            row.addWidget(edit, 1)
+        remove = icon_button("trash", "Quitar esta fila", lambda: self.remove_row(row_widget))
+        row.addWidget(remove)
+        self.rows_layout.addWidget(row_widget)
+        self.rows.append((row_widget, edits))
+        if not supplied:
+            edits[0].setFocus()
 
-        custom_title = QLabel("CAMPOS PERSONALIZADOS")
-        custom_title.setObjectName("eyebrow")
-        content_layout.addWidget(custom_title)
-        custom_note = QLabel(
-            "Podés crear cualquier dato adicional. La variable se genera automáticamente a partir del nombre."
+    def remove_row(self, widget: QWidget):
+        self.rows = [row for row in self.rows if row[0] is not widget]
+        widget.deleteLater()
+        self.changed.emit()
+
+    def value(self) -> str:
+        lines = []
+        for _, edits in self.rows:
+            values = [" ".join(edit.text().split()).strip() for edit in edits]
+            while values and not values[-1]:
+                values.pop()
+            if any(values):
+                lines.append(" | ".join(values))
+        return "\n".join(lines)
+
+
+class ExtendedMetadataDialog(QDialog):
+    def __init__(
+        self,
+        metadata: dict[str, str],
+        parent=None,
+        *,
+        case_name: str = "",
+        professional: str = "",
+    ):
+        super().__init__(parent)
+        self.case_name = case_name
+        self.professional = professional
+        self._base_metadata = ensure_system_metadata(metadata, professional=professional)
+        self.setWindowTitle("Datos ampliados del caso")
+        self.setMinimumSize(820, 720)
+        self.resize(940, 790)
+        self._custom_rows: list[tuple[QWidget, QLineEdit, QLineEdit]] = []
+        self.edits: dict[str, QWidget] = {}
+        self._field_specs: dict[str, FieldSpec] = {}
+        self.repeated: dict[str, RepeatedRowsWidget] = {}
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(10)
+        layout.addLayout(
+            section_heading(
+                "Más datos del caso",
+                "La ficha se divide por uso. Todos los campos quedan disponibles para modelos Word.",
+            )
         )
-        custom_note.setObjectName("muted")
-        custom_note.setWordWrap(True)
-        content_layout.addWidget(custom_note)
-        self.custom_rows_layout = QVBoxLayout()
-        self.custom_rows_layout.setSpacing(6)
-        content_layout.addLayout(self.custom_rows_layout)
-        known = set(CASE_FIELDS) | set(ADVANCED_CASE_FIELDS)
-        for key, value in metadata.items():
-            if key not in known:
-                self.add_custom_row(key, value)
-        add_custom = QPushButton("Agregar campo personalizado")
-        decorate_button(add_custom, "plus")
-        add_custom.clicked.connect(lambda: self.add_custom_row())
-        content_layout.addWidget(add_custom, 0, Qt.AlignmentFlag.AlignLeft)
-        content_layout.addStretch()
-        scroll.setWidget(content)
-        layout.addWidget(scroll, 1)
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs, 1)
+        self._build_general_tab()
+        self._build_interview_tab()
+        self._build_raeo_tab()
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save
@@ -302,6 +381,154 @@ class ExtendedMetadataDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.refresh_dynamic_information()
+
+    def _scroll_tab(self) -> tuple[QWidget, QVBoxLayout]:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(4, 4, 10, 8)
+        content_layout.setSpacing(10)
+        scroll.setWidget(content)
+        return scroll, content_layout
+
+    def _build_general_tab(self):
+        tab, content = self._scroll_tab()
+        system_card, system_layout = make_card("softCard")
+        system_layout.addLayout(
+            section_heading(
+                "Datos generados por el sistema",
+                "La carátula y el número de expediente se toman de los datos existentes.",
+            )
+        )
+        self.system_summary = QLabel()
+        self.system_summary.setWordWrap(True)
+        system_layout.addWidget(self.system_summary)
+        content.addWidget(system_card)
+        self._add_sections(content, GENERAL_SECTIONS)
+        self._add_repeated(content, GENERAL_REPEATED)
+        self._add_custom_fields(content)
+        content.addStretch()
+        self.tabs.addTab(tab, "Datos generales")
+
+    def _build_interview_tab(self):
+        tab, content = self._scroll_tab()
+        calculations, calculations_layout = make_card("softCard")
+        calculations_layout.addLayout(
+            section_heading(
+                "Cálculos y alertas",
+                "Se actualizan con lo cargado y no reemplazan la revisión profesional.",
+            )
+        )
+        self.calculations_summary = QLabel()
+        self.calculations_summary.setWordWrap(True)
+        calculations_layout.addWidget(self.calculations_summary)
+        self.suggestions_summary = QLabel()
+        self.suggestions_summary.setObjectName("muted")
+        self.suggestions_summary.setWordWrap(True)
+        calculations_layout.addWidget(self.suggestions_summary)
+        content.addWidget(calculations)
+        self._add_sections(content, INTERVIEW_SECTIONS)
+        self._add_repeated(content, INTERVIEW_REPEATED)
+        content.addStretch()
+        self.tabs.addTab(tab, "Entrevista inicial")
+
+    def _build_raeo_tab(self):
+        tab, content = self._scroll_tab()
+        summary, summary_layout = make_card("softCard")
+        summary_layout.addLayout(
+            section_heading(
+                "Datos reutilizados del expediente",
+                "No se vuelven a cargar: se toman de Datos generales, la entrevista y el cuadro principal.",
+            )
+        )
+        self.raeo_summary = QLabel()
+        self.raeo_summary.setWordWrap(True)
+        summary_layout.addWidget(self.raeo_summary)
+        self.raeo_status = QLabel()
+        self.raeo_status.setWordWrap(True)
+        summary_layout.addWidget(self.raeo_status)
+        content.addWidget(summary)
+        self._add_sections(content, RAEO_SECTIONS)
+        self._add_repeated(content, RAEO_REPEATED)
+        content.addStretch()
+        self.tabs.addTab(tab, "RAEO")
+
+    def _add_sections(self, parent_layout: QVBoxLayout, sections):
+        for section in sections:
+            card, card_layout = make_card("softCard")
+            card_layout.addLayout(section_heading(section.title, section.description))
+            form = QFormLayout()
+            form.setHorizontalSpacing(14)
+            form.setVerticalSpacing(8)
+            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            for field in section.fields:
+                label = QLabel(field.label)
+                label.setObjectName("muted")
+                label.setWordWrap(True)
+                editor = self._make_field_editor(field)
+                form.addRow(label, editor)
+            card_layout.addLayout(form)
+            parent_layout.addWidget(card)
+
+    def _make_field_editor(self, field: FieldSpec) -> QWidget:
+        value = field_initial_value(self._base_metadata, field)
+        self._field_specs[field.key] = field
+        if field.kind == "combo":
+            editor = QComboBox()
+            editor.setEditable(True)
+            editor.addItem("")
+            editor.addItems(field.choices)
+            editor.setCurrentText(value)
+            editor.currentTextChanged.connect(self.refresh_dynamic_information)
+        elif field.kind == "textarea":
+            editor = QPlainTextEdit(value)
+            editor.setMaximumHeight(92)
+            editor.setPlaceholderText(field.placeholder)
+            editor.textChanged.connect(self.refresh_dynamic_information)
+        else:
+            editor = QLineEdit(value)
+            editor.setPlaceholderText(field.placeholder)
+            if field.kind == "money":
+                editor.setPlaceholderText("Ej.: 850.000,00")
+            elif field.kind == "integer":
+                editor.setPlaceholderText("Número entero")
+            editor.textChanged.connect(self.refresh_dynamic_information)
+        editor.setToolTip(f"Variable para modelos: {{{{{template_variable_name(field.key)}}}}}")
+        self.edits[field.key] = editor
+        return editor
+
+    def _add_repeated(self, parent_layout: QVBoxLayout, specifications):
+        for spec in specifications:
+            editor = RepeatedRowsWidget(spec, self._base_metadata.get(spec.key, ""))
+            editor.changed.connect(self.refresh_dynamic_information)
+            self.repeated[spec.key] = editor
+            parent_layout.addWidget(editor)
+
+    def _add_custom_fields(self, parent_layout: QVBoxLayout):
+        card, card_layout = make_card("softCard")
+        card_layout.addLayout(
+            section_heading(
+                "Campos personalizados",
+                "Usalos para datos propios del Estudio que todavía no estén contemplados.",
+            )
+        )
+        self.custom_rows_layout = QVBoxLayout()
+        self.custom_rows_layout.setSpacing(6)
+        card_layout.addLayout(self.custom_rows_layout)
+        known = set(CASE_FIELDS) | all_defined_keys()
+        for section in GENERAL_SECTIONS + INTERVIEW_SECTIONS + RAEO_SECTIONS:
+            for field in section.fields:
+                known.update(field.aliases)
+        for key, value in self._base_metadata.items():
+            if key not in known:
+                self.add_custom_row(key, value)
+        add_custom = QPushButton("Agregar campo personalizado")
+        decorate_button(add_custom, "plus")
+        add_custom.clicked.connect(lambda: self.add_custom_row())
+        card_layout.addWidget(add_custom, 0, Qt.AlignmentFlag.AlignLeft)
+        parent_layout.addWidget(card)
 
     def add_custom_row(self, name: str = "", value: str = ""):
         row_widget = QWidget()
@@ -334,14 +561,129 @@ class ExtendedMetadataDialog(QDialog):
         self._custom_rows = [row for row in self._custom_rows if row[0] is not widget]
         widget.deleteLater()
 
+    def _editor_value(self, editor: QWidget) -> str:
+        if isinstance(editor, QPlainTextEdit):
+            return editor.toPlainText().strip()
+        if isinstance(editor, QComboBox):
+            return editor.currentText().strip()
+        if isinstance(editor, QLineEdit):
+            return editor.text().strip()
+        return ""
+
     def values(self) -> dict[str, str]:
-        result = {field: edit.text().strip() for field, edit in self.edits.items() if edit.text().strip()}
+        result = {
+            key: str(self._base_metadata.get(key, "")).strip()
+            for key in (SYSTEM_METADATA_KEYS | set(CASE_FIELDS))
+            if str(self._base_metadata.get(key, "")).strip()
+        }
+        for field, editor in self.edits.items():
+            value = self._editor_value(editor)
+            if value:
+                result[field] = value
+            else:
+                result.pop(field, None)
+        for key, editor in self.repeated.items():
+            value = editor.value()
+            if value:
+                result[key] = value
         for _, name_edit, value_edit in self._custom_rows:
             name = " ".join(name_edit.text().split()).strip()
             value = value_edit.text().strip()
             if name and value:
                 result[name] = value
-        return result
+        return ensure_system_metadata(result, professional=self.professional)
+
+    def refresh_dynamic_information(self, *args):
+        if not hasattr(self, "system_summary"):
+            return
+        metadata = self.values()
+        self._refresh_responsible_choices(metadata)
+        caption = build_case_caption(metadata, self.case_name)
+        case_number = metadata.get("CUIJ", "") or metadata.get("Número de expediente", "")
+        self.system_summary.setText(
+            f"<b>Carátula:</b> {caption or 'Sin datos suficientes'}<br>"
+            f"<b>Número de expediente:</b> {case_number or 'Sin cargar'}<br>"
+            f"<b>Identificación interna:</b> {metadata.get('Identificación interna del expediente', '')}<br>"
+            f"<b>Registro creado:</b> {metadata.get('Fecha de creación del registro', '')} · "
+            f"<b>Profesional creador:</b> {metadata.get('Profesional creador', 'Sin registrar')}"
+        )
+        computed = computed_values(metadata)
+        calculation_rows = []
+        labels = (
+            ("EDAD_RAEO", "Edad sugerida para RAEO"),
+            ("ANTIGUEDAD_LABORAL", "Antigüedad laboral"),
+            ("DIAS_ACCIDENTE_DENUNCIA_ART", "Días entre accidente y denuncia ART"),
+            ("DIAS_ACCIDENTE_ALTA_MEDICA", "Días entre accidente y alta"),
+            ("DIAS_ALTA_REINGRESO", "Días entre alta y reingreso"),
+            ("REMUNERACION_MENSUAL_ESTIMADA", "Remuneración mensual estimada"),
+            ("DIFERENCIA_REMUNERACION_CONVENIO", "Diferencia con remuneración de convenio"),
+        )
+        for key, label in labels:
+            value = computed.get(key, "")
+            if value:
+                prefix = "$ " if key.startswith(("REMUNERACION", "DIFERENCIA")) else ""
+                calculation_rows.append(f"<b>{label}:</b> {prefix}{value}")
+        self.calculations_summary.setText(
+            "<br>".join(calculation_rows) if calculation_rows else "Cargá fechas y remuneraciones para ver cálculos automáticos."
+        )
+        suggestions = case_suggestions(metadata)
+        self.suggestions_summary.setText(
+            "<b>Sugerencias</b><br>• " + "<br>• ".join(suggestions)
+            if suggestions
+            else "Sin alertas con los datos actuales."
+        )
+        effective = raeo_effective_values(metadata)
+        self.raeo_summary.setText(
+            f"<b>Trabajador:</b> {effective['Actor'] or 'Sin cargar'} · "
+            f"<b>Documento:</b> {effective['Documento'] or 'Sin cargar'} · "
+            f"<b>Edad:</b> {effective['Edad'] or 'Sin calcular'}<br>"
+            f"<b>Actividad:</b> {effective['Actividad o puesto'] or 'Sin cargar'} · "
+            f"<b>Antigüedad:</b> {effective['Antigüedad'] or 'Sin calcular'}<br>"
+            f"<b>Responsable principal:</b> {effective['Responsable principal'] or 'Sin cargar'}<br>"
+            f"<b>Carátula:</b> {caption or 'Sin datos suficientes'}<br>"
+            f"<b>Número de expediente:</b> {effective['CUIJ'] or 'Sin cargar'}"
+        )
+        missing = raeo_missing_fields(metadata)
+        if missing:
+            visible = ", ".join(missing[:7])
+            extra = f" y {len(missing) - 7} más" if len(missing) > 7 else ""
+            self.raeo_status.setObjectName("warning")
+            self.raeo_status.setText(f"Faltan datos para emitir RAEO: {visible}{extra}.")
+            self.tabs.setTabText(2, f"RAEO · {len(missing)} pendientes")
+        else:
+            self.raeo_status.setObjectName("caseBadge")
+            self.raeo_status.setText("Datos necesarios para RAEO completos.")
+            self.tabs.setTabText(2, "RAEO · completo")
+        self.raeo_status.style().unpolish(self.raeo_status)
+        self.raeo_status.style().polish(self.raeo_status)
+
+    def _refresh_responsible_choices(self, metadata: dict[str, str]):
+        editor = self.edits.get("Responsable principal RAEO")
+        if not isinstance(editor, QComboBox):
+            return
+        current = editor.currentText().strip()
+        options = []
+        for value in (
+            metadata.get("Empleador principal", ""),
+            metadata.get("Demandado", ""),
+        ):
+            value = str(value).strip()
+            if value and value not in options:
+                options.append(value)
+        for line in str(metadata.get("Responsables solidarios", "")).splitlines():
+            value = re.split(r"\s*[|│]\s*", line, maxsplit=1)[0].strip()
+            if value and value not in options:
+                options.append(value)
+        if current and current not in options:
+            options.append(current)
+        editor.blockSignals(True)
+        try:
+            editor.clear()
+            editor.addItem("")
+            editor.addItems(options)
+            editor.setCurrentText(current)
+        finally:
+            editor.blockSignals(False)
 
 
 class ModelPickerDialog(QDialog):
@@ -716,6 +1058,140 @@ class SignerDropDialog(QDialog):
         layout.addWidget(buttons)
 
 
+class CertificatePickerDialog(QDialog):
+    def __init__(self, certificates: list[SigningCertificate], parent=None):
+        super().__init__(parent)
+        self.certificates = certificates
+        self.setWindowTitle("Elegir certificado de firma")
+        self.setMinimumSize(580, 390)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(10)
+        layout.addLayout(
+            section_heading(
+                "Certificado para esta sesión",
+                "El certificado elegido se reutilizará hasta cerrar la sesión de firma o salir del Gestor.",
+            )
+        )
+        self.list = QListWidget()
+        self.list.setObjectName("modelList")
+        for index, certificate in enumerate(certificates):
+            item = QListWidgetItem(ui_icon("signature", "#2B7564"), certificate.summary)
+            item.setData(PATH_ROLE, index)
+            item.setToolTip(f"Emisor: {certificate.issuer}\nToken: {certificate.token_label}")
+            self.list.addItem(item)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+        self.list.itemDoubleClicked.connect(lambda _: self.accept())
+        layout.addWidget(self.list, 1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Usar certificado")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    @property
+    def selected_certificate(self) -> SigningCertificate | None:
+        item = self.list.currentItem()
+        return self.certificates[int(item.data(PATH_ROLE))] if item else None
+
+
+class TokenPinDialog(QDialog):
+    def __init__(self, certificate: SigningCertificate, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Iniciar sesión de firma")
+        self.setMinimumWidth(500)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(11)
+        layout.addLayout(
+            section_heading(
+                "Desbloquear el token",
+                "El PIN se usa una sola vez y no se guarda. La sesión permanece abierta mientras el Gestor siga abierto.",
+            )
+        )
+        certificate_label = QLabel(certificate.summary)
+        certificate_label.setObjectName("caseBadge")
+        certificate_label.setWordWrap(True)
+        layout.addWidget(certificate_label)
+        layout.addWidget(QLabel("PIN del token"))
+        self.pin_edit = QLineEdit()
+        self.pin_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pin_edit.setPlaceholderText("Ingresá el PIN")
+        self.pin_edit.returnPressed.connect(self.accept_if_valid)
+        layout.addWidget(self.pin_edit)
+        note = QLabel(
+            "Por seguridad, cerrá manualmente la sesión desde el menú Firmar si te alejás del equipo."
+        )
+        note.setObjectName("muted")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Iniciar sesión")
+        buttons.accepted.connect(self.accept_if_valid)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.pin_edit.setFocus()
+
+    def accept_if_valid(self):
+        if self.pin_edit.text():
+            self.accept()
+
+    def take_pin(self) -> str:
+        value = self.pin_edit.text()
+        self.pin_edit.clear()
+        return value
+
+
+class SignPdfDialog(QDialog):
+    def __init__(self, source: Path, certificate: SigningCertificate, parent=None):
+        super().__init__(parent)
+        self.source = source
+        self.setWindowTitle("Firmar PDF")
+        self.setMinimumWidth(590)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(10)
+        layout.addLayout(
+            section_heading(
+                "Confirmar firma digital",
+                "Se conservará el PDF original y se creará un nuevo archivo firmado en la misma carpeta.",
+            )
+        )
+        source_label = QLabel(f"<b>Archivo:</b> {source.name}<br><b>Certificado:</b> {certificate.summary}")
+        source_label.setWordWrap(True)
+        layout.addWidget(source_label)
+        layout.addWidget(QLabel("Nombre del archivo firmado"))
+        self.name_edit = QLineEdit(signed_output_path(source).name)
+        layout.addWidget(self.name_edit)
+        layout.addWidget(QLabel("Motivo de la firma"))
+        self.reason_edit = QLineEdit("Presentación judicial")
+        layout.addWidget(self.reason_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Firmar ahora")
+        buttons.accepted.connect(self.accept_if_valid)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def accept_if_valid(self):
+        if self.name_edit.text().strip():
+            self.accept()
+
+    @property
+    def output(self) -> Path:
+        return self.source.parent / normalize_filename(self.name_edit.text(), ".pdf")
+
+    @property
+    def reason(self) -> str:
+        return self.reason_edit.text().strip()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, store: SettingsStore | None = None):
         super().__init__()
@@ -724,6 +1200,8 @@ class MainWindow(QMainWindow):
         self.case: Case | None = None
         self.current_writing: Path | None = None
         self.last_compiled: Path | None = None
+        self.last_signed: Path | None = None
+        self.digital_signer = DigitalSignatureSession()
         self.case_directory: Path | None = None
         self._loading_files = False
         self._loading_quick = False
@@ -1690,18 +2168,19 @@ class MainWindow(QMainWindow):
             return
         metadata = dict(self._loaded_metadata)
         metadata.update(self.basic_metadata_values())
-        dialog = ExtendedMetadataDialog(metadata, self)
+        dialog = ExtendedMetadataDialog(
+            metadata,
+            self,
+            case_name=self.case.name,
+            professional=self.professional_combo.currentText(),
+        )
         if not dialog.exec():
             return
         payload = self.basic_metadata_values()
         payload.update(dialog.values())
         try:
             save_case_metadata(self.case, payload)
-            self._loaded_metadata = read_case_metadata(self.case)
-            self._metadata_snapshot = self.basic_metadata_values()
-            self._metadata_dirty = False
-            self.set_metadata_editing(False)
-            self.update_more_metadata_count()
+            self.load_metadata(read_case_metadata(self.case))
             self.update_case_badge()
             self.update_output_preview()
             self.statusBar().showMessage("Datos ampliados guardados", 3000)
@@ -2245,6 +2724,7 @@ class MainWindow(QMainWindow):
             "{{RADICACION}}  {{ABOGADO}}  {{CONTRAPARTE}}\n"
             "{{NOMBRE_CORTO}}  Identificador breve usado en archivos PDF\n"
             "{{JURISDICCION}}  {{FUERO}}  {{JUZGADO}}  {{SECRETARIA}}\n"
+            "{{EDAD_RAEO}}  {{ANTIGUEDAD_LABORAL}}  Cálculos de la ficha ampliada\n"
             "{{TITULO}}  Nombre del escrito\n"
             "{{FECHA}}  Fecha numérica actual\n"
             "{{FECHA_EXTENSA}}  Ej.: 13 de agosto de 2026\n\n"
@@ -2456,15 +2936,34 @@ class MainWindow(QMainWindow):
         if not self.confirm_pending_metadata_change():
             event.ignore()
             return
+        self.digital_signer.close()
         super().closeEvent(event)
 
+    def current_pdf_for_signing(self) -> Path | None:
+        for path in self.selected_case_paths():
+            if path.is_file() and path.suffix.casefold() == ".pdf":
+                return path
+        if self.last_compiled and self.last_compiled.exists():
+            return self.last_compiled
+        return None
+
     def show_sign_menu(self):
-        pdf = self.last_compiled if self.last_compiled and self.last_compiled.exists() else None
-        if not pdf:
-            selected = self.selected_case_paths()
-            if selected and selected[0].suffix.lower() == ".pdf":
-                pdf = selected[0]
+        pdf = self.current_pdf_for_signing()
         menu = QMenu(self)
+        certificate = self.digital_signer.certificate
+        internal_label = (
+            f"Firmar dentro del Gestor · sesión abierta"
+            if self.digital_signer.active
+            else "Firmar dentro del Gestor…"
+        )
+        internal_action = menu.addAction(ui_icon("signature", "#2B7564"), internal_label)
+        internal_action.setEnabled(pdf is not None)
+        if pdf:
+            internal_action.triggered.connect(lambda: self.sign_with_token(pdf))
+        if certificate:
+            internal_action.setToolTip(certificate.summary)
+            menu.addAction("Cerrar sesión de firma", self.close_digital_signature_session)
+        menu.addSeparator()
         open_action = menu.addAction("Abrir PDF para firmar")
         open_action.setEnabled(pdf is not None)
         if pdf:
@@ -2480,6 +2979,93 @@ class MainWindow(QMainWindow):
         if self.case:
             menu.addAction("Abrir carpeta del caso", lambda: open_file(self.case.path))
         menu.exec(self.sign_button.mapToGlobal(self.sign_button.rect().bottomLeft()))
+
+    def choose_signing_certificate(self) -> SigningCertificate | None:
+        certificates = select_current_certificates(discover_signing_certificates())
+        if not certificates:
+            raise SigningUnavailable(
+                "El token está conectado, pero no contiene un certificado vigente para firmar."
+            )
+        if len(certificates) == 1:
+            return certificates[0]
+        dialog = CertificatePickerDialog(certificates, self)
+        return dialog.selected_certificate if dialog.exec() else None
+
+    def sign_with_token(self, pdf: Path):
+        try:
+            certificate = self.digital_signer.certificate or self.choose_signing_certificate()
+            if not certificate:
+                return
+            confirmation = SignPdfDialog(pdf, certificate, self)
+            if not confirmation.exec():
+                return
+            target = confirmation.output
+            reason = confirmation.reason
+            if target.exists():
+                QMessageBox.warning(
+                    self,
+                    "Ya existe el archivo firmado",
+                    "Elegí otro nombre. El Gestor no reemplaza una firma existente.",
+                )
+                return
+            if not self.digital_signer.active:
+                pin_dialog = TokenPinDialog(certificate, self)
+                if not pin_dialog.exec():
+                    return
+                pin = pin_dialog.take_pin()
+                try:
+                    self.digital_signer.open(certificate, pin)
+                finally:
+                    pin = ""
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                signed = self.digital_signer.sign_pdf(
+                    pdf,
+                    target,
+                    reason=reason,
+                    location="Argentina",
+                )
+            finally:
+                QApplication.restoreOverrideCursor()
+            self.last_signed = signed
+            self.case_directory = signed.parent
+            self.reload_case_files(signed)
+            size = signed.stat().st_size
+            self.last_output.setText(f"{signed.name}\nFIRMADO · {human_size(size)}")
+            limit = int(self.limit_combo.currentData())
+            if size > limit:
+                QMessageBox.warning(
+                    self,
+                    "Firma realizada, pero supera el límite",
+                    f"El PDF quedó firmado correctamente, pero pesa {human_size(size)} y el límite "
+                    f"seleccionado es {human_size(limit)}.\n\n"
+                    "No lo comprimas ni lo modifiques después de firmarlo. Volvé a compilar con más margen y firmá otra copia.",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "PDF firmado",
+                    f"Se creó {signed.name}.\n\nTamaño final: {human_size(size)}\n"
+                    "La sesión del token seguirá abierta para los próximos documentos.",
+                )
+            self.statusBar().showMessage("Firma digital terminada · sesión abierta", 6000)
+        except (SigningUnavailable, SigningError, FileExistsError) as error:
+            QMessageBox.critical(
+                self,
+                "No pudimos firmar dentro del Gestor",
+                f"{error}\n\nPodés continuar con Xólido desde este mismo menú.",
+            )
+        except Exception as error:
+            self.digital_signer.close()
+            QMessageBox.critical(
+                self,
+                "No pudimos firmar dentro del Gestor",
+                f"Ocurrió un problema inesperado.\n\nDetalle: {error}",
+            )
+
+    def close_digital_signature_session(self):
+        self.digital_signer.close()
+        self.statusBar().showMessage("Sesión de firma cerrada", 3500)
 
     def configure_signer(self):
         path = QFileDialog.getOpenFileName(

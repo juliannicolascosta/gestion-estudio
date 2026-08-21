@@ -37,6 +37,11 @@
 - [x] Metadatos protegidos, ficha ampliada y campos personalizados para modelos.
 - [x] Selector buscable de modelos con título en el mismo paso.
 - [x] Estados visuales para Word editable, PDF para firmar y archivo firmado.
+- [x] Ficha ampliada en pestañas para datos generales, entrevista inicial y RAEO.
+- [x] Campos repetibles y cálculos determinísticos de edad, antigüedad, días y remuneraciones.
+- [x] Validación de datos faltantes y sugerencias contextuales para casos LRT/RAEO.
+- [x] Firma PAdES con token SafeNet/PKCS#11 y sesión autenticada reutilizable sin persistir el PIN.
+- [x] Validación inmediata de integridad y control de tamaño posterior a la firma.
 
 ## Próxima iteración
 
@@ -44,6 +49,9 @@
 - [ ] Vincular carpeta externa como caso mediante copia normalizada y vista previa.
 - [ ] Reglas avanzadas configurables de nomenclatura para quienes no usen el formato recomendado.
 - [ ] Detección configurable de la carpeta de salida del firmador para recuperar automáticamente el PDF firmado.
+- [ ] Generación automática del oficio y formulario RAEO desde la ficha validada.
+- [ ] Definir con el profesional una regla asistida para monto reclamado sin reemplazar la edición manual.
+- [ ] Sellado de tiempo y validación de largo plazo PAdES-LT/LTA, si los organismos receptores lo requieren.
 
 ## Robustez
 
@@ -55,6 +63,5 @@
 
 ## Fuera de alcance hasta decisión expresa
 
-- Firma criptográfica propia.
 - Carga automática en SRT, SISFE o portales de Provincia.
 - Agenda, clientes, expedientes y gestión jurídica integral.

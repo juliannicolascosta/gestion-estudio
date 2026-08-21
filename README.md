@@ -17,7 +17,9 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Cada ubicación tiene su propia biblioteca en `00 - ACCESO RÁPIDO`, pero esa carpeta no aparece como si fuera un caso.
 - Creación de casos vacíos, sin subcarpetas automáticas; reconocimiento, importación y renombrado de carpetas creadas por el usuario.
 - Datos del caso protegidos contra cambios involuntarios: se muestran en modo lectura y sólo se modifican mediante **Editar datos**, con Guardar/Cancelar y aviso si se intenta cambiar de caso con cambios pendientes.
-- **Más datos** incorpora jurisdicción, fuero, juzgado, secretaría, domicilios, matrícula y campos personalizados reutilizables por los modelos Word. Todo se guarda en el archivo oculto `.gestor-caso.json`.
+- **Más datos** se organiza en tres pestañas: **Datos generales**, **Entrevista inicial** y **RAEO**. La pantalla principal sigue siendo breve, mientras que la ficha ampliada incorpora datos personales, laborales, procesales, médicos, prueba, campos repetibles y datos propios del formulario RAEO.
+- Carátula y número de expediente se reutilizan del caso: nunca se vuelven a cargar en RAEO. El sistema genera además una identificación interna, fecha de creación y profesional creador.
+- Cálculos automáticos de edad, antigüedad, días entre hitos médicos/laborales, remuneración mensual estimada y diferencia con convenio; alertas de datos RAEO faltantes y sugerencias contextuales.
 - Archivos del caso con arrastre hacia adentro y hacia otras aplicaciones, iconos de tipo y navegación interna por subcarpetas mediante doble clic, `Enter` y **Atrás**.
 - Normalización de nombre al importar, con conversión opcional de Word o imagen a PDF.
 - Apertura de archivos con doble clic o `Enter`, renombrado con `F2` y envío recuperable a la Papelera con `Supr`.
@@ -41,7 +43,9 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Liberación inmediata de los PDF leídos: al terminar de compilar o dividir, las carpetas del caso pueden renombrarse o eliminarse desde el Explorador de Windows.
 - Conversión de Word aislada del proceso principal, con tiempo máximo y caché local para no reconvertir escritos sin cambios.
 - Optimización de PDF que conserva el texto y evita rasterizar todas las páginas.
-- Firma externa: reutiliza la sesión abierta de Xólido y muestra el PDF listo para arrastrar a su cuadro de documentos.
+- Firma digital PAdES dentro del Gestor mediante token SafeNet/PKCS#11. El PIN se solicita una vez, no se guarda y la sesión se reutiliza hasta cerrarla manualmente o salir de la aplicación.
+- Cada firma se valida inmediatamente y crea un archivo `_FIRMADO.pdf` sin modificar el PDF original. Si el tamaño firmado supera el límite elegido, se advierte sin alterar el documento ya firmado.
+- Xólido continúa disponible como alternativa: reutiliza su sesión abierta y muestra el PDF listo para arrastrar a su cuadro de documentos.
 - Selector ampliable de profesionales.
 
 ## Iniciar
@@ -63,10 +67,10 @@ Microsoft Word o LibreOffice es necesario para convertir documentos Word. La int
 1. Pulsá **Agregar ubicación** y elegí la carpeta que contiene tus casos. Podés repetirlo para sumar una ubicación local, de red o sincronizada por Google Drive.
 2. Elegí una carpeta existente del árbol o creá **Nuevo caso**.
 3. Arrastrá a **Acceso rápido** los documentos que usás en distintos casos o correos.
-4. Pulsá **Editar datos**, completá lo necesario y guardá. **Más datos** contiene la ficha ampliada.
+4. Pulsá **Editar datos**, completá lo necesario y guardá. **Más datos** abre las pestañas de ficha general, entrevista y RAEO.
 5. Creá o elegí un escrito y agregá la documental a la compilación.
 6. Ordená los elementos, elegí el límite y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.
-7. Abrí o enviá el resultado a la aplicación de firma.
+7. Pulsá **Firmar → Firmar dentro del Gestor**. La primera firma de la sesión solicita el PIN del token; las siguientes reutilizan la sesión. También podés continuar usando Xólido.
 
 Atajos: `Ctrl+Shift+N` crea un caso, `Ctrl+N` abre las opciones de escrito, `Ctrl+O` agrega archivos, `Ctrl+P` compila, `F2` renombra, `Enter` abre y `Supr` envía a la Papelera (o quita de la compilación, según el panel activo).
 
@@ -77,6 +81,8 @@ Para cambiar lo que genera **Escrito nuevo**, elegí **+ Escrito → Modificar m
 - Configuración general y modelos: `%APPDATA%\GestorDocumental`.
 - Caché local de conversiones Word: `%LOCALAPPDATA%\GestorDocumental\conversion-cache`; se invalida automáticamente al cambiar el archivo original.
 - Metadatos de cada caso: `.gestor-caso.json`, dentro de su carpeta.
+- El PIN del token no se almacena en configuración, metadatos ni registros. La sesión autenticada sólo vive mientras el proceso del Gestor está abierto.
+- Las contraseñas de ARCA/AFIP y ANSES tampoco se guardan en los casos: la entrevista registra únicamente si el acceso fue informado o verificado.
 - Los archivos importados se copian; el original externo no se modifica.
 - Quitar una Ubicación del Estudio sólo la desconecta de la aplicación: nunca elimina la carpeta ni sus casos.
 - Quitar un elemento de la compilación no borra el archivo del caso. `Supr` en **Archivos del caso** pide confirmación y lo envía a la Papelera de Windows.
@@ -84,4 +90,4 @@ Para cambiar lo que genera **Escrito nuevo**, elegí **+ Escrito → Modificar m
 
 ## Estado
 
-La versión actual es la `0.11.0`, una evolución local del MVP `delivery-sisfe`. Incorpora nombres inteligentes de PDF, edición protegida y ampliada de metadatos, selector moderno de modelos y estados claros para Word/PDF. Conserva las varias **Ubicaciones del Estudio** y su búsqueda conjunta. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio. No hay commit, push ni publicación.
+La versión en desarrollo es la `0.12.0`, una evolución local del MVP `delivery-sisfe`. Incorpora firma PAdES con sesión de token reutilizable y una ficha ampliada por uso —general, entrevista y RAEO— sin convertir la aplicación en un gestor jurídico integral. Conserva las varias **Ubicaciones del Estudio**, la búsqueda conjunta y Xólido como alternativa. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio. No hay push ni publicación de esta versión.

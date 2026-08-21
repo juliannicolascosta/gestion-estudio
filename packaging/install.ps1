@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProductName = "Gestor de documental"
-$Version = "0.11.0"
+$Version = "0.12.0"
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Payload = Join-Path $SourceDir "payload.zip"
 $LogFile = Join-Path $env:TEMP "gestor-documental-instalacion.log"

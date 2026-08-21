@@ -20,6 +20,10 @@ El profesional elegido arriba y los metadatos del caso completan la presentació
 
 Los datos de un caso abierto no cambian por escribir o presionar `Tab` accidentalmente. La ficha se habilita mediante **Editar datos**, separa Guardar de Cancelar y advierte antes de abandonar cambios pendientes. Los datos menos cotidianos viven en **Más datos**.
 
+## Separar por uso, no por acumulación
+
+**Más datos** abre tres ámbitos claros: lo reutilizable en escritos, lo propio de la entrevista y lo necesario para RAEO. Carátula y número de expediente se muestran donde hacen falta, pero se mantienen en una única fuente para evitar divergencias.
+
 ## Buscar antes que navegar
 
 El buscador encuentra por nombre de carpeta y por los datos del caso. El usuario no necesita recordar dónde guardó cada caso ni recorrer árboles profundos.
@@ -55,6 +59,10 @@ El Word es el original editable; el PDF compilado es el archivo para firmar o pr
 ## Comprimir sin destruir intención
 
 El usuario elige el límite antes de compilar. La app intenta comprimir y sólo divide si todavía se excede y el usuario lo confirma.
+
+## Firmar una vez, trabajar en serie
+
+La primera firma desbloquea el token y las siguientes reutilizan esa sesión hasta cerrar el Gestor o elegir **Cerrar sesión de firma**. El PIN nunca se guarda. El PDF original permanece intacto y el tamaño se vuelve a controlar después de firmar, porque una firma no debe comprimirse ni modificarse.
 
 ## Lenguaje jurídico, no informático
 

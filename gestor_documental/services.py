@@ -13,6 +13,7 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
+from .case_data import build_case_caption, computed_values
 from .models import ADVANCED_FIELD_VARIABLES, AppSettings, Case, CompilationResult
 
 
@@ -379,8 +380,15 @@ def read_case_metadata(case: Case) -> dict[str, str]:
 
 def save_case_metadata(case: Case, metadata: dict[str, str]):
     case.ensure()
+
+    def clean_value(value) -> str:
+        # Repeated data uses one human-readable item per line. Preserve those
+        # boundaries while normalising whitespace within each row.
+        lines = [" ".join(line.split()).strip() for line in str(value).splitlines()]
+        return "\n".join(line for line in lines if line)
+
     cleaned = {
-        str(key): " ".join(str(value).split()).strip()
+        str(key): clean_value(value)
         for key, value in metadata.items()
         if str(value).strip()
     }
@@ -592,12 +600,7 @@ def writing_template_values(
         metadata.get("CUIJ", "").strip()
         or metadata.get("Número de expediente", "").strip()
     )
-    caption = actor
-    if defendant:
-        caption = f"{caption} c/ {defendant}" if caption else defendant
-    if cause:
-        caption = f"{caption} s/ {cause}" if caption else cause
-    caption = (caption or case.name).upper()
+    caption = build_case_caption(metadata, case.name)
     metadata_lawyer = metadata.get("Abogado", "").strip()
     lawyer = metadata_lawyer or professional.strip()
     lawyer = re.sub(
@@ -626,10 +629,22 @@ def writing_template_values(
         "FECHA": date.today().strftime("%d/%m/%Y"),
         "FECHA_ISO": date.today().isoformat(),
         "FECHA_EXTENSA": spanish_long_date(date.today()),
+        "DOCUMENTO_ACTOR": (
+            metadata.get("DNI del actor", "").strip()
+            or metadata.get("DNI/CUIT actor", "").strip()
+        ),
+        "DOMICILIO_ACTOR": (
+            metadata.get("Domicilio real", "").strip()
+            or metadata.get("Domicilio actor", "").strip()
+        ),
+        "LOCALIDAD_ACTOR": metadata.get("Localidad del actor", "").strip(),
     }
     for label, value in metadata.items():
         key = ADVANCED_FIELD_VARIABLES.get(label, template_variable_name(label))
         values.setdefault(key, str(value).strip())
+    for key, value in computed_values(metadata).items():
+        values.setdefault(key, value)
+    values["ANTIGUEDAD"] = values.get("ANTIGUEDAD_LABORAL", "")
     values["ACTOR_CORTO"] = short_case_identifier(case, metadata)
     values["NOMBRE_CORTO"] = values["ACTOR_CORTO"]
     values["CUIJ_COMPLETO"] = f" (CUIJ N° {values['CUIJ']})" if values["CUIJ"] else ""

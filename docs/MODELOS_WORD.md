@@ -17,10 +17,16 @@ Campos disponibles:
 - `{{FECHA}}`: fecha actual como `13/08/2026`.
 - `{{FECHA_ISO}}`: fecha actual como `2026-08-13`.
 - `{{FECHA_EXTENSA}}`: fecha actual como `13 de agosto de 2026`.
+- `{{EDAD}}` o `{{EDAD_RAEO}}`: edad calculada a la fecha de la contingencia; si no existe, a la fecha actual. El campo manual de RAEO tiene prioridad.
+- `{{ANTIGUEDAD_LABORAL}}`: antigüedad calculada con las fechas disponibles.
+- `{{DIAS_ACCIDENTE_DENUNCIA_ART}}`, `{{DIAS_ACCIDENTE_ALTA_MEDICA}}` y `{{DIAS_ALTA_REINGRESO}}`: intervalos automáticos cuando las fechas necesarias están cargadas.
+- `{{REMUNERACION_MENSUAL_ESTIMADA}}` y `{{DIFERENCIA_REMUNERACION_CONVENIO}}`: cálculos orientativos a partir de remuneración, periodicidad y CCT.
 
 En la pantalla, el campo antes llamado **CUIJ** aparece como **Número de expediente**. Los valores cargados con versiones anteriores se conservan y continúan funcionando.
 
 Los campos personalizados creados en **Más datos** reciben una variable automática. Por ejemplo, **Nombre del mediador** se usa como `{{NOMBRE_DEL_MEDIADOR}}`. La aplicación muestra el nombre de la variable junto al campo para poder copiarlo al Word sin adivinarlo.
+
+Todos los nuevos campos generales, de entrevista y RAEO siguen la misma regla. Por ejemplo, **Fecha del accidente** se usa como `{{FECHA_DEL_ACCIDENTE}}` y **Monto reclamado** como `{{MONTO_RECLAMADO}}`. Los campos repetibles se insertan como líneas legibles; por ejemplo, `{{POSIBLES_TESTIGOS}}` conserva un testigo por renglón.
 
 ## Ejemplo: apelación
 
