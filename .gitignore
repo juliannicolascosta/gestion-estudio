@@ -1,8 +1,9 @@
-.venv/
+.venv*/
 .deps/
 build-env/
 __pycache__/
 *.py[cod]
+*.log
 build/
 dist/
 *.spec
@@ -10,3 +11,8 @@ installer-build/
 ui-*-profile/
 .pytest_cache/
 .coverage
+
+# Datos y documentos locales: nunca forman parte del programa.
+/Casos/
+/Diario de notas.docx
+/.gestor-documental.json
