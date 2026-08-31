@@ -21,7 +21,7 @@ def browser_sync_script(cuij: str) -> str:
             const target = {target};
             const getJson = async (path) => {{
               const response = await fetch(path, {{credentials: 'include'}});
-              if (!response.ok) throw new Error('SISFE devolvió ' + response.status);
+              if (!response.ok) throw new Error('SISFE devolvió ' + response.status + ' al consultar ' + path);
               return response.json();
             }};
             const list = await getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=100');

@@ -1223,6 +1223,7 @@ class SisfeLoginDialog(QDialog):
         )
         self.profile.cookieStore().cookieAdded.connect(self.capture_cookie)
         self._sync_timer: QTimer | None = None
+        self.ready_for_sync = False
         self.browser = QWebEngineView()
         self.browser.setPage(QWebEnginePage(self.profile, self.browser))
         layout.addWidget(self.browser, 1)
@@ -1233,6 +1234,11 @@ class SisfeLoginDialog(QDialog):
         layout.addWidget(buttons)
         self.session.mark_portal_opened()
         self.browser.setUrl(QUrl("https://sisfe.justiciasantafe.gov.ar/"))
+        self.browser.loadFinished.connect(self.portal_loaded)
+
+    def portal_loaded(self, ok: bool):
+        path = self.browser.url().path().rstrip("/")
+        self.ready_for_sync = bool(ok and path == "/buscar-expediente")
 
     def capture_cookie(self, cookie):
         name = bytes(cookie.name()).decode("utf-8", "ignore")
@@ -1241,10 +1247,17 @@ class SisfeLoginDialog(QDialog):
 
     def accept_manual_session(self):
         self.session.confirm_manual_login()
+        # SISFE authorizes its internal endpoints from this application route,
+        # not from the generic portal landing page.
+        self.ready_for_sync = False
+        self.browser.setUrl(QUrl("https://sisfe.justiciasantafe.gov.ar/buscar-expediente"))
         self.accept()
 
     def request_snapshot(self, cuij: str, completed):
         """Query SISFE from its own browser context and return a plain snapshot."""
+        if not self.ready_for_sync:
+            completed(None, RuntimeError("SISFE todavía está preparando el área de expedientes."))
+            return
         script = browser_sync_script(cuij)
         self.browser.page().runJavaScript(script)
         elapsed = {"milliseconds": 0}
@@ -1986,10 +1999,7 @@ class MainWindow(QMainWindow):
         dialog = SisfeLoginDialog(self.sisfe_session, self)
         if dialog.exec() and self.sisfe_session.active:
             self._sisfe_login_dialog = dialog
-            if self.sisfe_session.has_http_cookies:
-                self.sisfe_status.setText("Sesión manual lista para sincronizar")
-            else:
-                self.sisfe_status.setText("Sesión manual lista para sincronizar")
+            self.sisfe_status.setText("Preparando el área de expedientes SISFE…")
         else:
             self.sisfe_status.setText("Sesión SISFE sin confirmar")
 
@@ -1999,6 +2009,13 @@ class MainWindow(QMainWindow):
         if not self.sisfe_session.active or not self._sisfe_login_dialog:
             QMessageBox.information(
                 self, "Sesión SISFE", "Iniciá y confirmá la sesión manual de SISFE primero."
+            )
+            return
+        if not self._sisfe_login_dialog.ready_for_sync:
+            QMessageBox.information(
+                self,
+                "Sesión SISFE",
+                "SISFE todavía está abriendo el área de expedientes. Esperá unos segundos y reintentá.",
             )
             return
         cuij = read_case_metadata(self.case).get("CUIJ", "")

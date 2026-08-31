@@ -8,6 +8,7 @@ class SisfeBrowserTests(unittest.TestCase):
         script = browser_sync_script("21-12345678-9")
         self.assertIn("credentials: 'include'", script)
         self.assertIn("findNovedadesById", script)
+        self.assertIn("al consultar", script)
         self.assertNotIn("document.cookie", script)
         self.assertNotIn("Authorization", script)
 
