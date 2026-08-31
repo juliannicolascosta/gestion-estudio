@@ -99,6 +99,26 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
             window.close()
 
+    def test_selected_case_shows_its_integrated_novedades(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                database.add_movement(
+                    expediente.id, "Cédula electrónica", source="sisfe", external_id="mov-1"
+                )
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            self.assertEqual(window.novedades_list.count(), 1)
+            self.assertIn("Cédula electrónica", window.novedades_list.item(0).text())
+            self.assertEqual(window.novedades_count.text(), "1 novedad")
+            window.close()
+
     def test_metadata_is_read_only_until_explicit_edit_and_save(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

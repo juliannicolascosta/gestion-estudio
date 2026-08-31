@@ -95,6 +95,26 @@ class StudyDatabaseTests(unittest.TestCase):
 
             self.assertEqual(first.id, second.id)
 
+    def test_recent_movements_are_returned_newest_first(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                database.add_movement(
+                    expediente.id,
+                    "Primero",
+                    occurred_at=datetime(2026, 8, 30, tzinfo=timezone.utc),
+                )
+                database.add_movement(
+                    expediente.id,
+                    "Último",
+                    occurred_at=datetime(2026, 8, 31, tzinfo=timezone.utc),
+                )
+                movements = database.list_recent_movements(expediente.id)
+
+            self.assertEqual([movement.title for movement in movements], ["Último", "Primero"])
+
     def test_documents_stay_relative_to_case_and_tasks_require_confirmation(self):
         with tempfile.TemporaryDirectory() as directory:
             study = Path(directory) / "Estudio"

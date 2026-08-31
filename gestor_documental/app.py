@@ -69,7 +69,7 @@ from .case_data import (
     raeo_effective_values,
     raeo_missing_fields,
 )
-from .case_registry import register_case_as_expediente
+from .case_registry import recent_case_novedades, register_case_as_expediente
 from .icons import file_icon_name, ui_icon
 from .signing import (
     DigitalSignatureSession,
@@ -1444,6 +1444,22 @@ class MainWindow(QMainWindow):
         metadata_layout.addLayout(metadata_actions)
         information_column.addWidget(metadata_card)
 
+        novedades_card, novedades_layout = make_card()
+        novedades_header = QHBoxLayout()
+        novedades_header.addLayout(
+            section_heading("Novedades", "Movimientos recibidos por SISFE y otras fuentes")
+        )
+        novedades_header.addStretch()
+        self.novedades_count = QLabel("Sin novedades")
+        self.novedades_count.setObjectName("muted")
+        novedades_header.addWidget(self.novedades_count)
+        novedades_layout.addLayout(novedades_header)
+        self.novedades_list = QListWidget()
+        self.novedades_list.setObjectName("novedadesList")
+        self.novedades_list.setFixedHeight(110)
+        novedades_layout.addWidget(self.novedades_list)
+        information_column.addWidget(novedades_card)
+
         files_card, files_layout = make_card()
         files_header = QHBoxLayout()
         files_header.addLayout(section_heading("Archivos del caso", "Archivos y carpetas · arrastrá hacia adentro o afuera"))
@@ -1492,7 +1508,7 @@ class MainWindow(QMainWindow):
         files_actions.addWidget(add_to_compile)
         files_layout.addLayout(files_actions)
         information_column.addWidget(files_card)
-        information_column.setSizes([260, 470])
+        information_column.setSizes([250, 145, 360])
         workspace_layout.addWidget(information_column, 5)
 
         preparation_card, preparation_layout = make_card()
@@ -1841,6 +1857,7 @@ class MainWindow(QMainWindow):
             self.update_writing_label()
             self.update_compilation_count()
             self.update_output_preview()
+            self.reload_novedades()
             return
         try:
             # El registro sólo vincula la carpeta existente con SQLite y
@@ -1854,11 +1871,33 @@ class MainWindow(QMainWindow):
             )
         self.case_title.setText(case.name)
         self.load_metadata(read_case_metadata(case))
+        self.reload_novedades()
         self.reload_case_files()
         self.update_writing_label()
         self.update_compilation_count()
         self.update_case_badge()
         self.update_output_preview()
+
+    def reload_novedades(self):
+        self.novedades_list.clear()
+        if not self.case:
+            self.novedades_count.setText("Sin novedades")
+            return
+        try:
+            movements = recent_case_novedades(self.case)
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            self.novedades_count.setText("No disponibles")
+            self.novedades_list.addItem(f"No pudimos cargar las novedades: {error}")
+            return
+        for movement in movements:
+            stamp = movement.occurred_at.strftime("%d/%m/%Y %H:%M") if movement.occurred_at else "Sin fecha"
+            item = QListWidgetItem(ui_icon("bell", "#2B7564"), f"{movement.title}\n{stamp} · {movement.source.upper()}")
+            item.setToolTip(movement.external_id or movement.source)
+            self.novedades_list.addItem(item)
+        count = len(movements)
+        self.novedades_count.setText(
+            "Sin novedades" if not count else f"{count} novedad{'es' if count != 1 else ''}"
+        )
 
     def require_study(self) -> bool:
         if self.store.settings.study_root:
