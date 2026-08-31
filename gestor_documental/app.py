@@ -1217,6 +1217,10 @@ class SisfeLoginDialog(QDialog):
         note.setWordWrap(True)
         note.setObjectName("muted")
         layout.addWidget(note)
+        self.validation_status = QLabel("Completá Matriculados y CAPTCHA; luego validá la sesión.")
+        self.validation_status.setObjectName("muted")
+        self.validation_status.setWordWrap(True)
+        layout.addWidget(self.validation_status)
         self.profile = QWebEngineProfile(self)
         self.profile.setPersistentCookiesPolicy(
             QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies
@@ -1228,17 +1232,25 @@ class SisfeLoginDialog(QDialog):
         self.browser.setPage(QWebEnginePage(self.profile, self.browser))
         layout.addWidget(self.browser, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        self.use_session_button = buttons.addButton("Usar esta sesión", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.use_session_button = buttons.addButton("Validar sesión", QDialogButtonBox.ButtonRole.AcceptRole)
         self.use_session_button.clicked.connect(self.accept_manual_session)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.session.mark_portal_opened()
+        self._validate_after_load = False
         self.browser.setUrl(QUrl("https://sisfe.justiciasantafe.gov.ar/"))
         self.browser.loadFinished.connect(self.portal_loaded)
 
     def portal_loaded(self, ok: bool):
         path = self.browser.url().path().rstrip("/")
         self.ready_for_sync = bool(ok and path == "/buscar-expediente")
+        if self._validate_after_load:
+            self._validate_after_load = False
+            if self.ready_for_sync:
+                self.validate_loaded_session()
+            else:
+                self.validation_status.setText("No pudimos abrir el área de expedientes de SISFE. Reintentá.")
+                self.use_session_button.setEnabled(True)
 
     def capture_cookie(self, cookie):
         name = bytes(cookie.name()).decode("utf-8", "ignore")
@@ -1246,12 +1258,67 @@ class SisfeLoginDialog(QDialog):
         self.session.attach_runtime_cookie(name, value, cookie.domain(), cookie.path())
 
     def accept_manual_session(self):
-        self.session.confirm_manual_login()
-        # SISFE authorizes its internal endpoints from this application route,
-        # not from the generic portal landing page.
+        # SISFE authorizes its internal endpoints from this application route.
         self.ready_for_sync = False
+        self._validate_after_load = True
+        self.use_session_button.setEnabled(False)
+        self.validation_status.setText("Abriendo el área de expedientes y validando la sesión…")
         self.browser.setUrl(QUrl("https://sisfe.justiciasantafe.gov.ar/buscar-expediente"))
-        self.accept()
+
+    def validate_loaded_session(self):
+        self.browser.page().runJavaScript(
+            """
+            window.__gestorSisfeValidation = null;
+            (async () => {
+              try {
+                const response = await fetch('/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=1',
+                  {credentials: 'include'});
+                window.__gestorSisfeValidation = {ok: response.ok, status: response.status};
+              } catch (error) {
+                window.__gestorSisfeValidation = {ok: false, error: String(error.message || error)};
+              }
+            })();
+            """
+        )
+        timer = QTimer(self)
+        timer.setInterval(250)
+        elapsed = {"milliseconds": 0}
+        self._sync_timer = timer
+
+        def poll():
+            elapsed["milliseconds"] += 250
+            self.browser.page().runJavaScript(
+                "JSON.stringify(window.__gestorSisfeValidation)",
+                lambda value: finish(value) if value else None,
+            )
+            if elapsed["milliseconds"] >= 15000:
+                timer.stop()
+                self._sync_timer = None
+                self.validation_status.setText("SISFE demoró en validar. Esperá y presioná Validar sesión otra vez.")
+                self.use_session_button.setEnabled(True)
+
+        def finish(value):
+            if not value or not timer.isActive():
+                return
+            timer.stop()
+            self._sync_timer = None
+            try:
+                result = json.loads(str(value))
+            except (TypeError, ValueError):
+                result = {"ok": False, "error": "SISFE devolvió una validación inválida."}
+            if result.get("ok"):
+                self.session.confirm_manual_login()
+                self.ready_for_sync = True
+                self.accept()
+                return
+            detail = result.get("status") or result.get("error") or "sin detalle"
+            self.validation_status.setText(
+                f"SISFE todavía no autorizó la sesión ({detail}). Esperá o completá el CAPTCHA y reintentá."
+            )
+            self.use_session_button.setEnabled(True)
+
+        timer.timeout.connect(poll)
+        timer.start()
 
     def request_snapshot(self, cuij: str, completed):
         """Query SISFE from its own browser context and return a plain snapshot."""
