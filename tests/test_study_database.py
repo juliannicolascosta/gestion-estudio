@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from gestor_documental.services import create_case, read_case_metadata, save_case_metadata
@@ -60,6 +61,60 @@ class StudyDatabaseTests(unittest.TestCase):
 
             with self.assertRaises(RuntimeError):
                 StudyDatabase(database_path)
+
+    def test_external_movements_deduplicate_but_manual_movements_do_not(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                first = database.add_movement(
+                    expediente.id, "Cédula recibida", source="sisfe", external_id="mov-42"
+                )
+                second = database.add_movement(
+                    expediente.id, "Cédula recibida", source="sisfe", external_id="mov-42"
+                )
+                manual_a = database.add_movement(expediente.id, "Llamado al cliente")
+                manual_b = database.add_movement(expediente.id, "Llamado al cliente")
+
+            self.assertEqual(first.id, second.id)
+            self.assertNotEqual(manual_a.id, manual_b.id)
+
+    def test_documents_stay_relative_to_case_and_tasks_require_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso")
+            due_at = datetime(2026, 9, 15, 12, tzinfo=timezone.utc)
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                document = database.add_document(
+                    expediente.id,
+                    Path("Notificaciones") / "cedula.pdf",
+                    sha256="ABC123",
+                    source="sisfe",
+                )
+                task = database.suggest_task(
+                    expediente.id, "Revisar cédula", due_at=due_at, suggested_by="sisfe"
+                )
+                confirmed = database.confirm_task(task.id, "Dra. Ana Pérez")
+                audit_actions = [
+                    row[0]
+                    for row in database.connection.execute(
+                        "SELECT action FROM audit_events WHERE entity_id = ? ORDER BY rowid", (task.id,)
+                    )
+                ]
+
+                with self.assertRaises(ValueError):
+                    database.add_document(expediente.id, Path("..") / "outside.pdf")
+                with self.assertRaises(ValueError):
+                    database.confirm_task(task.id, "")
+
+            self.assertEqual(document.relative_path, Path("Notificaciones/cedula.pdf"))
+            self.assertEqual(document.sha256, "abc123")
+            self.assertEqual(task.status, "pendiente")
+            self.assertEqual(confirmed.status, "confirmada")
+            self.assertEqual(confirmed.confirmed_by, "Dra. Ana Pérez")
+            self.assertEqual(audit_actions, ["suggested", "confirmed"])
 
 
 if __name__ == "__main__":
