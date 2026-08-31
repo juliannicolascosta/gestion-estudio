@@ -140,7 +140,7 @@ class AppSmokeTests(unittest.TestCase):
                 window.open_sisfe_session()
 
             self.assertTrue(window.sisfe_session.active)
-            self.assertIn("confirmada", window.sisfe_status.text().lower())
+            self.assertIn("lista", window.sisfe_status.text().lower())
             self.assertNotIn("password", vars(window.sisfe_session))
             window.close()
 

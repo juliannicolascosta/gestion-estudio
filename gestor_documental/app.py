@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import re
 import sqlite3
+import json
 from datetime import date
 from pathlib import Path
 from threading import Event
@@ -74,7 +75,7 @@ from .case_data import (
 from .case_registry import recent_case_novedades, register_case_as_expediente
 from .sisfe_session import ManualSisfeSession
 from .sisfe_sync import SisfeSessionRequired, SisfeSnapshotProviderMissing, SisfeSyncCoordinator
-from .sisfe_http import SisfeHttpSnapshotProvider
+from .sisfe_browser import browser_sync_script, snapshot_from_browser_payload
 from .icons import file_icon_name, ui_icon
 from .signing import (
     DigitalSignatureSession,
@@ -1221,6 +1222,7 @@ class SisfeLoginDialog(QDialog):
             QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies
         )
         self.profile.cookieStore().cookieAdded.connect(self.capture_cookie)
+        self._sync_timer: QTimer | None = None
         self.browser = QWebEngineView()
         self.browser.setPage(QWebEnginePage(self.profile, self.browser))
         layout.addWidget(self.browser, 1)
@@ -1240,6 +1242,40 @@ class SisfeLoginDialog(QDialog):
     def accept_manual_session(self):
         self.session.confirm_manual_login()
         self.accept()
+
+    def request_snapshot(self, cuij: str, completed):
+        """Query SISFE from its own browser context and return a plain snapshot."""
+        script = browser_sync_script(cuij)
+        self.browser.page().runJavaScript(script)
+        elapsed = {"milliseconds": 0}
+        timer = QTimer(self)
+        timer.setInterval(250)
+        self._sync_timer = timer
+
+        def poll():
+            elapsed["milliseconds"] += 250
+            self.browser.page().runJavaScript(
+                "JSON.stringify(window.__gestorSisfeResult)",
+                lambda value: finish(value) if value else None,
+            )
+            if elapsed["milliseconds"] >= 30000:
+                timer.stop()
+                self._sync_timer = None
+                completed(None, RuntimeError("SISFE demoró demasiado en responder."))
+
+        def finish(value):
+            if not value or not timer.isActive():
+                return
+            timer.stop()
+            self._sync_timer = None
+            try:
+                payload = json.loads(str(value))
+                completed(snapshot_from_browser_payload(payload), None)
+            except Exception as error:
+                completed(None, error)
+
+        timer.timeout.connect(poll)
+        timer.start()
 
 
 class MainWindow(QMainWindow):
@@ -1268,6 +1304,7 @@ class MainWindow(QMainWindow):
         self._compile_cancelling = False
         self._close_after_compile = False
         self._signer_dialog: SignerDropDialog | None = None
+        self._sisfe_login_dialog: SisfeLoginDialog | None = None
         self.setWindowTitle("Gestor de documental")
         self.setMinimumSize(1120, 700)
         self.resize(1450, 880)
@@ -1948,33 +1985,51 @@ class MainWindow(QMainWindow):
     def open_sisfe_session(self):
         dialog = SisfeLoginDialog(self.sisfe_session, self)
         if dialog.exec() and self.sisfe_session.active:
-            self.sisfe_sync.snapshot_provider = SisfeHttpSnapshotProvider(
-                self.sisfe_session.http_session
-            )
+            self._sisfe_login_dialog = dialog
             if self.sisfe_session.has_http_cookies:
                 self.sisfe_status.setText("Sesión manual lista para sincronizar")
             else:
-                self.sisfe_status.setText("Sesión confirmada; SISFE todavía no entregó cookies")
+                self.sisfe_status.setText("Sesión manual lista para sincronizar")
         else:
             self.sisfe_status.setText("Sesión SISFE sin confirmar")
 
     def sync_sisfe(self):
         if not self.require_case():
             return
-        try:
-            result = self.sisfe_sync.synchronize(self.case, self.case.path / "Documentos SISFE")
-        except SisfeSessionRequired as error:
-            QMessageBox.information(self, "Sesión SISFE", str(error))
-        except SisfeSnapshotProviderMissing as error:
-            QMessageBox.information(self, "Sincronización SISFE", str(error))
-        except Exception as error:
-            QMessageBox.warning(self, "No pudimos sincronizar SISFE", str(error))
-        else:
+        if not self.sisfe_session.active or not self._sisfe_login_dialog:
+            QMessageBox.information(
+                self, "Sesión SISFE", "Iniciá y confirmá la sesión manual de SISFE primero."
+            )
+            return
+        cuij = read_case_metadata(self.case).get("CUIJ", "")
+        if not cuij.strip():
+            QMessageBox.information(self, "Sincronización SISFE", "El caso necesita CUIJ para sincronizar.")
+            return
+        self.sisfe_sync_button.setEnabled(False)
+        self.sisfe_status.setText("Consultando novedades SISFE…")
+
+        def completed(snapshot, error):
+            self.sisfe_sync_button.setEnabled(True)
+            if error:
+                self.sisfe_status.setText("No se pudo sincronizar")
+                QMessageBox.warning(self, "No pudimos sincronizar SISFE", str(error))
+                return
+            try:
+                result = self.sisfe_sync.importer.import_snapshot(
+                    self.case, snapshot, self.case.path / "Documentos SISFE"
+                )
+            except Exception as import_error:
+                self.sisfe_status.setText("No se pudo importar")
+                QMessageBox.warning(self, "No pudimos importar SISFE", str(import_error))
+                return
             self.reload_novedades()
             self.reload_case_files()
+            self.sisfe_status.setText("Sesión manual lista para sincronizar")
             self.statusBar().showMessage(
                 f"SISFE sincronizado: {result.movements_registered} novedades nuevas", 5000
             )
+
+        self._sisfe_login_dialog.request_snapshot(cuij, completed)
 
     def reload_novedades(self):
         self.novedades_list.clear()
