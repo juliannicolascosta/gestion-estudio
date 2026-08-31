@@ -119,6 +119,26 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.novedades_count.text(), "1 novedad")
             window.close()
 
+    def test_manual_sisfe_session_is_confirmed_without_storing_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+            with (
+                patch("gestor_documental.sisfe_session.webbrowser.open", return_value=True),
+                patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes),
+            ):
+                window.open_sisfe_session()
+
+            self.assertTrue(window.sisfe_session.active)
+            self.assertIn("confirmada", window.sisfe_status.text().lower())
+            self.assertNotIn("password", vars(window.sisfe_session))
+            window.close()
+
     def test_metadata_is_read_only_until_explicit_edit_and_save(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

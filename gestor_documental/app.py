@@ -70,6 +70,8 @@ from .case_data import (
     raeo_missing_fields,
 )
 from .case_registry import recent_case_novedades, register_case_as_expediente
+from .sisfe_session import ManualSisfeSession
+from .sisfe_sync import SisfeSessionRequired, SisfeSnapshotProviderMissing, SisfeSyncCoordinator
 from .icons import file_icon_name, ui_icon
 from .signing import (
     DigitalSignatureSession,
@@ -1198,6 +1200,8 @@ class MainWindow(QMainWindow):
     def __init__(self, store: SettingsStore | None = None):
         super().__init__()
         self.store = store or SettingsStore()
+        self.sisfe_session = ManualSisfeSession()
+        self.sisfe_sync = SisfeSyncCoordinator(self.sisfe_session)
         self.base_template = ensure_default_writing_template(self.store.base_template)
         self.case: Case | None = None
         self.current_writing: Path | None = None
@@ -1604,6 +1608,22 @@ class MainWindow(QMainWindow):
         decorate_button(self.sign_button, "signature", "#173F37")
         self.sign_button.clicked.connect(self.show_sign_menu)
         actions_layout.addWidget(self.sign_button)
+        actions_layout.addSpacing(10)
+        sisfe_label = QLabel("SISFE · SESIÓN MANUAL")
+        sisfe_label.setObjectName("professionalLabel")
+        actions_layout.addWidget(sisfe_label)
+        self.sisfe_status = QLabel("Sesión sin iniciar")
+        self.sisfe_status.setObjectName("actionMuted")
+        self.sisfe_status.setWordWrap(True)
+        actions_layout.addWidget(self.sisfe_status)
+        self.sisfe_connect_button = QPushButton("Abrir SISFE")
+        self.sisfe_connect_button.setObjectName("onDark")
+        self.sisfe_connect_button.clicked.connect(self.open_sisfe_session)
+        actions_layout.addWidget(self.sisfe_connect_button)
+        self.sisfe_sync_button = QPushButton("Sincronizar")
+        self.sisfe_sync_button.setObjectName("onDark")
+        self.sisfe_sync_button.clicked.connect(self.sync_sisfe)
+        actions_layout.addWidget(self.sisfe_sync_button)
         actions_layout.addStretch()
         last_label = QLabel("ÚLTIMO RESULTADO")
         last_label.setObjectName("professionalLabel")
@@ -1849,6 +1869,7 @@ class MainWindow(QMainWindow):
         self.last_output.setText("Aún no compilaste")
         self.workspace.setEnabled(case is not None)
         self.open_case_button.setEnabled(case is not None)
+        self.sisfe_sync_button.setEnabled(case is not None)
         if not case:
             self.case_title.setText("Elegí un caso")
             self.load_metadata({})
@@ -1877,6 +1898,40 @@ class MainWindow(QMainWindow):
         self.update_compilation_count()
         self.update_case_badge()
         self.update_output_preview()
+
+    def open_sisfe_session(self):
+        self.sisfe_session.open_portal()
+        confirmed = QMessageBox.question(
+            self,
+            "Sesión SISFE manual",
+            "Completá el acceso de Matriculados y el CAPTCHA en el navegador.\n\n"
+            "¿La sesión ya quedó iniciada en este equipo?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmed is QMessageBox.StandardButton.Yes:
+            self.sisfe_session.confirm_manual_login()
+            self.sisfe_status.setText("Sesión manual confirmada para esta ejecución")
+        else:
+            self.sisfe_status.setText("Esperando confirmación de sesión manual")
+
+    def sync_sisfe(self):
+        if not self.require_case():
+            return
+        try:
+            result = self.sisfe_sync.synchronize(self.case, self.case.path / "Documentos SISFE")
+        except SisfeSessionRequired as error:
+            QMessageBox.information(self, "Sesión SISFE", str(error))
+        except SisfeSnapshotProviderMissing as error:
+            QMessageBox.information(self, "Sincronización SISFE", str(error))
+        except Exception as error:
+            QMessageBox.warning(self, "No pudimos sincronizar SISFE", str(error))
+        else:
+            self.reload_novedades()
+            self.reload_case_files()
+            self.statusBar().showMessage(
+                f"SISFE sincronizado: {result.movements_registered} novedades nuevas", 5000
+            )
 
     def reload_novedades(self):
         self.novedades_list.clear()
