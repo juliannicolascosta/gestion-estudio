@@ -7,8 +7,9 @@ from gestor_documental.sisfe_http import SisfeCaseNotFound, SisfeHttpSnapshotPro
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self.payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None
@@ -21,6 +22,7 @@ class FakeSession:
     def __init__(self, responses):
         self.responses = responses
         self.calls = []
+        self.headers = {}
 
     def get(self, url, params, timeout):
         self.calls.append((url, params, timeout))
@@ -48,6 +50,8 @@ class SisfeHttpTests(unittest.TestCase):
         self.assertEqual(snapshot.movements[0].title, "Cédula electrónica")
         self.assertEqual(len(session.calls), 3)
         self.assertTrue(all("Authorization" not in str(call) for call in session.calls))
+        self.assertIn("Mozilla/5.0", session.headers["User-Agent"])
+        self.assertEqual(session.headers["Referer"], "https://sisfe.justiciasantafe.gov.ar/")
 
     def test_requires_case_cuij_and_matching_remote_case(self):
         with tempfile.TemporaryDirectory() as directory:

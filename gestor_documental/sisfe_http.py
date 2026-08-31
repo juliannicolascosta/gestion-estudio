@@ -23,6 +23,18 @@ class SisfeCaseNotFound(RuntimeError):
 class SisfeHttpSnapshotProvider:
     """Fetch SISFE movements only; document downloads remain CAPTCHA-protected."""
 
+    BROWSER_HEADERS = {
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "es-AR,es;q=0.9",
+        "Referer": "https://sisfe.justiciasantafe.gov.ar/",
+        # SISFE serves these endpoints to its browser application. This is a
+        # navigation identity, not an authentication secret.
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+        ),
+    }
+
     def __init__(
         self,
         session: requests.Session,
@@ -37,6 +49,7 @@ class SisfeHttpSnapshotProvider:
         self.days_of_news = days_of_news
         self.page_size = page_size
         self.timeout_seconds = timeout_seconds
+        self.session.headers.update(self.BROWSER_HEADERS)
 
     def __call__(self, case: Case) -> SisfeCaseSnapshot:
         cuij = read_case_metadata(case).get("CUIJ", "")
@@ -78,6 +91,10 @@ class SisfeHttpSnapshotProvider:
         response = self.session.get(
             f"{self.base_url}{path}", params=params, timeout=self.timeout_seconds
         )
+        if response.status_code in (401, 403):
+            raise PermissionError(
+                "SISFE no autorizó la sesión manual. Volvé a iniciar sesión de Matriculados."
+            )
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict):
