@@ -24,8 +24,11 @@ class SisfeSessionTests(unittest.TestCase):
         self.assertTrue(session.active)
         self.assertNotIn("password", vars(session))
         self.assertNotIn("cookie", vars(session))
+        session.attach_runtime_cookie("SISFE", "transient", ".justiciasantafe.gov.ar")
+        self.assertTrue(session.has_http_cookies)
         session.close()
         self.assertFalse(session.active)
+        self.assertFalse(session.has_http_cookies)
 
     def test_sync_requires_manual_session_and_explicit_provider(self):
         with tempfile.TemporaryDirectory() as directory:

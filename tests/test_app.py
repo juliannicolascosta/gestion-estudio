@@ -128,10 +128,15 @@ class AppSmokeTests(unittest.TestCase):
             store.set_study_root(study)
             window = MainWindow(store)
             window.reload_cases(case.path)
-            with (
-                patch("gestor_documental.sisfe_session.webbrowser.open", return_value=True),
-                patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes),
-            ):
+            with patch("gestor_documental.app.SisfeLoginDialog") as dialog_class:
+                dialog = dialog_class.return_value
+
+                def confirm_session():
+                    window.sisfe_session.mark_portal_opened()
+                    window.sisfe_session.confirm_manual_login()
+                    return 1
+
+                dialog.exec.side_effect = confirm_session
                 window.open_sisfe_session()
 
             self.assertTrue(window.sisfe_session.active)

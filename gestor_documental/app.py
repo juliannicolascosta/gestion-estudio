@@ -9,6 +9,8 @@ from threading import Event
 
 from PyQt6.QtCore import QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QKeySequence, QPainter, QPalette, QShortcut
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -72,6 +74,7 @@ from .case_data import (
 from .case_registry import recent_case_novedades, register_case_as_expediente
 from .sisfe_session import ManualSisfeSession
 from .sisfe_sync import SisfeSessionRequired, SisfeSnapshotProviderMissing, SisfeSyncCoordinator
+from .sisfe_http import SisfeHttpSnapshotProvider
 from .icons import file_icon_name, ui_icon
 from .signing import (
     DigitalSignatureSession,
@@ -1196,6 +1199,49 @@ class SignPdfDialog(QDialog):
         return self.reason_edit.text().strip()
 
 
+class SisfeLoginDialog(QDialog):
+    """Embedded manual login whose cookies live only for this process."""
+
+    def __init__(self, session: ManualSisfeSession, parent=None):
+        super().__init__(parent)
+        self.session = session
+        self.setWindowTitle("Iniciar sesión SISFE")
+        self.setMinimumSize(980, 720)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        note = QLabel(
+            "Completá el acceso de Matriculados y el CAPTCHA aquí. Las cookies se usan sólo "
+            "durante esta ejecución y no se guardan en el equipo."
+        )
+        note.setWordWrap(True)
+        note.setObjectName("muted")
+        layout.addWidget(note)
+        self.profile = QWebEngineProfile(self)
+        self.profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies
+        )
+        self.profile.cookieStore().cookieAdded.connect(self.capture_cookie)
+        self.browser = QWebEngineView()
+        self.browser.setPage(QWebEnginePage(self.profile, self.browser))
+        layout.addWidget(self.browser, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.use_session_button = buttons.addButton("Usar esta sesión", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.use_session_button.clicked.connect(self.accept_manual_session)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.session.mark_portal_opened()
+        self.browser.setUrl(QUrl("https://sisfe.justiciasantafe.gov.ar/"))
+
+    def capture_cookie(self, cookie):
+        name = bytes(cookie.name()).decode("utf-8", "ignore")
+        value = bytes(cookie.value()).decode("utf-8", "ignore")
+        self.session.attach_runtime_cookie(name, value, cookie.domain(), cookie.path())
+
+    def accept_manual_session(self):
+        self.session.confirm_manual_login()
+        self.accept()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, store: SettingsStore | None = None):
         super().__init__()
@@ -1900,20 +1946,17 @@ class MainWindow(QMainWindow):
         self.update_output_preview()
 
     def open_sisfe_session(self):
-        self.sisfe_session.open_portal()
-        confirmed = QMessageBox.question(
-            self,
-            "Sesión SISFE manual",
-            "Completá el acceso de Matriculados y el CAPTCHA en el navegador.\n\n"
-            "¿La sesión ya quedó iniciada en este equipo?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirmed is QMessageBox.StandardButton.Yes:
-            self.sisfe_session.confirm_manual_login()
-            self.sisfe_status.setText("Sesión manual confirmada para esta ejecución")
+        dialog = SisfeLoginDialog(self.sisfe_session, self)
+        if dialog.exec() and self.sisfe_session.active:
+            self.sisfe_sync.snapshot_provider = SisfeHttpSnapshotProvider(
+                self.sisfe_session.http_session
+            )
+            if self.sisfe_session.has_http_cookies:
+                self.sisfe_status.setText("Sesión manual lista para sincronizar")
+            else:
+                self.sisfe_status.setText("Sesión confirmada; SISFE todavía no entregó cookies")
         else:
-            self.sisfe_status.setText("Esperando confirmación de sesión manual")
+            self.sisfe_status.setText("Sesión SISFE sin confirmar")
 
     def sync_sisfe(self):
         if not self.require_case():
