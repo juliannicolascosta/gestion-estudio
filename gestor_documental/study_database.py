@@ -17,7 +17,7 @@ from .models import Case
 from .services import read_case_metadata
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 DATABASE_NAME = ".gestor-estudio.sqlite3"
 
 
@@ -62,7 +62,15 @@ class StudyDatabase:
         if current < 1:
             self._migrate_to_1()
             self.connection.execute("PRAGMA user_version = 1")
-            self.connection.commit()
+            current = 1
+        if current < 2:
+            self._migrate_to_2()
+            self.connection.execute("PRAGMA user_version = 2")
+            current = 2
+        if current < 3:
+            self._migrate_to_3()
+            self.connection.execute("PRAGMA user_version = 3")
+        self.connection.commit()
 
     def _migrate_to_1(self):
         self.connection.executescript(
@@ -128,6 +136,24 @@ class StudyDatabase:
             """
         )
 
+    def _migrate_to_2(self):
+        """Add a stable fallback identity for sources whose ID is unavailable."""
+        self.connection.execute(
+            "ALTER TABLE movimientos ADD COLUMN logical_key TEXT NOT NULL DEFAULT ''"
+        )
+
+    def _migrate_to_3(self):
+        self.connection.execute(
+            "ALTER TABLE expedientes ADD COLUMN tribunal TEXT NOT NULL DEFAULT ''"
+        )
+        self.connection.execute(
+            """
+            CREATE UNIQUE INDEX movimientos_logical_identity
+            ON movimientos(expediente_id, source, logical_key)
+            WHERE logical_key <> ''
+            """
+        )
+
     def import_case(self, case: Case) -> Expediente:
         """Register an existing case folder once, preserving its JSON unchanged."""
         folder_path = str(case.path.resolve())
@@ -145,14 +171,15 @@ class StudyDatabase:
             title=case.name,
             client_name=metadata.get("Actor", ""),
             case_number=metadata.get("CUIJ", ""),
+            tribunal=metadata.get("Juzgado o tribunal", ""),
             created_at=utc_now(),
             updated_at=utc_now(),
         )
         self.connection.execute(
             """
             INSERT INTO expedientes
-                (id, folder_path, title, client_name, case_number, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, folder_path, title, client_name, case_number, tribunal, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -160,6 +187,7 @@ class StudyDatabase:
                 record.title,
                 record.client_name,
                 record.case_number,
+                record.tribunal,
                 record.status,
                 now,
                 now,
@@ -175,6 +203,27 @@ class StudyDatabase:
         self.connection.commit()
         return record
 
+    def fill_sisfe_context(self, expediente_id: str, cuij: str, tribunal: str) -> Expediente:
+        """Fill missing operational context without replacing user-entered case data."""
+        row = self.connection.execute("SELECT * FROM expedientes WHERE id = ?", (expediente_id,)).fetchone()
+        if not row:
+            raise KeyError("No encontramos el expediente a actualizar.")
+        case_number = row["case_number"] or cuij.strip()
+        court = row["tribunal"] or tribunal.strip()
+        if case_number == row["case_number"] and court == row["tribunal"]:
+            return self._expediente_from_row(row)
+        now = utc_now().isoformat()
+        self.connection.execute(
+            """
+            UPDATE expedientes SET case_number = ?, tribunal = ?, updated_at = ? WHERE id = ?
+            """,
+            (case_number, court, now, expediente_id),
+        )
+        self._audit("expediente", expediente_id, "sisfe_context_received", now)
+        self.connection.commit()
+        updated = self.connection.execute("SELECT * FROM expedientes WHERE id = ?", (expediente_id,)).fetchone()
+        return self._expediente_from_row(updated)
+
     def add_movement(
         self,
         expediente_id: str,
@@ -183,17 +232,29 @@ class StudyDatabase:
         occurred_at: datetime | None = None,
         source: str = "manual",
         external_id: str = "",
+        logical_key: str = "",
     ) -> Movimiento:
         """Add a movement, or return the existing one for an external ID."""
         title = title.strip()
         source = source.strip() or "manual"
         external_id = external_id.strip()
+        logical_key = logical_key.strip()
         if not title:
             raise ValueError("El movimiento necesita una descripción.")
         if external_id:
             row = self.connection.execute(
                 "SELECT * FROM movimientos WHERE source = ? AND external_id = ?",
                 (source, external_id),
+            ).fetchone()
+            if row:
+                return self._movimiento_from_row(row)
+        if logical_key:
+            row = self.connection.execute(
+                """
+                SELECT * FROM movimientos
+                WHERE expediente_id = ? AND source = ? AND logical_key = ?
+                """,
+                (expediente_id, source, logical_key),
             ).fetchone()
             if row:
                 return self._movimiento_from_row(row)
@@ -208,8 +269,9 @@ class StudyDatabase:
         )
         self.connection.execute(
             """
-            INSERT INTO movimientos (id, expediente_id, title, occurred_at, source, external_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO movimientos
+                (id, expediente_id, title, occurred_at, source, external_id, logical_key, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -218,12 +280,24 @@ class StudyDatabase:
                 record.occurred_at.isoformat() if record.occurred_at else None,
                 record.source,
                 record.external_id,
+                logical_key,
                 now,
             ),
         )
         self._audit("movimiento", record.id, "created", now)
         self.connection.commit()
         return record
+
+    def find_document_by_sha256(self, expediente_id: str, sha256: str) -> Documento | None:
+        """Find a previously registered content hash within an expediente."""
+        digest = sha256.strip().lower()
+        if not digest:
+            return None
+        row = self.connection.execute(
+            "SELECT * FROM documentos WHERE expediente_id = ? AND sha256 = ?",
+            (expediente_id, digest),
+        ).fetchone()
+        return self._documento_from_row(row) if row else None
 
     def add_document(
         self,
@@ -351,6 +425,7 @@ class StudyDatabase:
             title=row["title"],
             client_name=row["client_name"],
             case_number=row["case_number"],
+            tribunal=row["tribunal"],
             status=row["status"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),

@@ -21,6 +21,7 @@ class Expediente:
     title: str
     client_name: str = ""
     case_number: str = ""
+    tribunal: str = ""
     status: str = "activo"
     created_at: datetime | None = None
     updated_at: datetime | None = None

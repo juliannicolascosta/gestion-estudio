@@ -80,6 +80,21 @@ class StudyDatabaseTests(unittest.TestCase):
             self.assertEqual(first.id, second.id)
             self.assertNotEqual(manual_a.id, manual_b.id)
 
+    def test_logical_movement_identity_deduplicates_when_external_id_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                first = database.add_movement(
+                    expediente.id, "Providencia", source="sisfe", logical_key="2026-08-31|providencia"
+                )
+                second = database.add_movement(
+                    expediente.id, "Providencia", source="sisfe", logical_key="2026-08-31|providencia"
+                )
+
+            self.assertEqual(first.id, second.id)
+
     def test_documents_stay_relative_to_case_and_tasks_require_confirmation(self):
         with tempfile.TemporaryDirectory() as directory:
             study = Path(directory) / "Estudio"
