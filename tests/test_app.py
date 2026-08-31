@@ -28,6 +28,7 @@ from gestor_documental.services import (
     save_case_metadata,
     study_library_path,
 )
+from gestor_documental.study_database import StudyDatabase, study_database_path
 
 
 class AppSmokeTests(unittest.TestCase):
@@ -73,6 +74,29 @@ class AppSmokeTests(unittest.TestCase):
             self.assertTrue(study_library_path(study).is_dir())
             window.reload_cases(case.path)
             self.assertEqual(window.case_title.text(), case.name)
+            window.close()
+
+    def test_selecting_case_registers_expediente_without_changing_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            case = create_case(study, "Rosales c/ Provincia")
+            metadata = {"Actor": "Pablo Rosales", "CUIJ": "21-12345678-9"}
+            save_case_metadata(case, metadata)
+            json_before = (case.path / ".gestor-caso.json").read_bytes()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+            with StudyDatabase(study_database_path(study)) as database:
+                row = database.connection.execute(
+                    "SELECT title, client_name, case_number FROM expedientes"
+                ).fetchone()
+
+            self.assertEqual(tuple(row), (case.name, "Pablo Rosales", "21-12345678-9"))
+            self.assertEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
             window.close()
 
     def test_metadata_is_read_only_until_explicit_edit_and_save(self):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import re
+import sqlite3
 from datetime import date
 from pathlib import Path
 from threading import Event
@@ -68,6 +69,7 @@ from .case_data import (
     raeo_effective_values,
     raeo_missing_fields,
 )
+from .case_registry import register_case_as_expediente
 from .icons import file_icon_name, ui_icon
 from .signing import (
     DigitalSignatureSession,
@@ -1840,6 +1842,16 @@ class MainWindow(QMainWindow):
             self.update_compilation_count()
             self.update_output_preview()
             return
+        try:
+            # El registro sólo vincula la carpeta existente con SQLite y
+            # conserva los archivos y el JSON del gestor como están.
+            register_case_as_expediente(case)
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            # Una ubicación de sólo lectura no debe impedir el uso del gestor
+            # documental que ya funciona sobre sus carpetas.
+            self.statusBar().showMessage(
+                f"No se pudo vincular el expediente: {error}", 7000
+            )
         self.case_title.setText(case.name)
         self.load_metadata(read_case_metadata(case))
         self.reload_case_files()
