@@ -7,9 +7,175 @@ portal's actual browser session without exporting cookies to disk or Python.
 from __future__ import annotations
 
 import json
+from base64 import b64decode
+from binascii import Error as Base64Error
 from datetime import datetime
 
-from .sisfe_import import SisfeCaseSnapshot, SisfeMovementPayload
+from .sisfe_import import SisfeCaseSnapshot, SisfeDocumentPayload, SisfeMovementPayload
+
+
+def browser_validation_script() -> str:
+    """Validate SISFE inside the logged-in page without exporting its token."""
+    return """
+        window.__gestorSisfeValidation = null;
+        (async () => {
+          try {
+            const currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
+            if (!currentUser || !currentUser.token) {
+              throw new Error('SISFE no entregó el token de la sesión');
+            }
+            const response = await fetch(
+              '/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=1',
+              {
+                credentials: 'include',
+                headers: {Authorization: 'Bearer ' + currentUser.token}
+              }
+            );
+            window.__gestorSisfeValidation = {ok: response.ok, status: response.status};
+          } catch (error) {
+            window.__gestorSisfeValidation = {ok: false, error: String(error.message || error)};
+          }
+        })();
+    """
+
+
+def browser_movement_detail_script(cuij: str, movement_id: str) -> str:
+    target = json.dumps("".join(char for char in cuij if char.isdigit()))
+    remote_movement = json.dumps(str(movement_id))
+    return f"""
+        window.__gestorSisfeMovement = null;
+        (async () => {{
+          try {{
+            const target = {target};
+            const movementId = {remote_movement};
+            const currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
+            if (!currentUser || !currentUser.token) {{
+              throw new Error('SISFE no entregó el token de la sesión');
+            }}
+            const getJson = async (path) => {{
+              const response = await fetch(path, {{
+                credentials: 'include',
+                headers: {{Authorization: 'Bearer ' + currentUser.token}}
+              }});
+              if (!response.ok) throw new Error('SISFE devolvió ' + response.status);
+              return response.json();
+            }};
+            const list = await getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=100');
+            const selected = (list.lista || []).find(row =>
+              JSON.stringify(row).replace(/\\D/g, '').includes(target)
+            );
+            if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
+            const news = await getJson('/iol/expedientes/findNovedadesById?idExpediente=' +
+              encodeURIComponent(selected.id) + '&page=0&size=100');
+            const movement = (news.lista || []).find(row => String(row.id || '') === movementId);
+            if (!movement) throw new Error('SISFE no devolvió el movimiento seleccionado');
+            window.__gestorSisfeMovement = {{
+              ok: true,
+              remote_case_id: String(selected.id),
+              movement_id: movementId,
+              title: String(movement.novedad || movement.tipoActuacion || 'Movimiento SISFE'),
+              occurred_at: movement.fecha || null,
+              observation: String(movement.observacion || ''),
+              has_primary_document: movement.adjunto1 != null,
+              has_related_organizations: movement.adjunto2 != null,
+              has_additional_documents: movement.adjunto3 != null
+            }};
+          }} catch (error) {{
+            window.__gestorSisfeMovement = {{ok: false, error: String(error.message || error)}};
+          }}
+        }})();
+    """
+
+
+def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
+    target = json.dumps("".join(char for char in cuij if char.isdigit()))
+    remote_movement = json.dumps(str(movement_id))
+    return f"""
+        window.__gestorSisfeDocuments = null;
+        (async () => {{
+          try {{
+            const target = {target};
+            const movementId = {remote_movement};
+            const currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
+            if (!currentUser || !currentUser.token) {{
+              throw new Error('SISFE no entregó el token de la sesión');
+            }}
+            const options = {{
+              credentials: 'include',
+              headers: {{Authorization: 'Bearer ' + currentUser.token}}
+            }};
+            const getJson = async (path) => {{
+              const response = await fetch(path, options);
+              if (!response.ok) throw new Error('SISFE devolvió ' + response.status + ' al consultar ' + path);
+              return response.json();
+            }};
+            const getPdf = async (path, fallbackName) => {{
+              const response = await fetch(path, options);
+              if (!response.ok) {{
+                if (response.status === 401 || response.status === 403) {{
+                  throw new Error('SISFE exige validar nuevamente la sesión o completar el CAPTCHA');
+                }}
+                throw new Error('SISFE devolvió ' + response.status + ' al descargar el documento');
+              }}
+              const blob = await response.blob();
+              if (!blob.size) throw new Error('SISFE devolvió un documento vacío');
+              if (blob.size > 20 * 1024 * 1024) {{
+                throw new Error('El documento supera 20 MB; abrilo directamente en SISFE');
+              }}
+              const dataUrl = await new Promise((resolve, reject) => {{
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result));
+                reader.onerror = () => reject(new Error('No pudimos leer el documento descargado'));
+                reader.readAsDataURL(blob);
+              }});
+              return {{name: fallbackName, content_base64: dataUrl.split(',', 2)[1] || ''}};
+            }};
+            const list = await getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=100');
+            const selected = (list.lista || []).find(row =>
+              JSON.stringify(row).replace(/\\D/g, '').includes(target)
+            );
+            if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
+            const details = await getJson('/iol/expedientes/findById?idExpediente=' + encodeURIComponent(selected.id));
+            const news = await getJson('/iol/expedientes/findNovedadesById?idExpediente=' +
+              encodeURIComponent(selected.id) + '&page=0&size=100');
+            const movement = (news.lista || []).find(row => String(row.id || '') === movementId);
+            if (!movement) throw new Error('SISFE no devolvió el movimiento seleccionado');
+            const documents = [];
+            if (movement.adjunto1 != null) {{
+              documents.push(await getPdf(
+                '/iol/actuaciones/findDocumentoAdjuntoById?idActuacion=' + encodeURIComponent(movementId),
+                'Movimiento SISFE ' + movementId + '.pdf'
+              ));
+            }}
+            if (movement.adjunto3 != null) {{
+              const attached = await getJson('/iol/cargos/findDocumentosAdjuntosById?idCargo=' +
+                encodeURIComponent(movementId));
+              for (const row of (attached.lista || [])) {{
+                documents.push(await getPdf(
+                  '/iol/cargos/findDocumentoAdjuntoByAdjuntoCargoId?idAdjuntoCargo=' +
+                    encodeURIComponent(row.idAdjuntoCargo),
+                  String(row.adjunto || ('Adjunto SISFE ' + row.idAdjuntoCargo + '.pdf'))
+                ));
+              }}
+            }}
+            if (!documents.length) throw new Error('Este movimiento no tiene documentos descargables');
+            window.__gestorSisfeDocuments = {{
+              ok: true,
+              cuij: target,
+              title: details.expCaratula || selected.expCaratula || '',
+              tribunal: details.radicado || selected.radicacionActual || '',
+              movements: [{{
+                internal_id: movementId,
+                title: String(movement.novedad || movement.tipoActuacion || 'Movimiento SISFE'),
+                occurred_at: movement.fecha || null,
+                documents: documents
+              }}]
+            }};
+          }} catch (error) {{
+            window.__gestorSisfeDocuments = {{ok: false, error: String(error.message || error)}};
+          }}
+        }})();
+    """
 
 
 def browser_sync_script(cuij: str) -> str:
@@ -19,8 +185,15 @@ def browser_sync_script(cuij: str) -> str:
         (async () => {{
           try {{
             const target = {target};
+            const currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
+            if (!currentUser || !currentUser.token) {{
+              throw new Error('SISFE no entregó el token de la sesión');
+            }}
             const getJson = async (path) => {{
-              const response = await fetch(path, {{credentials: 'include'}});
+              const response = await fetch(path, {{
+                credentials: 'include',
+                headers: {{Authorization: 'Bearer ' + currentUser.token}}
+              }});
               if (!response.ok) throw new Error('SISFE devolvió ' + response.status + ' al consultar ' + path);
               return response.json();
             }};
@@ -51,13 +224,16 @@ def browser_sync_script(cuij: str) -> str:
 
 
 def snapshot_from_browser_payload(payload: dict) -> SisfeCaseSnapshot:
-    if not isinstance(payload, dict) or not payload.get("ok"):
+    if not isinstance(payload, dict):
+        raise RuntimeError("SISFE devolvió una respuesta inválida.")
+    if not payload.get("ok"):
         raise RuntimeError(str(payload.get("error", "SISFE devolvió una respuesta inválida.")))
     movements = tuple(
         SisfeMovementPayload(
             internal_id=str(row.get("internal_id", "")),
             title=str(row.get("title", "Movimiento SISFE")),
             occurred_at=_parse_date(row.get("occurred_at")),
+            documents=_documents_from_browser_row(row),
         )
         for row in payload.get("movements", [])
         if isinstance(row, dict)
@@ -68,6 +244,27 @@ def snapshot_from_browser_payload(payload: dict) -> SisfeCaseSnapshot:
         tribunal=str(payload.get("tribunal", "")),
         movements=movements,
     )
+
+
+def _documents_from_browser_row(row: dict) -> tuple[SisfeDocumentPayload, ...]:
+    documents: list[SisfeDocumentPayload] = []
+    for item in row.get("documents", []):
+        if not isinstance(item, dict):
+            continue
+        encoded = str(item.get("content_base64", ""))
+        try:
+            content = b64decode(encoded, validate=True)
+        except (Base64Error, ValueError) as error:
+            raise RuntimeError("SISFE devolvió un documento inválido.") from error
+        if not content.startswith(b"%PDF"):
+            raise RuntimeError("SISFE devolvió un adjunto que no es PDF.")
+        documents.append(
+            SisfeDocumentPayload(
+                name=str(item.get("name") or "Documento SISFE.pdf"),
+                content=content,
+            )
+        )
+    return tuple(documents)
 
 
 def _parse_date(value: object) -> datetime | None:

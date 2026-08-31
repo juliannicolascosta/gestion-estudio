@@ -4,7 +4,7 @@ import sys
 import re
 import sqlite3
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from threading import Event
 
@@ -75,7 +75,13 @@ from .case_data import (
 from .case_registry import recent_case_novedades, register_case_as_expediente
 from .sisfe_session import ManualSisfeSession
 from .sisfe_sync import SisfeSessionRequired, SisfeSnapshotProviderMissing, SisfeSyncCoordinator
-from .sisfe_browser import browser_sync_script, snapshot_from_browser_payload
+from .sisfe_browser import (
+    browser_movement_detail_script,
+    browser_movement_documents_script,
+    browser_sync_script,
+    browser_validation_script,
+    snapshot_from_browser_payload,
+)
 from .icons import file_icon_name, ui_icon
 from .signing import (
     DigitalSignatureSession,
@@ -121,6 +127,24 @@ from .services import (
 PATH_ROLE = int(Qt.ItemDataRole.UserRole)
 TYPE_ROLE = PATH_ROLE + 1
 ROOT_ROLE = TYPE_ROLE + 1
+MOVEMENT_ROLE = ROOT_ROLE + 1
+
+
+def _format_sisfe_date(value: object) -> str:
+    if not value:
+        return "Sin fecha"
+    text = str(value).strip()
+    for candidate in (text, text.replace("Z", "+00:00")):
+        try:
+            return datetime.fromisoformat(candidate).strftime("%d/%m/%Y %H:%M")
+        except ValueError:
+            pass
+    for pattern in ("%d/%m/%Y", "%d/%m/%Y %H:%M"):
+        try:
+            return datetime.strptime(text, pattern).strftime("%d/%m/%Y %H:%M")
+        except ValueError:
+            pass
+    return text
 
 APP_STYLE = """
 QMainWindow, QWidget#appRoot { background: #F4F5F3; color: #17211F; }
@@ -1266,20 +1290,7 @@ class SisfeLoginDialog(QDialog):
         self.browser.setUrl(QUrl("https://sisfe.justiciasantafe.gov.ar/buscar-expediente"))
 
     def validate_loaded_session(self):
-        self.browser.page().runJavaScript(
-            """
-            window.__gestorSisfeValidation = null;
-            (async () => {
-              try {
-                const response = await fetch('/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=1',
-                  {credentials: 'include'});
-                window.__gestorSisfeValidation = {ok: response.ok, status: response.status};
-              } catch (error) {
-                window.__gestorSisfeValidation = {ok: false, error: String(error.message || error)};
-              }
-            })();
-            """
-        )
+        self.browser.page().runJavaScript(browser_validation_script())
         timer = QTimer(self)
         timer.setInterval(250)
         elapsed = {"milliseconds": 0}
@@ -1288,6 +1299,7 @@ class SisfeLoginDialog(QDialog):
         def poll():
             elapsed["milliseconds"] += 250
             self.browser.page().runJavaScript(
+                "window.__gestorSisfeValidation === null ? null : "
                 "JSON.stringify(window.__gestorSisfeValidation)",
                 lambda value: finish(value) if value else None,
             )
@@ -1305,6 +1317,8 @@ class SisfeLoginDialog(QDialog):
             try:
                 result = json.loads(str(value))
             except (TypeError, ValueError):
+                result = {"ok": False, "error": "SISFE devolvió una validación inválida."}
+            if not isinstance(result, dict):
                 result = {"ok": False, "error": "SISFE devolvió una validación inválida."}
             if result.get("ok"):
                 self.session.confirm_manual_login()
@@ -1335,6 +1349,7 @@ class SisfeLoginDialog(QDialog):
         def poll():
             elapsed["milliseconds"] += 250
             self.browser.page().runJavaScript(
+                "window.__gestorSisfeResult === null ? null : "
                 "JSON.stringify(window.__gestorSisfeResult)",
                 lambda value: finish(value) if value else None,
             )
@@ -1356,6 +1371,97 @@ class SisfeLoginDialog(QDialog):
 
         timer.timeout.connect(poll)
         timer.start()
+
+    def request_movement_detail(self, cuij: str, movement_id: str, completed):
+        self._request_json_result(
+            browser_movement_detail_script(cuij, movement_id),
+            "__gestorSisfeMovement",
+            20000,
+            completed,
+        )
+
+    def request_movement_documents(self, cuij: str, movement_id: str, completed):
+        def parsed(payload, error):
+            if error:
+                completed(None, error)
+                return
+            try:
+                completed(snapshot_from_browser_payload(payload), None)
+            except Exception as parse_error:
+                completed(None, parse_error)
+
+        self._request_json_result(
+            browser_movement_documents_script(cuij, movement_id),
+            "__gestorSisfeDocuments",
+            60000,
+            parsed,
+        )
+
+    def _request_json_result(self, script: str, result_name: str, timeout_ms: int, completed):
+        if self._sync_timer and self._sync_timer.isActive():
+            completed(None, RuntimeError("SISFE todavía está procesando otra consulta."))
+            return
+        self.browser.page().runJavaScript(script)
+        timer = QTimer(self)
+        timer.setInterval(250)
+        elapsed = {"milliseconds": 0}
+        self._sync_timer = timer
+
+        def poll():
+            elapsed["milliseconds"] += 250
+            expression = f"window.{result_name} === null ? null : JSON.stringify(window.{result_name})"
+            self.browser.page().runJavaScript(
+                expression,
+                lambda value: finish(value) if value else None,
+            )
+            if elapsed["milliseconds"] >= timeout_ms:
+                timer.stop()
+                self._sync_timer = None
+                completed(None, RuntimeError("SISFE demoró demasiado en responder."))
+
+        def finish(value):
+            if not value or not timer.isActive():
+                return
+            timer.stop()
+            self._sync_timer = None
+            try:
+                payload = json.loads(str(value))
+            except (TypeError, ValueError) as error:
+                completed(None, RuntimeError("SISFE devolvió una respuesta inválida."))
+                return
+            if not isinstance(payload, dict):
+                completed(None, RuntimeError("SISFE devolvió una respuesta inválida."))
+                return
+            if not payload.get("ok"):
+                completed(None, RuntimeError(str(payload.get("error") or "SISFE no pudo completar la consulta.")))
+                return
+            completed(payload, None)
+
+        timer.timeout.connect(poll)
+        timer.start()
+
+
+class SisfeCaseBrowserDialog(QDialog):
+    def __init__(self, profile: QWebEngineProfile, remote_case_id: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Expediente en SISFE")
+        self.setMinimumSize(1050, 760)
+        layout = QVBoxLayout(self)
+        note = QLabel(
+            "Vista oficial de SISFE. Si una descarga requiere CAPTCHA, completalo aquí y usá los iconos del portal."
+        )
+        note.setObjectName("muted")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.browser = QWebEngineView()
+        self.browser.setPage(QWebEnginePage(profile, self.browser))
+        self.browser.setUrl(
+            QUrl(f"https://sisfe.justiciasantafe.gov.ar/detalle-expediente/{remote_case_id}")
+        )
+        layout.addWidget(self.browser, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
 
 class MainWindow(QMainWindow):
@@ -1385,6 +1491,7 @@ class MainWindow(QMainWindow):
         self._close_after_compile = False
         self._signer_dialog: SignerDropDialog | None = None
         self._sisfe_login_dialog: SisfeLoginDialog | None = None
+        self._sisfe_case_dialog: SisfeCaseBrowserDialog | None = None
         self.setWindowTitle("Gestor de documental")
         self.setMinimumSize(1120, 700)
         self.resize(1450, 880)
@@ -1624,7 +1731,17 @@ class MainWindow(QMainWindow):
         self.novedades_list = QListWidget()
         self.novedades_list.setObjectName("novedadesList")
         self.novedades_list.setFixedHeight(110)
+        self.novedades_list.itemSelectionChanged.connect(self.update_novedad_actions)
+        self.novedades_list.itemDoubleClicked.connect(lambda _: self.show_selected_novedad())
         novedades_layout.addWidget(self.novedades_list)
+        novedades_actions = QHBoxLayout()
+        novedades_actions.addStretch()
+        self.novedad_detail_button = QPushButton("Ver detalle")
+        decorate_button(self.novedad_detail_button, "external")
+        self.novedad_detail_button.setEnabled(False)
+        self.novedad_detail_button.clicked.connect(self.show_selected_novedad)
+        novedades_actions.addWidget(self.novedad_detail_button)
+        novedades_layout.addLayout(novedades_actions)
         information_column.addWidget(novedades_card)
 
         files_card, files_layout = make_card()
@@ -1675,7 +1792,7 @@ class MainWindow(QMainWindow):
         files_actions.addWidget(add_to_compile)
         files_layout.addLayout(files_actions)
         information_column.addWidget(files_card)
-        information_column.setSizes([250, 145, 360])
+        information_column.setSizes([240, 205, 340])
         workspace_layout.addWidget(information_column, 5)
 
         preparation_card, preparation_layout = make_card()
@@ -2117,6 +2234,7 @@ class MainWindow(QMainWindow):
 
     def reload_novedades(self):
         self.novedades_list.clear()
+        self.update_novedad_actions()
         if not self.case:
             self.novedades_count.setText("Sin novedades")
             return
@@ -2130,10 +2248,145 @@ class MainWindow(QMainWindow):
             stamp = movement.occurred_at.strftime("%d/%m/%Y %H:%M") if movement.occurred_at else "Sin fecha"
             item = QListWidgetItem(ui_icon("bell", "#2B7564"), f"{movement.title}\n{stamp} · {movement.source.upper()}")
             item.setToolTip(movement.external_id or movement.source)
+            item.setData(
+                MOVEMENT_ROLE,
+                {
+                    "external_id": movement.external_id,
+                    "title": movement.title,
+                    "source": movement.source,
+                    "occurred_at": movement.occurred_at.isoformat() if movement.occurred_at else "",
+                },
+            )
             self.novedades_list.addItem(item)
         count = len(movements)
         self.novedades_count.setText(
             "Sin novedades" if not count else f"{count} novedad{'es' if count != 1 else ''}"
+        )
+
+    def update_novedad_actions(self):
+        if hasattr(self, "novedad_detail_button"):
+            self.novedad_detail_button.setEnabled(self.novedades_list.currentItem() is not None)
+
+    def selected_novedad_data(self) -> dict | None:
+        item = self.novedades_list.currentItem()
+        data = item.data(MOVEMENT_ROLE) if item else None
+        return data if isinstance(data, dict) else None
+
+    def show_selected_novedad(self):
+        movement = self.selected_novedad_data()
+        if not movement:
+            return
+        if movement.get("source") != "sisfe" or not movement.get("external_id"):
+            QMessageBox.information(
+                self,
+                "Detalle de la novedad",
+                f"{movement.get('title', 'Movimiento')}\n\nEsta novedad no proviene de SISFE.",
+            )
+            return
+        if not self._sisfe_login_dialog or not self.sisfe_session.active:
+            QMessageBox.information(
+                self,
+                "Sesión SISFE",
+                "Iniciá la sesión SISFE para consultar el detalle y sus documentos.",
+            )
+            return
+        cuij = read_case_metadata(self.case).get("CUIJ", "") if self.case else ""
+        self.novedad_detail_button.setEnabled(False)
+        self.sisfe_status.setText("Consultando detalle SISFE…")
+
+        def completed(detail, error):
+            self.update_novedad_actions()
+            self.sisfe_status.setText("Sesión manual lista para sincronizar")
+            if error:
+                QMessageBox.warning(self, "No pudimos consultar la novedad", str(error))
+                return
+            stamp = _format_sisfe_date(detail.get("occurred_at"))
+            observation = detail.get("observation") or "Sin observaciones adicionales."
+            attachments = []
+            if detail.get("has_primary_document"):
+                attachments.append("documento principal")
+            if detail.get("has_additional_documents"):
+                attachments.append("adjuntos adicionales")
+            if detail.get("has_related_organizations"):
+                attachments.append("organismos relacionados")
+            box = QMessageBox(self)
+            box.setWindowTitle("Detalle de la novedad SISFE")
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setText(str(detail.get("title") or movement.get("title") or "Movimiento SISFE"))
+            box.setInformativeText(
+                f"Fecha: {stamp}\n"
+                f"Contenido: {observation}\n"
+                f"Disponible: {', '.join(attachments) if attachments else 'sin adjuntos'}"
+            )
+            open_button = box.addButton("Abrir en SISFE", QMessageBox.ButtonRole.ActionRole)
+            download_button = None
+            if detail.get("has_primary_document") or detail.get("has_additional_documents"):
+                download_button = box.addButton("Descargar al caso", QMessageBox.ButtonRole.ActionRole)
+            box.addButton(QMessageBox.StandardButton.Close)
+            box.exec()
+            if box.clickedButton() is open_button:
+                self.open_sisfe_case(str(detail.get("remote_case_id") or ""))
+            elif download_button is not None and box.clickedButton() is download_button:
+                self.download_selected_novedad_documents(movement, detail)
+
+        self._sisfe_login_dialog.request_movement_detail(
+            cuij,
+            str(movement["external_id"]),
+            completed,
+        )
+
+    def open_sisfe_case(self, remote_case_id: str):
+        if not remote_case_id or not self._sisfe_login_dialog:
+            return
+        self._sisfe_case_dialog = SisfeCaseBrowserDialog(
+            self._sisfe_login_dialog.profile,
+            remote_case_id,
+            self,
+        )
+        self._sisfe_case_dialog.show()
+        self._sisfe_case_dialog.raise_()
+        self._sisfe_case_dialog.activateWindow()
+
+    def download_selected_novedad_documents(self, movement: dict, detail: dict):
+        if not self.case or not self._sisfe_login_dialog:
+            return
+        cuij = read_case_metadata(self.case).get("CUIJ", "")
+        self.novedad_detail_button.setEnabled(False)
+        self.sisfe_status.setText("Descargando documentos SISFE…")
+
+        def completed(snapshot, error):
+            self.update_novedad_actions()
+            self.sisfe_status.setText("Sesión manual lista para sincronizar")
+            if error:
+                box = QMessageBox(self)
+                box.setWindowTitle("No pudimos descargar el documento")
+                box.setIcon(QMessageBox.Icon.Warning)
+                box.setText(str(error))
+                open_button = box.addButton("Abrir en SISFE", QMessageBox.ButtonRole.ActionRole)
+                box.addButton(QMessageBox.StandardButton.Close)
+                box.exec()
+                if box.clickedButton() is open_button:
+                    self.open_sisfe_case(str(detail.get("remote_case_id") or ""))
+                return
+            try:
+                result = self.sisfe_sync.importer.import_snapshot(
+                    self.case,
+                    snapshot,
+                    self.case.path / "Documentos SISFE",
+                )
+            except Exception as import_error:
+                QMessageBox.warning(self, "No pudimos guardar el documento", str(import_error))
+                return
+            self.reload_case_files()
+            self.statusBar().showMessage(
+                f"SISFE: {result.documents_registered} documento(s) guardado(s) en el caso",
+                6000,
+            )
+
+        self._sisfe_login_dialog.request_movement_documents(
+            cuij,
+            str(movement["external_id"]),
+            completed,
         )
 
     def require_study(self) -> bool:

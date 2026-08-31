@@ -117,6 +117,10 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.novedades_list.count(), 1)
             self.assertIn("Cédula electrónica", window.novedades_list.item(0).text())
             self.assertEqual(window.novedades_count.text(), "1 novedad")
+            self.assertFalse(window.novedad_detail_button.isEnabled())
+            window.novedades_list.setCurrentRow(0)
+            self.app.processEvents()
+            self.assertTrue(window.novedad_detail_button.isEnabled())
             window.close()
 
     def test_manual_sisfe_session_is_confirmed_without_storing_credentials(self):
