@@ -150,9 +150,6 @@ class StudyDatabase:
         self.connection.execute(
             "ALTER TABLE expedientes ADD COLUMN tribunal TEXT NOT NULL DEFAULT ''"
         )
-
-    def _migrate_to_4(self):
-        self.connection.execute("ALTER TABLE documentos ADD COLUMN category TEXT NOT NULL DEFAULT 'otro'")
         self.connection.execute(
             """
             CREATE UNIQUE INDEX movimientos_logical_identity
@@ -160,6 +157,11 @@ class StudyDatabase:
             WHERE logical_key <> ''
             """
         )
+
+    def _migrate_to_4(self):
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(documentos)")}
+        if "category" not in columns:
+            self.connection.execute("ALTER TABLE documentos ADD COLUMN category TEXT NOT NULL DEFAULT 'otro'")
 
     def import_case(self, case: Case) -> Expediente:
         """Register an existing case folder once, preserving its JSON unchanged."""
