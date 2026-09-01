@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sys
 import re
 import sqlite3
@@ -10,7 +11,7 @@ from threading import Event
 
 from PyQt6.QtCore import QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QKeySequence, QPainter, QPalette, QShortcut
-from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest, QWebEnginePage, QWebEngineProfile
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -77,7 +78,6 @@ from .sisfe_session import ManualSisfeSession
 from .sisfe_sync import SisfeSessionRequired, SisfeSnapshotProviderMissing, SisfeSyncCoordinator
 from .sisfe_browser import (
     browser_movement_detail_script,
-    browser_movement_documents_script,
     browser_sync_script,
     browser_validation_script,
     snapshot_from_browser_payload,
@@ -121,7 +121,9 @@ from .services import (
     template_variable_name,
     split_pdf,
     study_library_path,
+    unique_path,
 )
+from .study_database import StudyDatabase, study_database_path
 
 
 PATH_ROLE = int(Qt.ItemDataRole.UserRole)
@@ -1380,23 +1382,6 @@ class SisfeLoginDialog(QDialog):
             completed,
         )
 
-    def request_movement_documents(self, cuij: str, movement_id: str, completed):
-        def parsed(payload, error):
-            if error:
-                completed(None, error)
-                return
-            try:
-                completed(snapshot_from_browser_payload(payload), None)
-            except Exception as parse_error:
-                completed(None, parse_error)
-
-        self._request_json_result(
-            browser_movement_documents_script(cuij, movement_id),
-            "__gestorSisfeDocuments",
-            60000,
-            parsed,
-        )
-
     def _request_json_result(self, script: str, result_name: str, timeout_ms: int, completed):
         if self._sync_timer and self._sync_timer.isActive():
             completed(None, RuntimeError("SISFE todavía está procesando otra consulta."))
@@ -1442,13 +1427,19 @@ class SisfeLoginDialog(QDialog):
 
 
 class SisfeCaseBrowserDialog(QDialog):
-    def __init__(self, profile: QWebEngineProfile, remote_case_id: str, parent=None):
+    """Official SISFE view that saves user-initiated downloads into one case."""
+
+    def __init__(self, profile: QWebEngineProfile, remote_case_id: str, case: Case, parent=None):
         super().__init__(parent)
+        self.profile = profile
+        self.case = case
+        self._downloads: dict[int, Path] = {}
         self.setWindowTitle("Expediente en SISFE")
         self.setMinimumSize(1050, 760)
         layout = QVBoxLayout(self)
         note = QLabel(
-            "Vista oficial de SISFE. Si una descarga requiere CAPTCHA, completalo aquí y usá los iconos del portal."
+            "Vista oficial de SISFE. Descargá con los iconos del portal; los archivos se guardarán "
+            "automáticamente en Documentos SISFE de este expediente."
         )
         note.setObjectName("muted")
         note.setWordWrap(True)
@@ -1459,9 +1450,53 @@ class SisfeCaseBrowserDialog(QDialog):
             QUrl(f"https://sisfe.justiciasantafe.gov.ar/detalle-expediente/{remote_case_id}")
         )
         layout.addWidget(self.browser, 1)
+        self.profile.downloadRequested.connect(self.save_official_download)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def save_official_download(self, download: QWebEngineDownloadRequest):
+        directory = self.case.path / "Documentos SISFE"
+        directory.mkdir(parents=True, exist_ok=True)
+        filename = normalize_filename(download.suggestedFileName() or "Documento SISFE.pdf")
+        target = unique_path(directory / filename)
+        self._downloads[id(download)] = target
+        download.setDownloadDirectory(str(target.parent))
+        download.setDownloadFileName(target.name)
+        download.stateChanged.connect(
+            lambda state, request=download: self.finish_official_download(request, state)
+        )
+        download.accept()
+
+    def finish_official_download(self, download: QWebEngineDownloadRequest, state):
+        if state != QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+            return
+        target = self._downloads.pop(id(download), None)
+        if not target or not target.is_file():
+            return
+        try:
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                expediente = database.import_case(self.case)
+                database.add_document(
+                    expediente.id,
+                    target.relative_to(self.case.path),
+                    sha256=digest,
+                    source="sisfe",
+                )
+            parent = self.parent()
+            if isinstance(parent, MainWindow):
+                parent.reload_case_files()
+                parent.statusBar().showMessage(f"SISFE: archivo guardado en {target.parent.name}", 6000)
+        except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "Documento descargado", f"El archivo se descargó, pero no pudimos registrarlo: {error}")
+
+    def closeEvent(self, event):
+        try:
+            self.profile.downloadRequested.disconnect(self.save_official_download)
+        except TypeError:
+            pass
+        super().closeEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -2321,13 +2356,13 @@ class MainWindow(QMainWindow):
             open_button = box.addButton("Abrir en SISFE", QMessageBox.ButtonRole.ActionRole)
             download_button = None
             if detail.get("has_primary_document") or detail.get("has_additional_documents"):
-                download_button = box.addButton("Descargar al caso", QMessageBox.ButtonRole.ActionRole)
+                download_button = box.addButton("Descargar desde SISFE", QMessageBox.ButtonRole.ActionRole)
             box.addButton(QMessageBox.StandardButton.Close)
             box.exec()
             if box.clickedButton() is open_button:
                 self.open_sisfe_case(str(detail.get("remote_case_id") or ""))
             elif download_button is not None and box.clickedButton() is download_button:
-                self.download_selected_novedad_documents(movement, detail)
+                self.open_sisfe_case(str(detail.get("remote_case_id") or ""))
 
         self._sisfe_login_dialog.request_movement_detail(
             cuij,
@@ -2336,67 +2371,17 @@ class MainWindow(QMainWindow):
         )
 
     def open_sisfe_case(self, remote_case_id: str):
-        if not remote_case_id or not self._sisfe_login_dialog:
+        if not remote_case_id or not self._sisfe_login_dialog or not self.case:
             return
         self._sisfe_case_dialog = SisfeCaseBrowserDialog(
             self._sisfe_login_dialog.profile,
             remote_case_id,
+            self.case,
             self,
         )
         self._sisfe_case_dialog.show()
         self._sisfe_case_dialog.raise_()
         self._sisfe_case_dialog.activateWindow()
-
-    def download_selected_novedad_documents(self, movement: dict, detail: dict):
-        if not self.case or not self._sisfe_login_dialog:
-            return
-        cuij = read_case_metadata(self.case).get("CUIJ", "")
-        self.novedad_detail_button.setEnabled(False)
-        self.sisfe_status.setText("Descargando documentos SISFE…")
-
-        def completed(snapshot, error):
-            self.update_novedad_actions()
-            self.sisfe_status.setText("Sesión manual lista para sincronizar")
-            if error:
-                box = QMessageBox(self)
-                box.setWindowTitle("No pudimos descargar el documento")
-                box.setIcon(QMessageBox.Icon.Warning)
-                box.setText(str(error))
-                open_button = box.addButton("Abrir en SISFE", QMessageBox.ButtonRole.ActionRole)
-                close_button = box.addButton(QMessageBox.StandardButton.Close)
-                close_button.setText("Cerrar")
-                box.exec()
-                if box.clickedButton() is open_button:
-                    self.open_sisfe_case(str(detail.get("remote_case_id") or ""))
-                return
-            try:
-                result = self.sisfe_sync.importer.import_snapshot(
-                    self.case,
-                    snapshot,
-                    self.case.path / "Documentos SISFE",
-                )
-            except Exception as import_error:
-                QMessageBox.warning(self, "No pudimos guardar el documento", str(import_error))
-                return
-            self.reload_case_files()
-            self.statusBar().showMessage(
-                f"SISFE: {result.documents_registered} documento(s) guardado(s) en el caso",
-                6000,
-            )
-            if snapshot.download_warnings:
-                QMessageBox.warning(
-                    self,
-                    "Descarga parcial desde SISFE",
-                    "Se guardaron los documentos disponibles. Estos archivos no pudieron descargarse:\n\n"
-                    + "\n".join(snapshot.download_warnings)
-                    + "\n\nPodés abrir el expediente en SISFE para descargarlos manualmente.",
-                )
-
-        self._sisfe_login_dialog.request_movement_documents(
-            cuij,
-            str(movement["external_id"]),
-            completed,
-        )
 
     def require_study(self) -> bool:
         if self.store.settings.study_root:
