@@ -9,6 +9,7 @@ Campos disponibles:
 - `{{PROFESIONAL}}`: valor de **Abogado**, convertido a mayúsculas y sin `Dr.`, `Dra.`, `Doctor` o `Doctora`. Si Abogado está vacío, usa el profesional seleccionado arriba.
 - `{{CARATULA}}`: `ACTOR C/ DEMANDADO S/ CAUSA`, en mayúsculas.
 - `{{NUMERO_EXPEDIENTE}}`: Número de expediente o CUIJ, sin texto adicional. `{{CUIJ}}` sigue disponible como alias para modelos anteriores.
+- `{{EXPEDIENTE_SRT}}`: número de expediente o trámite ante la SRT, independiente del expediente judicial.
 - `{{CUIJ_COMPLETO}}`: espacio, paréntesis y CUIJ, por ejemplo ` (CUIJ N° 21-12345678-9)`. Si no hay número, desaparece todo el bloque.
 - `{{ACTOR}}`, `{{DEMANDADO}}`, `{{CAUSA}}`, `{{RADICACION}}`, `{{ABOGADO}}` y `{{CONTRAPARTE}}`: cada dato individual.
 - `{{NOMBRE_CORTO}}`: identificador breve configurado en **Más datos**; si está vacío se infiere del Actor. También se usa para proponer el nombre del PDF.

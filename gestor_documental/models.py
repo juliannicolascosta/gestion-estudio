@@ -23,6 +23,7 @@ CASE_FIELDS = (
     "Demandado",
     "Causa",
     "CUIJ",
+    "Expediente SRT",
     "Radicación",
     "Abogado",
     "Contraparte",
@@ -30,6 +31,7 @@ CASE_FIELDS = (
 
 CASE_FIELD_LABELS = {
     "CUIJ": "Número de expediente",
+    "Expediente SRT": "Número de expediente SRT",
 }
 
 ADVANCED_CASE_FIELDS = (
