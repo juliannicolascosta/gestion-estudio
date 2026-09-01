@@ -33,6 +33,7 @@ _SHAPES = {
     "signature": '<path d="M4 17c2.5-5 4-8 5-8 1.5 0-1 8 .5 8 1 0 2-4 3-4s0 4 1.5 4c1 0 1.5-2 2.5-2s1.5 2 3.5 2M4 21h16"/>',
     "external": '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v7H4V6h7"/>',
     "template": '<path class="soft" d="M5 4h14v16H5Z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    "copy": '<rect x="9" y="8" width="10" height="12" rx="1.5"/><path d="M15 8V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H9"/>',
     "warning": '<path class="soft" d="M12 3 2.5 20h19Z"/><path d="M12 9v5M12 17.5h.01"/>',
     "edit": '<path class="soft" d="M5 19h4l10-10-4-4L5 15Z"/><path d="m13.5 6.5 4 4M5 19h14"/>',
     "check": '<path d="m5 12 4 4L19 6"/>',

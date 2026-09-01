@@ -534,28 +534,25 @@ class ExtendedMetadataDialog(QDialog):
     def template_field_label(self, label_text: str, variable_name: str) -> QWidget:
         """Show each metadata field's Word code without making the form technical."""
         container = QWidget()
-        layout = QVBoxLayout(container)
+        layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(6)
         label = QLabel(label_text)
         label.setObjectName("muted")
         label.setWordWrap(True)
         code = f"{{{{{variable_name}}}}}"
-        copy = QPushButton(code)
-        copy.setFlat(True)
-        copy.setCursor(Qt.CursorShape.PointingHandCursor)
-        copy.setToolTip("Copiar este código para usarlo en un modelo Word")
+        copy = icon_button("copy", f"Copiar {code}", lambda: None, color="#60736D")
         copy.clicked.connect(lambda: self.copy_template_code(code, copy))
         layout.addWidget(label)
-        layout.addWidget(copy, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(copy, 0, Qt.AlignmentFlag.AlignTop)
         return container
 
     @staticmethod
     def copy_template_code(code: str, button: QPushButton):
         QApplication.clipboard().setText(code)
-        original = button.text()
-        button.setText("Copiado")
-        QTimer.singleShot(1200, lambda: button.setText(original) if button else None)
+        original = button.toolTip()
+        button.setToolTip("Copiado")
+        QTimer.singleShot(1200, lambda: button.setToolTip(original) if button else None)
 
     def _add_repeated(self, parent_layout: QVBoxLayout, specifications):
         for spec in specifications:
@@ -596,18 +593,19 @@ class ExtendedMetadataDialog(QDialog):
         name_edit.setPlaceholderText("Nombre del dato")
         value_edit = QLineEdit(value)
         value_edit.setPlaceholderText("Valor")
-        variable = QPushButton()
-        variable.setFlat(True)
-        variable.setCursor(Qt.CursorShape.PointingHandCursor)
-        variable.setToolTip("Copiar este código para usarlo en un modelo Word")
-        variable.setMinimumWidth(145)
+        variable = icon_button("copy", "Copiar código del campo", lambda: None, color="#60736D")
 
         def refresh_variable(text: str):
-            variable.setText(f"{{{{{template_variable_name(text)}}}}}" if text.strip() else "{{DATO}}")
+            code = f"{{{{{template_variable_name(text)}}}}}" if text.strip() else "{{DATO}}"
+            variable.setProperty("templateCode", code)
+            variable.setToolTip(f"Copiar {code}")
+            variable.setEnabled(bool(text.strip()))
 
         refresh_variable(name)
         name_edit.textChanged.connect(refresh_variable)
-        variable.clicked.connect(lambda: self.copy_template_code(variable.text(), variable))
+        variable.clicked.connect(
+            lambda: self.copy_template_code(str(variable.property("templateCode")), variable)
+        )
         remove = icon_button("trash", "Quitar este campo", lambda: self.remove_custom_row(row_widget))
         row.addWidget(name_edit, 2)
         row.addWidget(value_edit, 3)
