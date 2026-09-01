@@ -123,6 +123,7 @@ from .services import (
     study_library_path,
     unique_path,
 )
+from .sisfe_extractor import extract_cedula_text
 from .study_database import StudyDatabase, study_database_path
 
 
@@ -1084,6 +1085,22 @@ class CompileWorker(QObject):
             self.failed.emit(str(error))
 
 
+class CedulaExtractionWorker(QObject):
+    finished = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, pdf: Path):
+        super().__init__()
+        self.pdf = pdf
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            self.finished.emit(extract_cedula_text(self.pdf))
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
 class SignerDropDialog(QDialog):
     def __init__(self, pdf: Path, parent=None):
         super().__init__(parent)
@@ -1545,6 +1562,7 @@ class MainWindow(QMainWindow):
         self._loaded_metadata: dict[str, str] = {}
         self._metadata_snapshot: dict[str, str] = {}
         self._compile_thread: QThread | None = None
+        self._cedula_thread: QThread | None = None
         self._compile_worker: CompileWorker | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._compile_cancelling = False
@@ -3013,9 +3031,69 @@ class MainWindow(QMainWindow):
             )
             if path.is_file() and path.suffix.lower() in {".doc", ".docx", ".odt", ".rtf"}:
                 menu.addAction("Usar como escrito", lambda: self.set_current_writing(path))
+            if path.is_file() and path.suffix.lower() == ".pdf":
+                menu.addAction("Generar cédula…", lambda: self.generate_cedula_from_pdf(path))
             menu.addSeparator()
             menu.addAction("Enviar a la Papelera", self.remove_selected_case_files)
         menu.exec(self.case_files.mapToGlobal(point))
+
+    def generate_cedula_from_pdf(self, pdf: Path):
+        if not self.case or self._cedula_thread is not None:
+            return
+        models = [
+            path for path in list_models(self.store.models_dir)
+            if "cedula" in path.stem.casefold() or "cédula" in path.stem.casefold()
+        ]
+        if not models:
+            QMessageBox.information(
+                self,
+                "Modelos de cédula",
+                "Agregá primero un modelo Word cuyo nombre incluya “Cédula”.",
+            )
+            return
+        names = [model.name for model in models]
+        selected, accepted = QInputDialog.getItem(
+            self, "Generar cédula", "Modelo Word de cédula:", names, 0, False
+        )
+        if not accepted:
+            return
+        template = models[names.index(selected)]
+        case = self.case
+        self.statusBar().showMessage("Extrayendo el texto del decreto…")
+        thread = QThread(self)
+        worker = CedulaExtractionWorker(pdf)
+        worker.moveToThread(thread)
+        self._cedula_thread = thread
+        thread.started.connect(worker.run)
+
+        def cleanup():
+            self._cedula_thread = None
+            worker.deleteLater()
+            thread.deleteLater()
+
+        def completed(extracted):
+            try:
+                writing = create_writing(
+                    case,
+                    f"Cédula - {pdf.stem}",
+                    template,
+                    self.professional_combo.currentText(),
+                    {"TEXTO_PROVEIDO": extracted.text},
+                )
+            except Exception as error:
+                QMessageBox.warning(self, "No pudimos generar la cédula", str(error))
+            else:
+                self.reload_case_files(writing)
+                self.set_current_writing(writing)
+                open_file(writing)
+                review = " Revisá los firmantes." if not extracted.signers_detected else ""
+                self.statusBar().showMessage(f"Cédula creada desde {pdf.name}.{review}", 7000)
+            thread.quit()
+
+        worker.finished.connect(completed)
+        worker.failed.connect(lambda message: (QMessageBox.warning(self, "No pudimos extraer el decreto", message), thread.quit()))
+        thread.finished.connect(cleanup)
+        thread.start()
 
     def remove_selected_case_files(self):
         paths = self.selected_case_paths()
