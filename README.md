@@ -27,7 +27,8 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Inserción automática del profesional seleccionado y de la carátula `ACTOR C/ DEMANDADO S/ CAUSA` con CUIJ.
 - Modelo precargado **Cedula LABVC**, basado en el formulario aportado por el usuario: completa fecha extensa, Actor, Demandado, Causa y Número de expediente.
 - Idioma predeterminado del modelo base: Español (Argentina).
-- Cuadro ordenable de documental y escrito; el escrito nuevo se coloca al final y puede moverse con arrastre o con **Subir/Bajar**.
+- Área central con pestañas **Archivos** y **Compilación**: ambas usan todo el espacio disponible, el contador permanece visible y agregar un PDF lleva directamente al orden de presentación.
+- Lista ordenable de documental y escrito; el escrito nuevo se coloca al final y puede moverse con arrastre o con **Subir/Bajar**.
 - Compilación de todos los elementos en un único PDF, respetando el orden visible.
 - Al pulsar **Compilar PDF** propone un nombre identificable `ACTOR_FECHA_TÍTULO.pdf`, editable antes de comenzar. Si ya existe, permite reemplazarlo de forma segura o crear `_V2`, `_V3`, etc.
 - Los Word de trabajo se identifican como **EDITABLE**, los PDF de salida como **PARA FIRMAR** y los archivos cuyo nombre indica firma como **FIRMADO**. No se crean carpetas ni copias auxiliares permanentes.
@@ -40,6 +41,8 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 
 - Compresión automática. Si el resultado todavía excede el límite, pregunta antes de dividirlo.
 - Compilación en segundo plano con una ventana de progreso, cancelación segura y sin mostrar PowerShell.
+- Novedades SISFE consultadas desde la sesión manual del navegador integrado, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
+- Descargas realizadas desde la vista oficial de SISFE guardadas en `Documentos SISFE`, con estado visible, registro por hash y descarte recuperable de copias idénticas.
 - Liberación inmediata de los PDF leídos: al terminar de compilar o dividir, las carpetas del caso pueden renombrarse o eliminarse desde el Explorador de Windows.
 - Conversión de Word aislada del proceso principal, con tiempo máximo y caché local para no reconvertir escritos sin cambios.
 - Optimización de PDF que conserva el texto y evita rasterizar todas las páginas.
@@ -68,8 +71,8 @@ Microsoft Word o LibreOffice es necesario para convertir documentos Word. La int
 2. Elegí una carpeta existente del árbol o creá **Nuevo caso**.
 3. Arrastrá a **Acceso rápido** los documentos que usás en distintos casos o correos.
 4. Pulsá **Editar datos**, completá lo necesario y guardá. **Más datos** abre las pestañas de ficha general, entrevista y RAEO.
-5. Creá o elegí un escrito y agregá la documental a la compilación.
-6. Ordená los elementos, elegí el límite y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.
+5. Creá o elegí un escrito y, desde **Archivos**, enviá la documental a **Compilación**.
+6. Ordená los elementos en la pestaña **Compilación**, elegí el límite y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.
 7. Pulsá **Firmar → Firmar dentro del Gestor**. La primera firma de la sesión solicita el PIN del token; las siguientes reutilizan la sesión. También podés continuar usando Xólido.
 
 Atajos: `Ctrl+Shift+N` crea un caso, `Ctrl+N` abre las opciones de escrito, `Ctrl+O` agrega archivos, `Ctrl+P` compila, `F2` renombra, `Enter` abre y `Supr` envía a la Papelera (o quita de la compilación, según el panel activo).

@@ -52,6 +52,13 @@ class AppSmokeTests(unittest.TestCase):
                 window.metadata_edits["CUIJ"].placeholderText(),
                 "Número de expediente",
             )
+            self.assertNotIn("Expediente SRT", window.metadata_edits)
+            self.assertEqual(window.work_tabs.count(), 2)
+            self.assertEqual(window.work_tabs.tabText(window.files_tab_index), "Archivos")
+            self.assertEqual(
+                window.work_tabs.tabText(window.compilation_tab_index),
+                "Compilación · 0",
+            )
             self.assertIn("expediente", window.search.placeholderText().lower())
             self.assertEqual(window.case_tree.topLevelItem(0).childCount(), 1)
             self.assertFalse(window.case_tree.topLevelItem(0).child(0).icon(0).isNull())
@@ -188,7 +195,14 @@ class AppSmokeTests(unittest.TestCase):
             study = root / "Estudio"
             study.mkdir()
             case = create_case(study, "Caso")
-            save_case_metadata(case, {"Jurisdicción": "Santa Fe", "Campo propio": "Valor"})
+            save_case_metadata(
+                case,
+                {
+                    "Jurisdicción": "Santa Fe",
+                    "Campo propio": "Valor",
+                    "Expediente SRT": "12345/26",
+                },
+            )
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
             window = MainWindow(store)
@@ -202,6 +216,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(metadata["Actor"], "Ana Pérez")
             self.assertEqual(metadata["Jurisdicción"], "Santa Fe")
             self.assertEqual(metadata["Campo propio"], "Valor")
+            self.assertEqual(metadata["Expediente SRT"], "12345/26")
             self.assertIn("2", window.more_metadata_button.text())
             window.close()
 
@@ -369,6 +384,8 @@ class AppSmokeTests(unittest.TestCase):
                 pdf,
             )
             self.assertFalse(window.case_files.item(0).icon().isNull())
+            window.set_document_category(pdf, "judicial")
+            self.assertIn("JUDICIAL", window.case_files.item(0).text())
             window.go_up_case_folder()
             self.assertEqual(window.case_directory, case.path)
 
@@ -381,6 +398,11 @@ class AppSmokeTests(unittest.TestCase):
             window.add_selected_to_compilation()
             self.assertEqual(window.compilation.count(), 1)
             self.assertEqual(Path(window.compilation.item(0).data(PATH_ROLE)), pdf)
+            self.assertEqual(window.work_tabs.currentIndex(), window.compilation_tab_index)
+            self.assertEqual(
+                window.work_tabs.tabText(window.compilation_tab_index),
+                "Compilación · 1",
+            )
             window.close()
 
     def test_close_cancels_background_compilation_and_then_closes(self):

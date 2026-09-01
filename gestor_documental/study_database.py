@@ -308,6 +308,14 @@ class StudyDatabase:
         ).fetchone()
         return self._documento_from_row(row) if row else None
 
+    def list_documents(self, expediente_id: str) -> list[Documento]:
+        """Return registered files so the UI can show their operational category."""
+        rows = self.connection.execute(
+            "SELECT * FROM documentos WHERE expediente_id = ? ORDER BY relative_path",
+            (expediente_id,),
+        ).fetchall()
+        return [self._documento_from_row(row) for row in rows]
+
     def find_expediente_by_folder(self, folder_path: Path) -> Expediente | None:
         row = self.connection.execute(
             "SELECT * FROM expedientes WHERE folder_path = ?", (str(Path(folder_path).resolve()),)

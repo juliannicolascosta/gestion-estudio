@@ -128,6 +128,7 @@ class StudyDatabaseTests(unittest.TestCase):
                     sha256="ABC123",
                     source="sisfe",
                 )
+                listed_documents = database.list_documents(expediente.id)
                 task = database.suggest_task(
                     expediente.id, "Revisar cédula", due_at=due_at, suggested_by="sisfe"
                 )
@@ -146,6 +147,7 @@ class StudyDatabaseTests(unittest.TestCase):
 
             self.assertEqual(document.relative_path, Path("Notificaciones/cedula.pdf"))
             self.assertEqual(document.sha256, "abc123")
+            self.assertEqual(listed_documents, [document])
             self.assertEqual(task.status, "pendiente")
             self.assertEqual(confirmed.status, "confirmada")
             self.assertEqual(confirmed.confirmed_by, "Dra. Ana Pérez")

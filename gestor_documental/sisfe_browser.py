@@ -14,6 +14,57 @@ from datetime import datetime
 from .sisfe_import import SisfeCaseSnapshot, SisfeDocumentPayload, SisfeMovementPayload
 
 
+_PAGINATION_HELPERS = """
+            const pageSize = 100;
+            const rowsFrom = (payload) => Array.isArray(payload && payload.lista) ? payload.lista : [];
+            const lastPage = (payload, page, rows) => {
+              const reported = Number(
+                payload && (payload.totalPages ?? payload.totalPaginas ?? payload.cantidadPaginas)
+              );
+              return (Number.isFinite(reported) && reported > 0 && page + 1 >= reported) ||
+                rows.length < pageSize;
+            };
+            const pageSignature = (rows) => rows.map(row =>
+              String((row && row.id) ?? JSON.stringify(row))
+            ).join('|');
+            const findPaged = async (loadPage, predicate) => {
+              const seenPages = new Set();
+              for (let page = 0; page < 100; page += 1) {
+                const payload = await loadPage(page, pageSize);
+                const rows = rowsFrom(payload);
+                const signature = pageSignature(rows);
+                if (seenPages.has(signature)) return null;
+                seenPages.add(signature);
+                const found = rows.find(predicate);
+                if (found) return found;
+                if (lastPage(payload, page, rows)) return null;
+              }
+              throw new Error('SISFE devolvió demasiadas páginas para una sola consulta');
+            };
+            const collectPaged = async (loadPage) => {
+              const collected = [];
+              const seenPages = new Set();
+              const seenRows = new Set();
+              for (let page = 0; page < 100; page += 1) {
+                const payload = await loadPage(page, pageSize);
+                const rows = rowsFrom(payload);
+                const signature = pageSignature(rows);
+                if (seenPages.has(signature)) break;
+                seenPages.add(signature);
+                for (const row of rows) {
+                  const key = String((row && row.id) ?? JSON.stringify(row));
+                  if (!seenRows.has(key)) {
+                    seenRows.add(key);
+                    collected.push(row);
+                  }
+                }
+                if (lastPage(payload, page, rows)) break;
+              }
+              return collected;
+            };
+"""
+
+
 def browser_validation_script() -> str:
     """Validate SISFE inside the logged-in page without exporting its token."""
     return """
@@ -60,14 +111,17 @@ def browser_movement_detail_script(cuij: str, movement_id: str) -> str:
               if (!response.ok) throw new Error('SISFE devolvió ' + response.status);
               return response.json();
             }};
-            const list = await getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=100');
-            const selected = (list.lista || []).find(row =>
-              JSON.stringify(row).replace(/\\D/g, '').includes(target)
+{_PAGINATION_HELPERS}
+            const selected = await findPaged(
+              (page, size) => getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=' + page + '&size=' + size),
+              row => JSON.stringify(row).replace(/\\D/g, '').includes(target)
             );
             if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
-            const news = await getJson('/iol/expedientes/findNovedadesById?idExpediente=' +
-              encodeURIComponent(selected.id) + '&page=0&size=100');
-            const movement = (news.lista || []).find(row => String(row.id || '') === movementId);
+            const news = await collectPaged((page, size) => getJson(
+              '/iol/expedientes/findNovedadesById?idExpediente=' + encodeURIComponent(selected.id) +
+              '&page=' + page + '&size=' + size
+            ));
+            const movement = news.find(row => String(row.id || '') === movementId);
             if (!movement) throw new Error('SISFE no devolvió el movimiento seleccionado');
             window.__gestorSisfeMovement = {{
               ok: true,
@@ -109,6 +163,7 @@ def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
               if (!response.ok) throw new Error('SISFE devolvió ' + response.status + ' al consultar ' + path);
               return response.json();
             }};
+{_PAGINATION_HELPERS}
             const captchaSetting = await getJson('/iol/config/getRecaptchaVisible');
             const captchaRequired = captchaSetting === true || captchaSetting === 1 || captchaSetting === '1';
             const captchaFor = async (action) => {{
@@ -161,15 +216,17 @@ def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
               }});
               return {{name: fallbackName, content_base64: dataUrl.split(',', 2)[1] || ''}};
             }};
-            const list = await getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=100');
-            const selected = (list.lista || []).find(row =>
-              JSON.stringify(row).replace(/\\D/g, '').includes(target)
+            const selected = await findPaged(
+              (page, size) => getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=' + page + '&size=' + size),
+              row => JSON.stringify(row).replace(/\\D/g, '').includes(target)
             );
             if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
             const details = await getJson('/iol/expedientes/findById?idExpediente=' + encodeURIComponent(selected.id));
-            const news = await getJson('/iol/expedientes/findNovedadesById?idExpediente=' +
-              encodeURIComponent(selected.id) + '&page=0&size=100');
-            const movement = (news.lista || []).find(row => String(row.id || '') === movementId);
+            const news = await collectPaged((page, size) => getJson(
+              '/iol/expedientes/findNovedadesById?idExpediente=' + encodeURIComponent(selected.id) +
+              '&page=' + page + '&size=' + size
+            ));
+            const movement = news.find(row => String(row.id || '') === movementId);
             if (!movement) throw new Error('SISFE no devolvió el movimiento seleccionado');
             const documents = [];
             const warnings = [];
@@ -245,20 +302,23 @@ def browser_sync_script(cuij: str) -> str:
               if (!response.ok) throw new Error('SISFE devolvió ' + response.status + ' al consultar ' + path);
               return response.json();
             }};
-            const list = await getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=100');
-            const selected = (list.lista || []).find(row =>
-              JSON.stringify(row).replace(/\\D/g, '').includes(target)
+{_PAGINATION_HELPERS}
+            const selected = await findPaged(
+              (page, size) => getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=' + page + '&size=' + size),
+              row => JSON.stringify(row).replace(/\\D/g, '').includes(target)
             );
             if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
             const details = await getJson('/iol/expedientes/findById?idExpediente=' + encodeURIComponent(selected.id));
-            const news = await getJson('/iol/expedientes/findNovedadesById?idExpediente=' +
-              encodeURIComponent(selected.id) + '&page=0&size=100');
+            const news = await collectPaged((page, size) => getJson(
+              '/iol/expedientes/findNovedadesById?idExpediente=' + encodeURIComponent(selected.id) +
+              '&page=' + page + '&size=' + size
+            ));
             window.__gestorSisfeResult = {{
               ok: true,
               cuij: target,
               title: details.expCaratula || selected.expCaratula || '',
               tribunal: details.radicado || selected.radicacionActual || '',
-              movements: (news.lista || []).map(row => ({{
+              movements: news.map(row => ({{
                 internal_id: String(row.id || ''),
                 title: String(row.novedad || row.tipoActuacion || 'Movimiento SISFE'),
                 occurred_at: row.fecha || null

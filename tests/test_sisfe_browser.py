@@ -17,6 +17,9 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("localStorage.getItem('currentUser')", script)
         self.assertIn("Authorization: 'Bearer ' + currentUser.token", script)
         self.assertIn("findNovedadesById", script)
+        self.assertIn("findPaged", script)
+        self.assertIn("collectPaged", script)
+        self.assertIn("page += 1", script)
         self.assertIn("al consultar", script)
         self.assertNotIn("document.cookie", script)
         self.assertNotIn("window.__gestorSisfeResult = currentUser", script)
@@ -34,6 +37,7 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("findNovedadesById", script)
         self.assertIn("has_primary_document", script)
         self.assertIn("has_additional_documents", script)
+        self.assertIn("collectPaged", script)
         self.assertIn("Authorization: 'Bearer ' + currentUser.token", script)
         self.assertNotIn("__gestorSisfeMovement = currentUser", script)
 

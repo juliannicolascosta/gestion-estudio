@@ -38,6 +38,7 @@ _SHAPES = {
     "warning": '<path class="soft" d="M12 3 2.5 20h19Z"/><path d="M12 9v5M12 17.5h.01"/>',
     "edit": '<path class="soft" d="M5 19h4l10-10-4-4L5 15Z"/><path d="m13.5 6.5 4 4M5 19h14"/>',
     "check": '<path d="m5 12 4 4L19 6"/>',
+    "refresh": '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.5 12a7 7 0 0 0-12-4.5L4 10M5.5 12a7 7 0 0 0 12 4.5L20 14"/>',
 }
 
 

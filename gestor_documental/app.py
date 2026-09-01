@@ -52,6 +52,7 @@ from .models import (
     CASE_FIELD_LABELS,
     DEFAULT_PROFILE,
     PRESENTATION_PROFILES,
+    VISIBLE_CASE_FIELDS,
     Case,
 )
 from .case_data import (
@@ -1397,7 +1398,7 @@ class SisfeLoginDialog(QDialog):
                 "JSON.stringify(window.__gestorSisfeResult)",
                 lambda value: finish(value) if value else None,
             )
-            if elapsed["milliseconds"] >= 30000:
+            if elapsed["milliseconds"] >= 60000:
                 timer.stop()
                 self._sync_timer = None
                 completed(None, RuntimeError("SISFE demoró demasiado en responder."))
@@ -1420,7 +1421,7 @@ class SisfeLoginDialog(QDialog):
         self._request_json_result(
             browser_movement_detail_script(cuij, movement_id),
             "__gestorSisfeMovement",
-            20000,
+            45000,
             completed,
         )
 
@@ -1486,6 +1487,9 @@ class SisfeCaseBrowserDialog(QDialog):
         note.setObjectName("muted")
         note.setWordWrap(True)
         layout.addWidget(note)
+        self.download_status = QLabel("Sin descargas en curso")
+        self.download_status.setObjectName("muted")
+        layout.addWidget(self.download_status)
         self.browser = QWebEngineView()
         self.browser.setPage(QWebEnginePage(profile, self.browser))
         self.browser.setUrl(
@@ -1503,6 +1507,7 @@ class SisfeCaseBrowserDialog(QDialog):
         filename = normalize_filename(download.suggestedFileName() or "Documento SISFE.pdf")
         target = unique_path(directory / filename)
         self._downloads[id(download)] = target
+        self.download_status.setText(f"Descargando {target.name}…")
         download.setDownloadDirectory(str(target.parent))
         download.setDownloadFileName(target.name)
         download.stateChanged.connect(
@@ -1511,25 +1516,54 @@ class SisfeCaseBrowserDialog(QDialog):
         download.accept()
 
     def finish_official_download(self, download: QWebEngineDownloadRequest, state):
-        if state != QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
+        terminal_states = {
+            QWebEngineDownloadRequest.DownloadState.DownloadCompleted,
+            QWebEngineDownloadRequest.DownloadState.DownloadCancelled,
+            QWebEngineDownloadRequest.DownloadState.DownloadInterrupted,
+        }
+        if state not in terminal_states:
             return
         target = self._downloads.pop(id(download), None)
+        if state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
+            self.download_status.setText("Descarga cancelada")
+            return
+        if state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
+            detail = download.interruptReasonString() or "SISFE interrumpió la descarga"
+            self.download_status.setText("No se pudo completar la descarga")
+            QMessageBox.warning(self, "Descarga SISFE interrumpida", detail)
+            return
         if not target or not target.is_file():
+            self.download_status.setText("SISFE no generó el archivo esperado")
             return
         try:
             digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            duplicate = False
             with StudyDatabase(study_database_path(self.case.path.parent)) as database:
                 expediente = database.import_case(self.case)
-                database.add_document(
-                    expediente.id,
-                    target.relative_to(self.case.path),
-                    sha256=digest,
-                    source="sisfe",
-                )
+                existing = database.find_document_by_sha256(expediente.id, digest)
+                existing_path = self.case.path / existing.relative_path if existing else None
+                duplicate = bool(existing_path and existing_path.is_file())
+                if not duplicate:
+                    database.add_document(
+                        expediente.id,
+                        target.relative_to(self.case.path),
+                        sha256=digest,
+                        source="sisfe",
+                    )
+            if duplicate:
+                move_to_recycle_bin([target])
+                self.download_status.setText("El documento ya estaba guardado; no se creó otra copia")
+            else:
+                self.download_status.setText(f"Guardado: {target.name}")
             parent = self.parent()
             if isinstance(parent, MainWindow):
                 parent.reload_case_files()
-                parent.statusBar().showMessage(f"SISFE: archivo guardado en {target.parent.name}", 6000)
+                message = (
+                    "SISFE: el documento ya estaba guardado"
+                    if duplicate
+                    else f"SISFE: archivo guardado en {target.parent.name}"
+                )
+                parent.statusBar().showMessage(message, 6000)
         except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
             QMessageBox.warning(self, "Documento descargado", f"El archivo se descargó, pero no pudimos registrarlo: {error}")
 
@@ -1617,8 +1651,6 @@ class MainWindow(QMainWindow):
             color="#173F37",
         )
         top_layout.addWidget(add_professional, 0, Qt.AlignmentFlag.AlignBottom)
-        mev_settings = icon_button("settings", "Configurar acceso MEV del profesional", self.configure_mev_profile, bordered=True, color="#173F37")
-        top_layout.addWidget(mev_settings, 0, Qt.AlignmentFlag.AlignBottom)
         outer.addWidget(top)
 
         body = QHBoxLayout()
@@ -1718,23 +1750,16 @@ class MainWindow(QMainWindow):
         workspace_outer.setSpacing(8)
 
         case_header = QHBoxLayout()
-        case_title_stack = QVBoxLayout()
-        case_title_stack.setSpacing(0)
-        case_context = QHBoxLayout()
-        case_context.setSpacing(8)
         current_label = QLabel("CASO ACTUAL")
         current_label.setObjectName("eyebrow")
+        case_header.addWidget(current_label)
+        self.case_title = QLabel("Elegí un caso")
+        self.case_title.setObjectName("caseTitle")
+        case_header.addWidget(self.case_title)
         self.case_badge = QLabel()
         self.case_badge.setObjectName("caseBadge")
         self.case_badge.hide()
-        case_context.addWidget(current_label)
-        case_context.addWidget(self.case_badge)
-        case_context.addStretch()
-        self.case_title = QLabel("Elegí un caso")
-        self.case_title.setObjectName("caseTitle")
-        case_title_stack.addLayout(case_context)
-        case_title_stack.addWidget(self.case_title)
-        case_header.addLayout(case_title_stack)
+        case_header.addWidget(self.case_badge)
         case_header.addStretch()
         self.open_case_button = QPushButton("Abrir carpeta")
         decorate_button(self.open_case_button, "folder-open")
@@ -1757,11 +1782,12 @@ class MainWindow(QMainWindow):
         fields_grid = QGridLayout(fields_widget)
         fields_grid.setContentsMargins(0, 4, 0, 0)
         fields_grid.setHorizontalSpacing(10)
-        fields_grid.setVerticalSpacing(7)
+        fields_grid.setVerticalSpacing(4)
         self.metadata_edits: dict[str, QLineEdit] = {}
-        for index, field in enumerate(CASE_FIELDS):
-            row = index // 2
-            column = (index % 2) * 2
+        for index, field in enumerate(VISIBLE_CASE_FIELDS):
+            group = index // 4
+            row = group * 2
+            column = index % 4
             display_name = CASE_FIELD_LABELS.get(field, field)
             label = QLabel(display_name)
             label.setObjectName("muted")
@@ -1771,9 +1797,9 @@ class MainWindow(QMainWindow):
             edit.textChanged.connect(self.metadata_changed)
             self.metadata_edits[field] = edit
             fields_grid.addWidget(label, row, column)
-            fields_grid.addWidget(edit, row, column + 1)
-        fields_grid.setColumnStretch(1, 1)
-        fields_grid.setColumnStretch(3, 1)
+            fields_grid.addWidget(edit, row + 1, column)
+        for column in range(4):
+            fields_grid.setColumnStretch(column, 1)
         metadata_layout.addWidget(fields_widget)
         metadata_actions = QHBoxLayout()
         metadata_actions.setSpacing(7)
@@ -1816,11 +1842,26 @@ class MainWindow(QMainWindow):
         self.novedades_list.itemDoubleClicked.connect(lambda _: self.show_selected_novedad())
         novedades_layout.addWidget(self.novedades_list)
         novedades_actions = QHBoxLayout()
-        novedades_actions.addStretch()
-        self.novedad_detail_button = QPushButton("Ver detalle")
-        decorate_button(self.novedad_detail_button, "external")
+        self.sisfe_status = QLabel("SISFE sin iniciar")
+        self.sisfe_status.setObjectName("muted")
+        self.sisfe_status.setToolTip("Estado de la sesión y de la última consulta a SISFE")
+        novedades_actions.addWidget(self.sisfe_status, 1)
+        self.sisfe_connect_button = QPushButton("Abrir SISFE")
+        decorate_button(self.sisfe_connect_button, "external")
+        self.sisfe_connect_button.clicked.connect(self.open_sisfe_session)
+        novedades_actions.addWidget(self.sisfe_connect_button)
+        self.sisfe_sync_button = QPushButton("Sincronizar")
+        self.sisfe_sync_button.setObjectName("green")
+        decorate_button(self.sisfe_sync_button, "refresh", "#FFFFFF")
+        self.sisfe_sync_button.clicked.connect(self.sync_sisfe)
+        novedades_actions.addWidget(self.sisfe_sync_button)
+        self.novedad_detail_button = icon_button(
+            "external",
+            "Ver detalle de la novedad seleccionada",
+            self.show_selected_novedad,
+            bordered=True,
+        )
         self.novedad_detail_button.setEnabled(False)
-        self.novedad_detail_button.clicked.connect(self.show_selected_novedad)
         novedades_actions.addWidget(self.novedad_detail_button)
         novedades_layout.addLayout(novedades_actions)
         information_column.addWidget(novedades_card)
@@ -1883,10 +1924,6 @@ class MainWindow(QMainWindow):
         files_actions.addWidget(add_to_compile)
         files_actions.addWidget(self.prepare_documents_button)
         files_layout.addLayout(files_actions)
-        information_column.addWidget(files_card)
-        information_column.setSizes([155, 125, 620])
-        workspace_layout.addWidget(information_column, 7)
-
         preparation_card, preparation_layout = make_card()
         prep_header = QHBoxLayout()
         prep_header.addLayout(section_heading("Documental a adjuntarse", "Ordená de arriba hacia abajo"))
@@ -1939,6 +1976,19 @@ class MainWindow(QMainWindow):
         prep_actions.addWidget(move_down)
         prep_actions.addStretch()
         preparation_layout.addLayout(prep_actions)
+
+        self.work_tabs = QTabWidget()
+        self.work_tabs.setDocumentMode(True)
+        self.files_tab_index = self.work_tabs.addTab(files_card, ui_icon("folder-open", "#2B7564"), "Archivos")
+        self.compilation_tab_index = self.work_tabs.addTab(
+            preparation_card,
+            ui_icon("layers", "#2B7564"),
+            "Compilación · 0",
+        )
+        information_column.addWidget(self.work_tabs)
+        information_column.setSizes([155, 140, 620])
+        workspace_layout.addWidget(information_column, 7)
+
         actions_card, actions_layout = make_card("actionCard")
         actions_card.setFixedWidth(235)
         actions_title = QLabel("Preparar presentación")
@@ -1979,22 +2029,6 @@ class MainWindow(QMainWindow):
         decorate_button(self.sign_button, "signature", "#173F37")
         self.sign_button.clicked.connect(self.show_sign_menu)
         actions_layout.addWidget(self.sign_button)
-        actions_layout.addSpacing(10)
-        sisfe_label = QLabel("SISFE · SESIÓN MANUAL")
-        sisfe_label.setObjectName("professionalLabel")
-        actions_layout.addWidget(sisfe_label)
-        self.sisfe_status = QLabel("Sesión sin iniciar")
-        self.sisfe_status.setObjectName("actionMuted")
-        self.sisfe_status.setWordWrap(True)
-        actions_layout.addWidget(self.sisfe_status)
-        self.sisfe_connect_button = QPushButton("Abrir SISFE")
-        self.sisfe_connect_button.setObjectName("onDark")
-        self.sisfe_connect_button.clicked.connect(self.open_sisfe_session)
-        actions_layout.addWidget(self.sisfe_connect_button)
-        self.sisfe_sync_button = QPushButton("Sincronizar")
-        self.sisfe_sync_button.setObjectName("onDark")
-        self.sisfe_sync_button.clicked.connect(self.sync_sisfe)
-        actions_layout.addWidget(self.sisfe_sync_button)
         actions_layout.addStretch()
         last_label = QLabel("ÚLTIMO RESULTADO")
         last_label.setObjectName("professionalLabel")
@@ -2004,16 +2038,6 @@ class MainWindow(QMainWindow):
         self.last_output.setWordWrap(True)
         actions_layout.addWidget(self.last_output)
         workspace_layout.addWidget(actions_card)
-
-        self.preparation_dialog = QDialog(self)
-        self.preparation_dialog.setWindowTitle("Preparar documental")
-        self.preparation_dialog.setMinimumSize(650, 620)
-        dialog_layout = QVBoxLayout(self.preparation_dialog)
-        dialog_layout.setContentsMargins(14, 14, 14, 14)
-        dialog_layout.addWidget(preparation_card, 1)
-        dialog_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        dialog_buttons.rejected.connect(self.preparation_dialog.hide)
-        dialog_layout.addWidget(dialog_buttons)
 
         workspace_outer.addWidget(self.workspace, 1)
         body.addWidget(workspace_wrap, 1)
@@ -2035,9 +2059,8 @@ class MainWindow(QMainWindow):
         self.rename_shortcut.activated.connect(self.rename_selected_file)
 
     def open_preparation_dialog(self):
-        self.preparation_dialog.show()
-        self.preparation_dialog.raise_()
-        self.preparation_dialog.activateWindow()
+        self.work_tabs.setCurrentIndex(self.compilation_tab_index)
+        self.compilation.setFocus()
 
     def reload_professionals(self):
         self.professional_combo.blockSignals(True)
@@ -2437,15 +2460,13 @@ class MainWindow(QMainWindow):
                 f"Contenido: {observation}\n"
                 f"Disponible: {', '.join(attachments) if attachments else 'sin adjuntos'}"
             )
-            open_button = box.addButton("Abrir en SISFE", QMessageBox.ButtonRole.ActionRole)
-            download_button = None
-            if detail.get("has_primary_document") or detail.get("has_additional_documents"):
-                download_button = box.addButton("Descargar desde SISFE", QMessageBox.ButtonRole.ActionRole)
+            open_button = box.addButton(
+                "Abrir expediente en SISFE",
+                QMessageBox.ButtonRole.ActionRole,
+            )
             box.addButton(QMessageBox.StandardButton.Close)
             box.exec()
             if box.clickedButton() is open_button:
-                self.open_sisfe_case(str(detail.get("remote_case_id") or ""))
-            elif download_button is not None and box.clickedButton() is download_button:
                 self.open_sisfe_case(str(detail.get("remote_case_id") or ""))
 
         self._sisfe_login_dialog.request_movement_detail(
@@ -2706,7 +2727,7 @@ class MainWindow(QMainWindow):
         if self._loading_metadata or not self.case:
             return False
         metadata = dict(self._loaded_metadata)
-        for field in CASE_FIELDS:
+        for field in VISIBLE_CASE_FIELDS:
             value = self.metadata_edits[field].text().strip()
             if value:
                 metadata[field] = value
@@ -2845,6 +2866,19 @@ class MainWindow(QMainWindow):
         self.case_files.blockSignals(True)
         self.case_files.clear()
         if self.case:
+            document_categories: dict[Path, str] = {}
+            try:
+                with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                    expediente = database.find_expediente_by_folder(self.case.path)
+                    if expediente:
+                        document_categories = {
+                            (self.case.path / document.relative_path).resolve(): document.category
+                            for document in database.list_documents(expediente.id)
+                        }
+            except (OSError, RuntimeError, sqlite3.Error):
+                # La carpeta sigue siendo la fuente principal; una etiqueta no
+                # debe impedir mostrar sus archivos.
+                document_categories = {}
             current = self.case_directory or self.case.path
             if not current.is_dir() or not self.path_is_inside_case(current):
                 current = self.case.path
@@ -2857,7 +2891,8 @@ class MainWindow(QMainWindow):
                 key=lambda path: (0 if path.is_dir() else 1, path.name.casefold()),
             )
             for path in entries:
-                label = self.case_file_label(path)
+                category = document_categories.get(path.resolve(), "otro")
+                label = self.case_file_label(path, category)
                 item = QListWidgetItem(label)
                 item.setIcon(self.icon_for_path(path))
                 item.setData(PATH_ROLE, str(path))
@@ -2867,6 +2902,11 @@ class MainWindow(QMainWindow):
                     item.setToolTip(
                         f"{self.case_file_description(path)}\n{path}\n"
                         f"{human_size(path.stat().st_size)}"
+                        + (
+                            f"\nClasificación: {self.document_category_label(category)}"
+                            if category != "otro"
+                            else ""
+                        )
                     )
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
                 self.case_files.addItem(item)
@@ -2907,7 +2947,16 @@ class MainWindow(QMainWindow):
             return "Documento PDF"
         return "Archivo del caso"
 
-    def case_file_label(self, path: Path) -> str:
+    @staticmethod
+    def document_category_label(category: str) -> str:
+        return {
+            "judicial": "JUDICIAL",
+            "parte": "ESCRITO DE PARTE",
+            "cedula": "CÉDULA",
+            "audiencia": "AUDIENCIA",
+        }.get(category, "OTRO")
+
+    def case_file_label(self, path: Path, category: str = "otro") -> str:
         if path.is_dir():
             return path.name
         description = self.case_file_description(path)
@@ -2916,8 +2965,12 @@ class MainWindow(QMainWindow):
             "PDF final para firmar o presentar": "PARA FIRMAR",
             "PDF firmado": "FIRMADO",
         }
-        tag = labels.get(description)
-        return f"{path.name}    · {tag}" if tag else path.name
+        tags = []
+        if labels.get(description):
+            tags.append(labels[description])
+        if category != "otro":
+            tags.append(self.document_category_label(category))
+        return f"{path.name}    · {' · '.join(tags)}" if tags else path.name
 
     def go_up_case_folder(self):
         if not self.case or not self.case_directory:
@@ -3095,6 +3148,7 @@ class MainWindow(QMainWindow):
                 expediente = database.import_case(self.case)
                 database.add_document(expediente.id, path.relative_to(self.case.path), source="local")
                 database.set_document_category(expediente.id, path.relative_to(self.case.path), category)
+            self.reload_case_files(path)
             self.statusBar().showMessage(f"Documento clasificado: {category}", 3000)
         except (OSError, ValueError, sqlite3.Error) as error:
             QMessageBox.warning(self, "No pudimos clasificar el documento", str(error))
@@ -3220,7 +3274,10 @@ class MainWindow(QMainWindow):
             return False
 
     def add_selected_to_compilation(self):
+        before = self.compilation.count()
         self.add_paths_to_compilation(self.selected_case_paths())
+        if self.compilation.count() > before:
+            self.open_preparation_dialog()
 
     def compilable_files(self, paths: list[Path]) -> list[Path]:
         result: list[Path] = []
@@ -3306,6 +3363,8 @@ class MainWindow(QMainWindow):
         self.compilation_count.setText(
             f"{count} elemento" if count == 1 else f"{count} elementos"
         )
+        if hasattr(self, "work_tabs"):
+            self.work_tabs.setTabText(self.compilation_tab_index, f"Compilación · {count}")
 
     def compilation_paths(self) -> list[Path]:
         return [
@@ -3452,10 +3511,11 @@ class MainWindow(QMainWindow):
             return
         paths = self.compilation_paths()
         if not paths:
+            self.open_preparation_dialog()
             QMessageBox.information(
                 self,
                 "Faltan archivos",
-                "Arrastrá la documental y el escrito al cuadro de compilación.",
+                "Agregá la documental y el escrito en la pestaña Compilación.",
             )
             return
         if not self.confirm_pending_metadata_change():
@@ -3550,6 +3610,7 @@ class MainWindow(QMainWindow):
         self.last_compiled = result.output
         self.last_output.setText(f"{result.output.name}\n{human_size(result.output.stat().st_size)}")
         self.case_directory = result.output.parent
+        self.work_tabs.setCurrentIndex(self.files_tab_index)
         self.reload_case_files(result.output)
         self.update_output_preview()
         if result.exceeds_limit:
