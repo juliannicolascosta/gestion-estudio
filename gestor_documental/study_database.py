@@ -17,7 +17,7 @@ from .models import Case
 from .services import read_case_metadata
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DATABASE_NAME = ".gestor-estudio.sqlite3"
 
 
@@ -70,6 +70,10 @@ class StudyDatabase:
         if current < 3:
             self._migrate_to_3()
             self.connection.execute("PRAGMA user_version = 3")
+            current = 3
+        if current < 4:
+            self._migrate_to_4()
+            self.connection.execute("PRAGMA user_version = 4")
         self.connection.commit()
 
     def _migrate_to_1(self):
@@ -146,6 +150,9 @@ class StudyDatabase:
         self.connection.execute(
             "ALTER TABLE expedientes ADD COLUMN tribunal TEXT NOT NULL DEFAULT ''"
         )
+
+    def _migrate_to_4(self):
+        self.connection.execute("ALTER TABLE documentos ADD COLUMN category TEXT NOT NULL DEFAULT 'otro'")
         self.connection.execute(
             """
             CREATE UNIQUE INDEX movimientos_logical_identity
@@ -305,6 +312,18 @@ class StudyDatabase:
         ).fetchone()
         return self._expediente_from_row(row) if row else None
 
+    def set_document_category(self, expediente_id: str, relative_path: Path, category: str) -> None:
+        allowed = {"judicial", "parte", "cedula", "audiencia", "otro"}
+        normalized = category.strip().casefold()
+        if normalized not in allowed:
+            raise ValueError("La categoría de documento no es válida.")
+        path = Path(relative_path).as_posix()
+        self.connection.execute(
+            "UPDATE documentos SET category = ? WHERE expediente_id = ? AND relative_path = ?",
+            (normalized, expediente_id, path),
+        )
+        self.connection.commit()
+
     def list_recent_movements(self, expediente_id: str, limit: int = 20) -> list[Movimiento]:
         """Return newest operational movements first for the expediente inbox."""
         rows = self.connection.execute(
@@ -324,6 +343,7 @@ class StudyDatabase:
         *,
         sha256: str = "",
         source: str = "local",
+        category: str = "otro",
     ) -> Documento:
         """Register a file reference; the file remains in its case folder."""
         relative_path = Path(relative_path)
@@ -345,13 +365,14 @@ class StudyDatabase:
             relative_path=Path(normalized_path),
             sha256=sha256.strip().lower(),
             source=source.strip() or "local",
+            category=category.strip().casefold() or "otro",
         )
         self.connection.execute(
             """
-            INSERT INTO documentos (id, expediente_id, relative_path, sha256, source, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO documentos (id, expediente_id, relative_path, sha256, source, category, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (record.id, record.expediente_id, normalized_path, record.sha256, record.source, now),
+            (record.id, record.expediente_id, normalized_path, record.sha256, record.source, record.category, now),
         )
         self._audit("documento", record.id, "registered", now)
         self.connection.commit()
@@ -468,6 +489,7 @@ class StudyDatabase:
             relative_path=Path(row["relative_path"]),
             sha256=row["sha256"],
             source=row["source"],
+            category=row["category"] if "category" in row.keys() else "otro",
         )
 
     @staticmethod

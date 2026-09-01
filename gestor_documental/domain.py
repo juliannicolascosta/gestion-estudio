@@ -48,6 +48,7 @@ class Documento:
     relative_path: Path
     sha256: str = ""
     source: str = "local"
+    category: str = "otro"
 
 
 @dataclass(frozen=True)

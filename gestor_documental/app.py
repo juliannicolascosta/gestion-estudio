@@ -3033,9 +3033,30 @@ class MainWindow(QMainWindow):
                 menu.addAction("Usar como escrito", lambda: self.set_current_writing(path))
             if path.is_file() and path.suffix.lower() == ".pdf":
                 menu.addAction("Generar cédula…", lambda: self.generate_cedula_from_pdf(path))
+                classify = menu.addMenu("Clasificar documento")
+                for category, label in (
+                    ("judicial", "Judicial · decreto o proveído"),
+                    ("parte", "Escrito de parte"),
+                    ("cedula", "Cédula"),
+                    ("audiencia", "Audiencia"),
+                    ("otro", "Otro documento"),
+                ):
+                    classify.addAction(label, lambda checked=False, value=category: self.set_document_category(path, value))
             menu.addSeparator()
             menu.addAction("Enviar a la Papelera", self.remove_selected_case_files)
         menu.exec(self.case_files.mapToGlobal(point))
+
+    def set_document_category(self, path: Path, category: str):
+        if not self.case:
+            return
+        try:
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                expediente = database.import_case(self.case)
+                database.add_document(expediente.id, path.relative_to(self.case.path), source="local")
+                database.set_document_category(expediente.id, path.relative_to(self.case.path), category)
+            self.statusBar().showMessage(f"Documento clasificado: {category}", 3000)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "No pudimos clasificar el documento", str(error))
 
     def generate_cedula_from_pdf(self, pdf: Path):
         if not self.case or self._cedula_thread is not None:
