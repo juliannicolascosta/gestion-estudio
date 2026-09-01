@@ -172,26 +172,40 @@ def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
             const movement = (news.lista || []).find(row => String(row.id || '') === movementId);
             if (!movement) throw new Error('SISFE no devolvió el movimiento seleccionado');
             const documents = [];
+            const warnings = [];
+            const tryDownload = async (label, download) => {{
+              try {{
+                documents.push(await download());
+              }} catch (error) {{
+                warnings.push(label + ': ' + String(error.message || error));
+              }}
+            }};
             if (movement.adjunto1 != null) {{
-              documents.push(await getPdf(
+              await tryDownload('Documento principal', () => getPdf(
                 '/iol/actuaciones/findDocumentoAdjuntoById?idActuacion=' + encodeURIComponent(movementId),
                 'Movimiento SISFE ' + movementId + '.pdf',
                 'findDocumentoAdjuntoById'
               ));
             }}
             if (movement.adjunto3 != null) {{
-              const attached = await getJson('/iol/cargos/findDocumentosAdjuntosById?idCargo=' +
-                encodeURIComponent(movementId));
-              for (const row of (attached.lista || [])) {{
-                documents.push(await getPdf(
+              try {{
+                const attached = await getJson('/iol/cargos/findDocumentosAdjuntosById?idCargo=' +
+                  encodeURIComponent(movementId));
+                for (const row of (attached.lista || [])) {{
+                  await tryDownload('Adjunto de cargo', () => getPdf(
                   '/iol/cargos/findDocumentoAdjuntoByAdjuntoCargoId?idAdjuntoCargo=' +
                     encodeURIComponent(row.idAdjuntoCargo),
                   String(row.adjunto || ('Adjunto SISFE ' + row.idAdjuntoCargo + '.pdf')),
                   'findDocumentoAdjuntoByAdjuntoCargoId'
-                ));
+                  ));
+                }}
+              }} catch (error) {{
+                warnings.push('Adjuntos de cargo: ' + String(error.message || error));
               }}
             }}
-            if (!documents.length) throw new Error('Este movimiento no tiene documentos descargables');
+            if (!documents.length) {{
+              throw new Error(warnings.join(' · ') || 'Este movimiento no tiene documentos descargables');
+            }}
             window.__gestorSisfeDocuments = {{
               ok: true,
               cuij: target,
@@ -202,7 +216,8 @@ def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
                 title: String(movement.novedad || movement.tipoActuacion || 'Movimiento SISFE'),
                 occurred_at: movement.fecha || null,
                 documents: documents
-              }}]
+              }}],
+              warnings: warnings
             }};
           }} catch (error) {{
             window.__gestorSisfeDocuments = {{ok: false, error: String(error.message || error)}};
@@ -276,6 +291,9 @@ def snapshot_from_browser_payload(payload: dict) -> SisfeCaseSnapshot:
         title=str(payload.get("title", "")),
         tribunal=str(payload.get("tribunal", "")),
         movements=movements,
+        download_warnings=tuple(
+            str(warning) for warning in payload.get("warnings", []) if str(warning).strip()
+        ),
     )
 
 

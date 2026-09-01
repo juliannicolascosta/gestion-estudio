@@ -48,6 +48,9 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("findDocumentoAdjuntoByAdjuntoCargoId'", script)
         self.assertIn("grecaptcha.execute", script)
         self.assertIn("FileReader", script)
+        self.assertIn("Documento principal", script)
+        self.assertIn("Adjunto de cargo", script)
+        self.assertIn("warnings: warnings", script)
         self.assertNotIn("document.cookie", script)
 
     def test_browser_payload_maps_to_import_snapshot(self):
@@ -88,6 +91,12 @@ class SisfeBrowserTests(unittest.TestCase):
         )
         self.assertEqual(snapshot.movements[0].documents[0].name, "resolucion.pdf")
         self.assertEqual(snapshot.movements[0].documents[0].content, content)
+
+    def test_browser_payload_preserves_partial_download_warnings(self):
+        snapshot = snapshot_from_browser_payload(
+            {"ok": True, "cuij": "21123456789", "warnings": ["Documento principal: SISFE devolvió 500"]}
+        )
+        self.assertEqual(snapshot.download_warnings, ("Documento principal: SISFE devolvió 500",))
 
     def test_browser_error_is_not_imported(self):
         with self.assertRaises(RuntimeError):

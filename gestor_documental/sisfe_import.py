@@ -44,6 +44,7 @@ class SisfeCaseSnapshot:
     title: str = ""
     tribunal: str = ""
     movements: tuple[SisfeMovementPayload, ...] = ()
+    download_warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -2383,6 +2383,14 @@ class MainWindow(QMainWindow):
                 f"SISFE: {result.documents_registered} documento(s) guardado(s) en el caso",
                 6000,
             )
+            if snapshot.download_warnings:
+                QMessageBox.warning(
+                    self,
+                    "Descarga parcial desde SISFE",
+                    "Se guardaron los documentos disponibles. Estos archivos no pudieron descargarse:\n\n"
+                    + "\n".join(snapshot.download_warnings)
+                    + "\n\nPodés abrir el expediente en SISFE para descargarlos manualmente.",
+                )
 
         self._sisfe_login_dialog.request_movement_documents(
             cuij,
