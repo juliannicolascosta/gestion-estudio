@@ -1714,8 +1714,8 @@ class MainWindow(QMainWindow):
 
         workspace_wrap = QWidget()
         workspace_outer = QVBoxLayout(workspace_wrap)
-        workspace_outer.setContentsMargins(20, 16, 20, 18)
-        workspace_outer.setSpacing(12)
+        workspace_outer.setContentsMargins(20, 10, 20, 12)
+        workspace_outer.setSpacing(8)
 
         case_header = QHBoxLayout()
         case_title_stack = QVBoxLayout()
@@ -1740,6 +1740,7 @@ class MainWindow(QMainWindow):
         decorate_button(self.open_case_button, "folder-open")
         self.open_case_button.clicked.connect(self.open_case_folder)
         case_header.addWidget(self.open_case_button)
+        self.open_case_button.hide()
         workspace_outer.addLayout(case_header)
 
         self.workspace = QWidget()
@@ -1859,20 +1860,31 @@ class MainWindow(QMainWindow):
             self.open_selected_file,
             bordered=True,
         )
+        open_case_root = icon_button(
+            "folder-open",
+            "Abrir la carpeta principal del caso",
+            self.open_case_folder,
+            bordered=True,
+        )
         add_to_compile = QPushButton("A compilación")
         add_to_compile.setObjectName("green")
         decorate_button(add_to_compile, "arrow-right", "#FFFFFF")
         add_to_compile.setToolTip("Agregar la selección a la compilación")
         add_to_compile.clicked.connect(self.add_selected_to_compilation)
+        self.prepare_documents_button = QPushButton("Preparar documental")
+        decorate_button(self.prepare_documents_button, "layers")
+        self.prepare_documents_button.clicked.connect(self.open_preparation_dialog)
         files_actions.addWidget(self.files_back)
         files_actions.addWidget(add_files)
         files_actions.addWidget(add_folder)
         files_actions.addWidget(open_selected)
+        files_actions.addWidget(open_case_root)
         files_actions.addStretch()
         files_actions.addWidget(add_to_compile)
+        files_actions.addWidget(self.prepare_documents_button)
         files_layout.addLayout(files_actions)
         information_column.addWidget(files_card)
-        information_column.setSizes([185, 150, 480])
+        information_column.setSizes([155, 125, 620])
         workspace_layout.addWidget(information_column, 7)
 
         preparation_card, preparation_layout = make_card()
@@ -1927,8 +1939,6 @@ class MainWindow(QMainWindow):
         prep_actions.addWidget(move_down)
         prep_actions.addStretch()
         preparation_layout.addLayout(prep_actions)
-        workspace_layout.addWidget(preparation_card, 3)
-
         actions_card, actions_layout = make_card("actionCard")
         actions_card.setFixedWidth(235)
         actions_title = QLabel("Preparar presentación")
@@ -1995,6 +2005,16 @@ class MainWindow(QMainWindow):
         actions_layout.addWidget(self.last_output)
         workspace_layout.addWidget(actions_card)
 
+        self.preparation_dialog = QDialog(self)
+        self.preparation_dialog.setWindowTitle("Preparar documental")
+        self.preparation_dialog.setMinimumSize(650, 620)
+        dialog_layout = QVBoxLayout(self.preparation_dialog)
+        dialog_layout.setContentsMargins(14, 14, 14, 14)
+        dialog_layout.addWidget(preparation_card, 1)
+        dialog_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        dialog_buttons.rejected.connect(self.preparation_dialog.hide)
+        dialog_layout.addWidget(dialog_buttons)
+
         workspace_outer.addWidget(self.workspace, 1)
         body.addWidget(workspace_wrap, 1)
         outer.addLayout(body, 1)
@@ -2013,6 +2033,11 @@ class MainWindow(QMainWindow):
         self.compile_shortcut.activated.connect(self.compile_pdf)
         self.rename_shortcut = QShortcut(QKeySequence("F2"), self)
         self.rename_shortcut.activated.connect(self.rename_selected_file)
+
+    def open_preparation_dialog(self):
+        self.preparation_dialog.show()
+        self.preparation_dialog.raise_()
+        self.preparation_dialog.activateWindow()
 
     def reload_professionals(self):
         self.professional_combo.blockSignals(True)
