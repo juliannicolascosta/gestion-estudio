@@ -1617,6 +1617,8 @@ class MainWindow(QMainWindow):
             color="#173F37",
         )
         top_layout.addWidget(add_professional, 0, Qt.AlignmentFlag.AlignBottom)
+        mev_settings = icon_button("settings", "Configurar acceso MEV del profesional", self.configure_mev_profile, bordered=True, color="#173F37")
+        top_layout.addWidget(mev_settings, 0, Qt.AlignmentFlag.AlignBottom)
         outer.addWidget(top)
 
         body = QHBoxLayout()
@@ -2033,6 +2035,19 @@ class MainWindow(QMainWindow):
         if accepted and name.strip():
             self.store.add_professional(name)
             self.reload_professionals()
+
+    def configure_mev_profile(self):
+        professional = self.professional_combo.currentText().strip()
+        if not professional:
+            return
+        profile = self.store.settings.mev_profiles.get(professional, {})
+        user, accepted = QInputDialog.getText(self, "Acceso MEV", "Usuario MEV:", text=profile.get("user", ""))
+        if not accepted:
+            return
+        department, accepted = QInputDialog.getText(self, "Acceso MEV", "Departamento judicial preferido:", text=profile.get("department", ""))
+        if accepted:
+            self.store.set_mev_profile(professional, user, department)
+            self.statusBar().showMessage("Preferencias MEV guardadas. La contraseña no se almacena.", 5000)
 
     def choose_study_root(self):
         initial = str(self.store.settings.study_root or Path.home())

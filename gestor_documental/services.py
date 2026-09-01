@@ -222,6 +222,11 @@ class SettingsStore:
             professionals=professionals,
             current_professional=current,
             signer_path=Path(signer) if signer else None,
+            mev_profiles={
+                str(name): {"user": str(data.get("user", "")), "department": str(data.get("department", ""))}
+                for name, data in (payload.get("mev_profiles", {}) or {}).items()
+                if isinstance(data, dict)
+            },
         )
 
     def save(self):
@@ -234,6 +239,7 @@ class SettingsStore:
             "professionals": self.settings.professionals,
             "current_professional": self.settings.current_professional,
             "signer_path": str(self.settings.signer_path) if self.settings.signer_path else None,
+            "mev_profiles": self.settings.mev_profiles,
         }
         self.config.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -279,6 +285,13 @@ class SettingsStore:
         if name in self.settings.professionals:
             self.settings.current_professional = name
             self.save()
+
+    def set_mev_profile(self, professional: str, user: str, department: str):
+        self.settings.mev_profiles[professional] = {
+            "user": " ".join(user.split()).strip(),
+            "department": " ".join(department.split()).strip(),
+        }
+        self.save()
 
     def set_signer(self, path: Path | None):
         self.settings.signer_path = path

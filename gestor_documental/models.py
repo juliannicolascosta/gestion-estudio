@@ -128,6 +128,7 @@ class AppSettings:
     professionals: list[str] = field(default_factory=list)
     current_professional: str = ""
     signer_path: Path | None = None
+    mev_profiles: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def study_root(self) -> Path | None:
