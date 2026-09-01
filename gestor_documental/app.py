@@ -498,9 +498,7 @@ class ExtendedMetadataDialog(QDialog):
             form.setVerticalSpacing(8)
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
             for field in section.fields:
-                label = QLabel(field.label)
-                label.setObjectName("muted")
-                label.setWordWrap(True)
+                label = self.template_field_label(field.label, template_variable_name(field.key))
                 editor = self._make_field_editor(field)
                 form.addRow(label, editor)
             card_layout.addLayout(form)
@@ -532,6 +530,32 @@ class ExtendedMetadataDialog(QDialog):
         editor.setToolTip(f"Variable para modelos: {{{{{template_variable_name(field.key)}}}}}")
         self.edits[field.key] = editor
         return editor
+
+    def template_field_label(self, label_text: str, variable_name: str) -> QWidget:
+        """Show each metadata field's Word code without making the form technical."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        label = QLabel(label_text)
+        label.setObjectName("muted")
+        label.setWordWrap(True)
+        code = f"{{{{{variable_name}}}}}"
+        copy = QPushButton(code)
+        copy.setFlat(True)
+        copy.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy.setToolTip("Copiar este código para usarlo en un modelo Word")
+        copy.clicked.connect(lambda: self.copy_template_code(code, copy))
+        layout.addWidget(label)
+        layout.addWidget(copy, 0, Qt.AlignmentFlag.AlignLeft)
+        return container
+
+    @staticmethod
+    def copy_template_code(code: str, button: QPushButton):
+        QApplication.clipboard().setText(code)
+        original = button.text()
+        button.setText("Copiado")
+        QTimer.singleShot(1200, lambda: button.setText(original) if button else None)
 
     def _add_repeated(self, parent_layout: QVBoxLayout, specifications):
         for spec in specifications:
@@ -572,8 +596,10 @@ class ExtendedMetadataDialog(QDialog):
         name_edit.setPlaceholderText("Nombre del dato")
         value_edit = QLineEdit(value)
         value_edit.setPlaceholderText("Valor")
-        variable = QLabel()
-        variable.setObjectName("muted")
+        variable = QPushButton()
+        variable.setFlat(True)
+        variable.setCursor(Qt.CursorShape.PointingHandCursor)
+        variable.setToolTip("Copiar este código para usarlo en un modelo Word")
         variable.setMinimumWidth(145)
 
         def refresh_variable(text: str):
@@ -581,6 +607,7 @@ class ExtendedMetadataDialog(QDialog):
 
         refresh_variable(name)
         name_edit.textChanged.connect(refresh_variable)
+        variable.clicked.connect(lambda: self.copy_template_code(variable.text(), variable))
         remove = icon_button("trash", "Quitar este campo", lambda: self.remove_custom_row(row_widget))
         row.addWidget(name_edit, 2)
         row.addWidget(value_edit, 3)
