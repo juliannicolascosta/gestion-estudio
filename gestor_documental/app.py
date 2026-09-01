@@ -2363,7 +2363,8 @@ class MainWindow(QMainWindow):
                 box.setIcon(QMessageBox.Icon.Warning)
                 box.setText(str(error))
                 open_button = box.addButton("Abrir en SISFE", QMessageBox.ButtonRole.ActionRole)
-                box.addButton(QMessageBox.StandardButton.Close)
+                close_button = box.addButton(QMessageBox.StandardButton.Close)
+                close_button.setText("Cerrar")
                 box.exec()
                 if box.clickedButton() is open_button:
                     self.open_sisfe_case(str(detail.get("remote_case_id") or ""))

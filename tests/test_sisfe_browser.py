@@ -42,6 +42,11 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("actuaciones/findDocumentoAdjuntoById", script)
         self.assertIn("cargos/findDocumentosAdjuntosById", script)
         self.assertIn("cargos/findDocumentoAdjuntoByAdjuntoCargoId", script)
+        self.assertIn("config/getRecaptchaVisible", script)
+        self.assertIn("config.sitekeyV3", script)
+        self.assertIn("findDocumentoAdjuntoById'", script)
+        self.assertIn("findDocumentoAdjuntoByAdjuntoCargoId'", script)
+        self.assertIn("grecaptcha.execute", script)
         self.assertIn("FileReader", script)
         self.assertNotIn("document.cookie", script)
 

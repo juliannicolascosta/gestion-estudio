@@ -109,8 +109,39 @@ def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
               if (!response.ok) throw new Error('SISFE devolvió ' + response.status + ' al consultar ' + path);
               return response.json();
             }};
-            const getPdf = async (path, fallbackName) => {{
-              const response = await fetch(path, options);
+            const captchaSetting = await getJson('/iol/config/getRecaptchaVisible');
+            const captchaRequired = captchaSetting === true || captchaSetting === 1 || captchaSetting === '1';
+            const captchaFor = async (action) => {{
+              if (!captchaRequired) return '';
+              const config = await getJson('/assets/config/config.json');
+              const siteKey = config.sitekeyV3;
+              if (!siteKey) throw new Error('SISFE no informó la configuración de CAPTCHA');
+              if (!window.grecaptcha || !window.grecaptcha.execute) {{
+                await new Promise((resolve, reject) => {{
+                  const existing = document.querySelector('script[data-gestor-recaptcha]');
+                  if (existing) {{
+                    existing.addEventListener('load', resolve, {{once: true}});
+                    existing.addEventListener('error', reject, {{once: true}});
+                    return;
+                  }}
+                  const script = document.createElement('script');
+                  script.src = 'https://www.google.com/recaptcha/api.js?render=' + encodeURIComponent(siteKey);
+                  script.async = true;
+                  script.dataset.gestorRecaptcha = 'true';
+                  script.onload = resolve;
+                  script.onerror = () => reject(new Error('No pudimos cargar la validación CAPTCHA'));
+                  document.head.appendChild(script);
+                }});
+              }}
+              await new Promise(resolve => window.grecaptcha.ready(resolve));
+              return window.grecaptcha.execute(siteKey, {{action: action}});
+            }};
+            const getPdf = async (path, fallbackName, captchaAction) => {{
+              const captcha = await captchaFor(captchaAction);
+              const requestPath = captcha
+                ? path + '&grecaptchaResponse=' + encodeURIComponent(captcha)
+                : path;
+              const response = await fetch(requestPath, options);
               if (!response.ok) {{
                 if (response.status === 401 || response.status === 403) {{
                   throw new Error('SISFE exige validar nuevamente la sesión o completar el CAPTCHA');
@@ -144,7 +175,8 @@ def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
             if (movement.adjunto1 != null) {{
               documents.push(await getPdf(
                 '/iol/actuaciones/findDocumentoAdjuntoById?idActuacion=' + encodeURIComponent(movementId),
-                'Movimiento SISFE ' + movementId + '.pdf'
+                'Movimiento SISFE ' + movementId + '.pdf',
+                'findDocumentoAdjuntoById'
               ));
             }}
             if (movement.adjunto3 != null) {{
@@ -154,7 +186,8 @@ def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
                 documents.push(await getPdf(
                   '/iol/cargos/findDocumentoAdjuntoByAdjuntoCargoId?idAdjuntoCargo=' +
                     encodeURIComponent(row.idAdjuntoCargo),
-                  String(row.adjunto || ('Adjunto SISFE ' + row.idAdjuntoCargo + '.pdf'))
+                  String(row.adjunto || ('Adjunto SISFE ' + row.idAdjuntoCargo + '.pdf')),
+                  'findDocumentoAdjuntoByAdjuntoCargoId'
                 ));
               }}
             }}
