@@ -591,6 +591,7 @@ def writing_template_values(
     case: Case,
     title: str,
     professional: str = "",
+    extra_values: dict[str, str] | None = None,
 ) -> dict[str, str]:
     metadata = read_case_metadata(case)
     actor = metadata.get("Actor", "").strip()
@@ -649,6 +650,10 @@ def writing_template_values(
     values["NOMBRE_CORTO"] = values["ACTOR_CORTO"]
     values["CUIJ_COMPLETO"] = f" (CUIJ N° {values['CUIJ']})" if values["CUIJ"] else ""
     values["PROFESIONAL_MAYUSCULAS"] = lawyer
+    for key, value in (extra_values or {}).items():
+        normalized = str(key).strip().strip("{}").strip()
+        if normalized:
+            values[normalized] = str(value)
     return {f"{{{{{key}}}}}": value for key, value in values.items()}
 
 
@@ -722,6 +727,7 @@ def create_writing(
     title: str,
     template: Path | None = None,
     professional: str = "",
+    extra_values: dict[str, str] | None = None,
 ) -> Path:
     stem = f"{date.today().isoformat()} - {safe_name(title).upper()}"
     path = unique_path(case.path / f"{stem}.docx")
@@ -733,7 +739,7 @@ def create_writing(
 
         document = Document(path)
         _set_spanish_argentina(document)
-        fill_writing_template(document, writing_template_values(case, title, professional))
+        fill_writing_template(document, writing_template_values(case, title, professional, extra_values))
         document.save(path)
         return path
 
@@ -753,7 +759,7 @@ def create_writing(
     caption_run.bold = True
     document.add_paragraph("Señor/a Juez/a:")
     document.add_paragraph("[Complete aquí el escrito]")
-    fill_writing_template(document, writing_template_values(case, title, professional))
+    fill_writing_template(document, writing_template_values(case, title, professional, extra_values))
     document.save(path)
     return path
 
