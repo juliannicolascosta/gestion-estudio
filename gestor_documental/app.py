@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import hashlib
 import sys
 import re
 import sqlite3
-import json
+import shutil
 from datetime import date, datetime
 from pathlib import Path
 from threading import Event
 
-from PyQt6.QtCore import QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QKeySequence, QPainter, QPalette, QShortcut
-from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest, QWebEnginePage, QWebEngineProfile
-from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QAction, QColor, QDrag, QIcon, QKeySequence, QPainter, QPalette, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -75,14 +72,14 @@ from .case_data import (
     raeo_missing_fields,
 )
 from .case_registry import recent_case_novedades, register_case_as_expediente
-from .sisfe_session import ManualSisfeSession
-from .sisfe_sync import SisfeSessionRequired, SisfeSnapshotProviderMissing, SisfeSyncCoordinator
-from .sisfe_browser import (
-    browser_movement_detail_script,
-    browser_sync_script,
-    browser_validation_script,
-    snapshot_from_browser_payload,
+from .compilation_draft import (
+    CompilationDraft,
+    DraftItem,
+    load_compilation_draft,
+    save_compilation_draft as persist_compilation_draft,
 )
+from .sisfe_session import ManualSisfeSession
+from .sisfe_sync import SisfePortalService
 from .icons import file_icon_name, ui_icon
 from .signing import (
     DigitalSignatureSession,
@@ -96,6 +93,7 @@ from .signing import (
 from .services import (
     SettingsStore,
     CompilationCancelled,
+    IMAGE_EXTENSIONS,
     PDF_EXTENSIONS,
     add_model,
     can_convert_to_pdf,
@@ -126,12 +124,12 @@ from .services import (
 )
 from .sisfe_extractor import extract_cedula_text
 from .study_database import StudyDatabase, study_database_path
+from .ui.compilation import CompilationList
+from .ui.operation_status import OperationState, OperationStatusIndicator
+from .ui.roles import MOVEMENT_ROLE, PATH_ROLE, ROOT_ROLE, TYPE_ROLE
+from .ui.sisfe import SisfeCaseBrowserDialog, SisfeLoginDialog
 
 
-PATH_ROLE = int(Qt.ItemDataRole.UserRole)
-TYPE_ROLE = PATH_ROLE + 1
-ROOT_ROLE = TYPE_ROLE + 1
-MOVEMENT_ROLE = ROOT_ROLE + 1
 ADD_PROFESSIONAL_LABEL = "Añadir nuevo profesional…"
 
 
@@ -197,9 +195,11 @@ QTreeWidget::item:selected, QListWidget::item:selected { background: #DCEAE4; co
 QListWidget#modelList { background: #F7F9F7; border: 1px solid #DDE3DF; border-radius: 10px; padding: 5px; }
 QListWidget#modelList::item { background: #FFFFFF; border: 1px solid transparent; padding: 11px; margin: 2px; }
 QListWidget#modelList::item:hover { background: #EDF4F1; color: #173F37; border-color: #C8DED5; }
-QListWidget#modelList::item:selected { background: #DCEAE4; color: #173F37; border-color: #87B6A7; }
+QListWidget#modelList::item:selected { background: #2B7564; color: #FFFFFF; border-color: #236353; }
+QListWidget#modelList::item:selected:hover { background: #236353; color: #FFFFFF; border-color: #173F37; }
 QFrame#actionCard QComboBox, QFrame#actionCard QLineEdit { background: #FFFFFF; color: #17211F; border: 0; }
-QSplitter::handle { background: transparent; width: 8px; }
+QSplitter::handle { background: #E2E8E4; width: 7px; height: 7px; }
+QSplitter::handle:hover { background: #BDD4C9; }
 QScrollArea { border: 0; background: transparent; }
 QTabWidget::pane { border: 0; background: transparent; top: -1px; }
 QTabBar::tab { background: #E7ECE9; color: #53635E; border: 0; border-radius: 8px; padding: 9px 14px; margin: 0 5px 7px 0; font-weight: 600; }
@@ -283,8 +283,21 @@ class ImportFileDialog(QDialog):
         layout.addWidget(self.name_edit)
         self.convert = QCheckBox("Convertir a PDF al agregar")
         self.convert.setVisible(can_convert_to_pdf(source))
-        self.convert.setChecked(can_convert_to_pdf(source))
+        self.convert.setChecked(False)
         layout.addWidget(self.convert)
+        self.image_mode_label = QLabel("Tratamiento de la imagen")
+        self.image_mode = QComboBox()
+        self.image_mode.addItem("Mantener color", "color")
+        self.image_mode.addItem("Escala de grises · archivo más liviano", "grayscale")
+        self.image_mode.addItem("Blanco y negro · máximo ahorro", "black_white")
+        is_image = source.suffix.casefold() in IMAGE_EXTENSIONS
+        self.image_mode_label.setVisible(False)
+        self.image_mode.setVisible(False)
+        if is_image:
+            self.convert.toggled.connect(self.image_mode_label.setVisible)
+            self.convert.toggled.connect(self.image_mode.setVisible)
+        layout.addWidget(self.image_mode_label)
+        layout.addWidget(self.image_mode)
         hint = QLabel("El original no se modifica. Si el nombre ya existe, se agrega un número.")
         hint.setObjectName("muted")
         hint.setWordWrap(True)
@@ -304,6 +317,10 @@ class ImportFileDialog(QDialog):
     @property
     def convert_to_pdf(self) -> bool:
         return can_convert_to_pdf(self.source) and self.convert.isChecked()
+
+    @property
+    def selected_image_mode(self) -> str:
+        return str(self.image_mode.currentData() or "color")
 
 
 class RepeatedRowsWidget(QFrame):
@@ -781,10 +798,19 @@ class ModelPickerDialog(QDialog):
         )
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Crear escrito")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
+        clear_button = self.buttons.addButton("Limpiar", QDialogButtonBox.ButtonRole.ResetRole)
+        clear_button.clicked.connect(self.clear_selection)
         self.buttons.accepted.connect(self.accept_if_valid)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
         self.filter_models("")
+
+    def clear_selection(self):
+        self.search.clear()
+        self.list.clearSelection()
+        self.list.setCurrentItem(None)
+        self.title_edit.clear()
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
 
     def filter_models(self, query: str):
         selected_path = self.selected_model
@@ -940,6 +966,18 @@ class CaseFilesList(QListWidget):
         )
 
     def keyPressEvent(self, event):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self.window().copy_selected_case_files()
+            event.accept()
+            return
+        if event.matches(QKeySequence.StandardKey.Cut):
+            self.window().cut_selected_case_files()
+            event.accept()
+            return
+        if event.matches(QKeySequence.StandardKey.Paste):
+            self.window().paste_case_files()
+            event.accept()
+            return
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.window().open_selected_file()
             event.accept()
@@ -982,65 +1020,6 @@ class QuickAccessList(CaseFilesList):
             event.accept()
             return
         QListWidget.keyPressEvent(self, event)
-
-
-class CompilationList(QListWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            paths = [Path(url.toLocalFile()) for url in event.mimeData().urls()]
-            self.window().handle_compilation_drop(paths)
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-            self.window().update_compilation_count()
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self.count():
-            return
-        painter = QPainter(self.viewport())
-        painter.setPen(QColor("#768681"))
-        font = QFont(self.font())
-        font.setPointSize(10)
-        painter.setFont(font)
-        painter.drawText(
-            self.viewport().rect().adjusted(24, 24, -24, -24),
-            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Arrastrá documental desde Archivos del caso o desde afuera\nEl escrito nuevo se agrega al final",
-        )
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Delete:
-            self.window().remove_from_compilation()
-            event.accept()
-            return
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            item = self.currentItem()
-            if item:
-                open_file(Path(item.data(PATH_ROLE)))
-            event.accept()
-            return
-        super().keyPressEvent(event)
 
 
 class CompileWorker(QObject):
@@ -1270,318 +1249,12 @@ class SignPdfDialog(QDialog):
         return self.reason_edit.text().strip()
 
 
-class SisfeLoginDialog(QDialog):
-    """Embedded manual login whose cookies live only for this process."""
-
-    def __init__(self, session: ManualSisfeSession, parent=None):
-        super().__init__(parent)
-        self.session = session
-        self.setWindowTitle("Iniciar sesión SISFE")
-        self.setMinimumSize(980, 720)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        note = QLabel(
-            "Completá el acceso de Matriculados y el CAPTCHA aquí. Las cookies se usan sólo "
-            "durante esta ejecución y no se guardan en el equipo."
-        )
-        note.setWordWrap(True)
-        note.setObjectName("muted")
-        layout.addWidget(note)
-        self.validation_status = QLabel("Completá Matriculados y CAPTCHA; luego validá la sesión.")
-        self.validation_status.setObjectName("muted")
-        self.validation_status.setWordWrap(True)
-        layout.addWidget(self.validation_status)
-        self.profile = QWebEngineProfile(self)
-        self.profile.setPersistentCookiesPolicy(
-            QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies
-        )
-        self.profile.cookieStore().cookieAdded.connect(self.capture_cookie)
-        self._sync_timer: QTimer | None = None
-        self.ready_for_sync = False
-        self.browser = QWebEngineView()
-        self.browser.setPage(QWebEnginePage(self.profile, self.browser))
-        layout.addWidget(self.browser, 1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        self.use_session_button = buttons.addButton("Validar sesión", QDialogButtonBox.ButtonRole.AcceptRole)
-        self.use_session_button.clicked.connect(self.accept_manual_session)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        self.session.mark_portal_opened()
-        self._validate_after_load = False
-        self.browser.setUrl(QUrl("https://sisfe.justiciasantafe.gov.ar/"))
-        self.browser.loadFinished.connect(self.portal_loaded)
-
-    def portal_loaded(self, ok: bool):
-        path = self.browser.url().path().rstrip("/")
-        self.ready_for_sync = bool(ok and path == "/buscar-expediente")
-        if self._validate_after_load:
-            self._validate_after_load = False
-            if self.ready_for_sync:
-                self.validate_loaded_session()
-            else:
-                self.validation_status.setText("No pudimos abrir el área de expedientes de SISFE. Reintentá.")
-                self.use_session_button.setEnabled(True)
-
-    def capture_cookie(self, cookie):
-        name = bytes(cookie.name()).decode("utf-8", "ignore")
-        value = bytes(cookie.value()).decode("utf-8", "ignore")
-        self.session.attach_runtime_cookie(name, value, cookie.domain(), cookie.path())
-
-    def accept_manual_session(self):
-        # SISFE authorizes its internal endpoints from this application route.
-        self.ready_for_sync = False
-        self._validate_after_load = True
-        self.use_session_button.setEnabled(False)
-        self.validation_status.setText("Abriendo el área de expedientes y validando la sesión…")
-        self.browser.setUrl(QUrl("https://sisfe.justiciasantafe.gov.ar/buscar-expediente"))
-
-    def validate_loaded_session(self):
-        self.browser.page().runJavaScript(browser_validation_script())
-        timer = QTimer(self)
-        timer.setInterval(250)
-        elapsed = {"milliseconds": 0}
-        self._sync_timer = timer
-
-        def poll():
-            elapsed["milliseconds"] += 250
-            self.browser.page().runJavaScript(
-                "window.__gestorSisfeValidation === null ? null : "
-                "JSON.stringify(window.__gestorSisfeValidation)",
-                lambda value: finish(value) if value else None,
-            )
-            if elapsed["milliseconds"] >= 15000:
-                timer.stop()
-                self._sync_timer = None
-                self.validation_status.setText("SISFE demoró en validar. Esperá y presioná Validar sesión otra vez.")
-                self.use_session_button.setEnabled(True)
-
-        def finish(value):
-            if not value or not timer.isActive():
-                return
-            timer.stop()
-            self._sync_timer = None
-            try:
-                result = json.loads(str(value))
-            except (TypeError, ValueError):
-                result = {"ok": False, "error": "SISFE devolvió una validación inválida."}
-            if not isinstance(result, dict):
-                result = {"ok": False, "error": "SISFE devolvió una validación inválida."}
-            if result.get("ok"):
-                self.session.confirm_manual_login()
-                self.ready_for_sync = True
-                self.accept()
-                return
-            detail = result.get("status") or result.get("error") or "sin detalle"
-            self.validation_status.setText(
-                f"SISFE todavía no autorizó la sesión ({detail}). Esperá o completá el CAPTCHA y reintentá."
-            )
-            self.use_session_button.setEnabled(True)
-
-        timer.timeout.connect(poll)
-        timer.start()
-
-    def request_snapshot(self, cuij: str, completed):
-        """Query SISFE from its own browser context and return a plain snapshot."""
-        if not self.ready_for_sync:
-            completed(None, RuntimeError("SISFE todavía está preparando el área de expedientes."))
-            return
-        script = browser_sync_script(cuij)
-        self.browser.page().runJavaScript(script)
-        elapsed = {"milliseconds": 0}
-        timer = QTimer(self)
-        timer.setInterval(250)
-        self._sync_timer = timer
-
-        def poll():
-            elapsed["milliseconds"] += 250
-            self.browser.page().runJavaScript(
-                "window.__gestorSisfeResult === null ? null : "
-                "JSON.stringify(window.__gestorSisfeResult)",
-                lambda value: finish(value) if value else None,
-            )
-            if elapsed["milliseconds"] >= 60000:
-                timer.stop()
-                self._sync_timer = None
-                completed(None, RuntimeError("SISFE demoró demasiado en responder."))
-
-        def finish(value):
-            if not value or not timer.isActive():
-                return
-            timer.stop()
-            self._sync_timer = None
-            try:
-                payload = json.loads(str(value))
-                completed(snapshot_from_browser_payload(payload), None)
-            except Exception as error:
-                completed(None, error)
-
-        timer.timeout.connect(poll)
-        timer.start()
-
-    def request_movement_detail(self, cuij: str, movement_id: str, completed):
-        self._request_json_result(
-            browser_movement_detail_script(cuij, movement_id),
-            "__gestorSisfeMovement",
-            45000,
-            completed,
-        )
-
-    def _request_json_result(self, script: str, result_name: str, timeout_ms: int, completed):
-        if self._sync_timer and self._sync_timer.isActive():
-            completed(None, RuntimeError("SISFE todavía está procesando otra consulta."))
-            return
-        self.browser.page().runJavaScript(script)
-        timer = QTimer(self)
-        timer.setInterval(250)
-        elapsed = {"milliseconds": 0}
-        self._sync_timer = timer
-
-        def poll():
-            elapsed["milliseconds"] += 250
-            expression = f"window.{result_name} === null ? null : JSON.stringify(window.{result_name})"
-            self.browser.page().runJavaScript(
-                expression,
-                lambda value: finish(value) if value else None,
-            )
-            if elapsed["milliseconds"] >= timeout_ms:
-                timer.stop()
-                self._sync_timer = None
-                completed(None, RuntimeError("SISFE demoró demasiado en responder."))
-
-        def finish(value):
-            if not value or not timer.isActive():
-                return
-            timer.stop()
-            self._sync_timer = None
-            try:
-                payload = json.loads(str(value))
-            except (TypeError, ValueError) as error:
-                completed(None, RuntimeError("SISFE devolvió una respuesta inválida."))
-                return
-            if not isinstance(payload, dict):
-                completed(None, RuntimeError("SISFE devolvió una respuesta inválida."))
-                return
-            if not payload.get("ok"):
-                completed(None, RuntimeError(str(payload.get("error") or "SISFE no pudo completar la consulta.")))
-                return
-            completed(payload, None)
-
-        timer.timeout.connect(poll)
-        timer.start()
-
-
-class SisfeCaseBrowserDialog(QDialog):
-    """Official SISFE view that saves user-initiated downloads into one case."""
-
-    def __init__(self, profile: QWebEngineProfile, remote_case_id: str, case: Case, parent=None):
-        super().__init__(parent)
-        self.profile = profile
-        self.case = case
-        self._downloads: dict[int, Path] = {}
-        self.setWindowTitle("Expediente en SISFE")
-        self.setMinimumSize(1050, 760)
-        layout = QVBoxLayout(self)
-        note = QLabel(
-            "Vista oficial de SISFE. Descargá con los iconos del portal; los archivos se guardarán "
-            "automáticamente en Documentos SISFE de este expediente."
-        )
-        note.setObjectName("muted")
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        self.download_status = QLabel("Sin descargas en curso")
-        self.download_status.setObjectName("muted")
-        layout.addWidget(self.download_status)
-        self.browser = QWebEngineView()
-        self.browser.setPage(QWebEnginePage(profile, self.browser))
-        self.browser.setUrl(
-            QUrl(f"https://sisfe.justiciasantafe.gov.ar/detalle-expediente/{remote_case_id}")
-        )
-        layout.addWidget(self.browser, 1)
-        self.profile.downloadRequested.connect(self.save_official_download)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def save_official_download(self, download: QWebEngineDownloadRequest):
-        directory = self.case.path / "Documentos SISFE"
-        directory.mkdir(parents=True, exist_ok=True)
-        filename = normalize_filename(download.suggestedFileName() or "Documento SISFE.pdf")
-        target = unique_path(directory / filename)
-        self._downloads[id(download)] = target
-        self.download_status.setText(f"Descargando {target.name}…")
-        download.setDownloadDirectory(str(target.parent))
-        download.setDownloadFileName(target.name)
-        download.stateChanged.connect(
-            lambda state, request=download: self.finish_official_download(request, state)
-        )
-        download.accept()
-
-    def finish_official_download(self, download: QWebEngineDownloadRequest, state):
-        terminal_states = {
-            QWebEngineDownloadRequest.DownloadState.DownloadCompleted,
-            QWebEngineDownloadRequest.DownloadState.DownloadCancelled,
-            QWebEngineDownloadRequest.DownloadState.DownloadInterrupted,
-        }
-        if state not in terminal_states:
-            return
-        target = self._downloads.pop(id(download), None)
-        if state == QWebEngineDownloadRequest.DownloadState.DownloadCancelled:
-            self.download_status.setText("Descarga cancelada")
-            return
-        if state == QWebEngineDownloadRequest.DownloadState.DownloadInterrupted:
-            detail = download.interruptReasonString() or "SISFE interrumpió la descarga"
-            self.download_status.setText("No se pudo completar la descarga")
-            QMessageBox.warning(self, "Descarga SISFE interrumpida", detail)
-            return
-        if not target or not target.is_file():
-            self.download_status.setText("SISFE no generó el archivo esperado")
-            return
-        try:
-            digest = hashlib.sha256(target.read_bytes()).hexdigest()
-            duplicate = False
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
-                expediente = database.import_case(self.case)
-                existing = database.find_document_by_sha256(expediente.id, digest)
-                existing_path = self.case.path / existing.relative_path if existing else None
-                duplicate = bool(existing_path and existing_path.is_file())
-                if not duplicate:
-                    database.add_document(
-                        expediente.id,
-                        target.relative_to(self.case.path),
-                        sha256=digest,
-                        source="sisfe",
-                    )
-            if duplicate:
-                move_to_recycle_bin([target])
-                self.download_status.setText("El documento ya estaba guardado; no se creó otra copia")
-            else:
-                self.download_status.setText(f"Guardado: {target.name}")
-            parent = self.parent()
-            if isinstance(parent, MainWindow):
-                parent.reload_case_files()
-                message = (
-                    "SISFE: el documento ya estaba guardado"
-                    if duplicate
-                    else f"SISFE: archivo guardado en {target.parent.name}"
-                )
-                parent.statusBar().showMessage(message, 6000)
-        except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
-            QMessageBox.warning(self, "Documento descargado", f"El archivo se descargó, pero no pudimos registrarlo: {error}")
-
-    def closeEvent(self, event):
-        try:
-            self.profile.downloadRequested.disconnect(self.save_official_download)
-        except TypeError:
-            pass
-        super().closeEvent(event)
-
-
 class MainWindow(QMainWindow):
     def __init__(self, store: SettingsStore | None = None):
         super().__init__()
         self.store = store or SettingsStore()
         self.sisfe_session = ManualSisfeSession()
-        self.sisfe_sync = SisfeSyncCoordinator(self.sisfe_session)
+        self.sisfe_portal = SisfePortalService(self.sisfe_session)
         self.base_template = ensure_default_writing_template(self.store.base_template)
         self.case: Case | None = None
         self.current_writing: Path | None = None
@@ -1592,6 +1265,8 @@ class MainWindow(QMainWindow):
         self._loading_files = False
         self._loading_quick = False
         self._loading_metadata = False
+        self._loading_compilation = False
+        self._loading_pending = False
         self._metadata_editing = False
         self._metadata_dirty = False
         self._loaded_metadata: dict[str, str] = {}
@@ -1605,8 +1280,22 @@ class MainWindow(QMainWindow):
         self._signer_dialog: SignerDropDialog | None = None
         self._sisfe_login_dialog: SisfeLoginDialog | None = None
         self._sisfe_case_dialog: SisfeCaseBrowserDialog | None = None
+        self._sisfe_download_request: tuple[str, dict] | None = None
+        self._cut_paths: list[Path] = []
         self._directory_expanded = False
         self._quick_access_collapsed = False
+        self._restoring_layout = True
+        self._visible_workspace_sizes = [930, 285]
+        self._layout_save_timer = QTimer(self)
+        self._layout_save_timer.setSingleShot(True)
+        self._layout_save_timer.setInterval(350)
+        self._layout_save_timer.timeout.connect(self.save_layout_state)
+        self._file_refresh_timer = QTimer(self)
+        self._file_refresh_timer.setSingleShot(True)
+        self._file_refresh_timer.setInterval(300)
+        self._file_refresh_timer.timeout.connect(self.reload_case_files)
+        self._file_watcher = QFileSystemWatcher(self)
+        self._file_watcher.directoryChanged.connect(self.schedule_case_files_refresh)
         self.setWindowTitle("Gestor de documental")
         self.setMinimumSize(1120, 700)
         self.resize(1450, 880)
@@ -1659,6 +1348,8 @@ class MainWindow(QMainWindow):
         professional_menu.addSeparator()
         professional_menu.addAction("Configurar firmador externo…", self.configure_signer)
         professional_menu.addAction("Abrir modelos de escritos", self.open_models_folder)
+        professional_menu.addSeparator()
+        professional_menu.addAction("Restablecer distribución", self.reset_layout)
         self.professional_settings_button.setMenu(professional_menu)
         top_layout.addWidget(
             self.professional_settings_button,
@@ -1667,13 +1358,14 @@ class MainWindow(QMainWindow):
         )
         outer.addWidget(top)
 
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
+        self.body_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.body_splitter.setObjectName("bodySplitter")
+        self.body_splitter.setChildrenCollapsible(False)
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(270)
+        sidebar.setMinimumWidth(205)
+        sidebar.setMaximumWidth(380)
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(16, 18, 16, 16)
         side_layout.setSpacing(10)
@@ -1775,7 +1467,7 @@ class MainWindow(QMainWindow):
         decorate_button(self.models_button, "template")
         self.models_button.clicked.connect(self.open_models_folder)
         side_layout.addWidget(self.models_button)
-        body.addWidget(sidebar)
+        self.body_splitter.addWidget(sidebar)
 
         workspace_wrap = QWidget()
         workspace_outer = QVBoxLayout(workspace_wrap)
@@ -1799,15 +1491,27 @@ class MainWindow(QMainWindow):
         self.open_case_button.clicked.connect(self.open_case_folder)
         case_header.addWidget(self.open_case_button)
         self.open_case_button.hide()
+        self.compilation_toggle_button = icon_button(
+            "arrow-right",
+            "Ocultar panel de compilación",
+            self.toggle_compilation_panel,
+            bordered=True,
+        )
+        case_header.addWidget(self.compilation_toggle_button)
         workspace_outer.addLayout(case_header)
 
         self.workspace = QWidget()
         workspace_layout = QHBoxLayout(self.workspace)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
-        workspace_layout.setSpacing(12)
+        workspace_layout.setSpacing(0)
+        self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.workspace_splitter.setObjectName("workspaceSplitter")
+        self.workspace_splitter.setChildrenCollapsible(False)
+        workspace_layout.addWidget(self.workspace_splitter)
 
-        information_column = QSplitter(Qt.Orientation.Vertical)
-        information_column.setChildrenCollapsible(False)
+        self.information_column = QSplitter(Qt.Orientation.Vertical)
+        self.information_column.setObjectName("informationColumn")
+        self.information_column.setChildrenCollapsible(False)
 
         metadata_card, metadata_layout = make_card()
         metadata_layout.addLayout(section_heading("Datos del caso", "Se guardan como metadatos de esta carpeta"))
@@ -1856,7 +1560,7 @@ class MainWindow(QMainWindow):
         metadata_actions.addWidget(self.cancel_metadata_button)
         metadata_actions.addWidget(self.save_metadata_button)
         metadata_layout.addLayout(metadata_actions)
-        information_column.addWidget(metadata_card)
+        self.information_column.addWidget(metadata_card)
 
         novedades_card, novedades_layout = make_card()
         novedades_header = QHBoxLayout()
@@ -1875,8 +1579,7 @@ class MainWindow(QMainWindow):
         self.novedades_list.itemDoubleClicked.connect(lambda _: self.show_selected_novedad())
         novedades_layout.addWidget(self.novedades_list, 1)
         novedades_actions = QHBoxLayout()
-        self.sisfe_status = QLabel("SISFE sin iniciar")
-        self.sisfe_status.setObjectName("muted")
+        self.sisfe_status = OperationStatusIndicator("SISFE sin iniciar")
         self.sisfe_status.setToolTip("Estado de la sesión y de la última consulta a SISFE")
         novedades_actions.addWidget(self.sisfe_status, 1)
         self.sisfe_connect_button = QPushButton("Abrir SISFE")
@@ -1888,6 +1591,18 @@ class MainWindow(QMainWindow):
         decorate_button(self.sisfe_sync_button, "refresh", "#FFFFFF")
         self.sisfe_sync_button.clicked.connect(self.sync_sisfe)
         novedades_actions.addWidget(self.sisfe_sync_button)
+        self.sisfe_retry_button = icon_button(
+            "refresh", "Reintentar la última descarga SISFE", self.retry_sisfe_download,
+            bordered=True,
+        )
+        self.sisfe_retry_button.setVisible(False)
+        novedades_actions.addWidget(self.sisfe_retry_button)
+        self.sisfe_show_download_button = icon_button(
+            "external", "Abrir SISFE para resolver la descarga", self.show_sisfe_download,
+            bordered=True,
+        )
+        self.sisfe_show_download_button.setVisible(False)
+        novedades_actions.addWidget(self.sisfe_show_download_button)
         self.novedad_detail_button = icon_button(
             "external",
             "Ver detalle de la novedad seleccionada",
@@ -1995,6 +1710,10 @@ class MainWindow(QMainWindow):
         preparation_layout.addWidget(writing_bar)
 
         self.compilation = CompilationList()
+        self.compilation.filesDropped.connect(self.handle_compilation_drop)
+        self.compilation.removeRequested.connect(self.remove_from_compilation)
+        self.compilation.openRequested.connect(open_file)
+        self.compilation.orderChanged.connect(self.update_compilation_count)
         preparation_layout.addWidget(self.compilation, 1)
         prep_actions = QHBoxLayout()
         remove = icon_button("trash", "Quitar de la compilación", self.remove_from_compilation)
@@ -2029,6 +1748,7 @@ class MainWindow(QMainWindow):
         self.pending_documents_list.itemSelectionChanged.connect(
             self.update_pending_document_actions
         )
+        self.pending_documents_list.itemChanged.connect(self.pending_document_changed)
         pending_layout.addWidget(self.pending_documents_list, 1)
         pending_actions = QHBoxLayout()
         pending_add = QPushButton("Agregar pendiente")
@@ -2057,17 +1777,11 @@ class MainWindow(QMainWindow):
             ui_icon("check", "#2B7564"),
             "Pendientes · 0",
         )
-        self.compilation_tab_index = self.work_tabs.addTab(
-            preparation_card,
-            ui_icon("layers", "#2B7564"),
-            "Compilación · 0",
-        )
-        information_column.addWidget(self.work_tabs)
-        information_column.setSizes([155, 760])
-        workspace_layout.addWidget(information_column, 7)
+        self.information_column.addWidget(self.work_tabs)
+        self.information_column.setSizes([155, 760])
+        self.workspace_splitter.addWidget(self.information_column)
 
         actions_card, actions_layout = make_card("actionCard")
-        actions_card.setFixedWidth(235)
         actions_title = QLabel("Preparar presentación")
         actions_title.setObjectName("actionTitle")
         actions_layout.addWidget(actions_title)
@@ -2080,9 +1794,15 @@ class MainWindow(QMainWindow):
         limit_label.setObjectName("professionalLabel")
         actions_layout.addWidget(limit_label)
         self.limit_combo = QComboBox()
+        self.limit_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.limit_combo.setMinimumContentsLength(12)
+        self.limit_combo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         for label, value in PRESENTATION_PROFILES.items():
             self.limit_combo.addItem(label, value)
         self.limit_combo.setCurrentIndex(self.limit_combo.findText(DEFAULT_PROFILE))
+        self.limit_combo.currentTextChanged.connect(self.compilation_profile_changed)
         actions_layout.addWidget(self.limit_combo)
         output_label = QLabel("NOMBRE AUTOMÁTICO")
         output_label.setObjectName("professionalLabel")
@@ -2104,8 +1824,20 @@ class MainWindow(QMainWindow):
         self.sign_button = QPushButton("Firmar")
         self.sign_button.setObjectName("onDark")
         decorate_button(self.sign_button, "signature", "#173F37")
-        self.sign_button.clicked.connect(self.show_sign_menu)
-        actions_layout.addWidget(self.sign_button)
+        self.sign_button.setToolTip("Firmar directamente el PDF seleccionado o el último compilado")
+        self.sign_button.clicked.connect(self.sign_current_pdf)
+        sign_row = QHBoxLayout()
+        sign_row.setSpacing(5)
+        sign_row.addWidget(self.sign_button, 1)
+        self.sign_options_button = QPushButton()
+        self.sign_options_button.setObjectName("onDark")
+        self.sign_options_button.setMaximumWidth(42)
+        self.sign_options_button.setIcon(ui_icon("arrow-down", "#173F37"))
+        self.sign_options_button.setToolTip("Otras opciones de firma")
+        self.sign_options_button.setAccessibleName("Otras opciones de firma")
+        self.sign_options_button.clicked.connect(self.show_sign_menu)
+        sign_row.addWidget(self.sign_options_button)
+        actions_layout.addLayout(sign_row)
         actions_layout.addStretch()
         last_label = QLabel("ÚLTIMO RESULTADO")
         last_label.setObjectName("professionalLabel")
@@ -2114,14 +1846,39 @@ class MainWindow(QMainWindow):
         self.last_output.setObjectName("actionMuted")
         self.last_output.setWordWrap(True)
         actions_layout.addWidget(self.last_output)
-        workspace_layout.addWidget(actions_card)
+
+        self.compilation_card = preparation_card
+        self.presentation_column = QSplitter(Qt.Orientation.Vertical)
+        self.presentation_column.setObjectName("presentationColumn")
+        self.presentation_column.setChildrenCollapsible(False)
+        self.presentation_column.setMinimumWidth(240)
+        self.presentation_column.setMaximumWidth(560)
+        self.presentation_column.addWidget(self.compilation_card)
+        self.presentation_column.addWidget(actions_card)
+        self.presentation_column.setSizes([560, 270])
+        self.workspace_splitter.addWidget(self.presentation_column)
+        self.workspace_splitter.setStretchFactor(0, 1)
+        self.workspace_splitter.setStretchFactor(1, 0)
+        self.workspace_splitter.setSizes(self._visible_workspace_sizes)
 
         workspace_outer.addWidget(self.workspace, 1)
-        body.addWidget(workspace_wrap, 1)
-        outer.addLayout(body, 1)
+        self.body_splitter.addWidget(workspace_wrap)
+        self.body_splitter.setStretchFactor(0, 0)
+        self.body_splitter.setStretchFactor(1, 1)
+        self.body_splitter.setSizes([235, 1215])
+        outer.addWidget(self.body_splitter, 1)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("Listo")
+        self.restore_layout()
+        for splitter in (
+            self.body_splitter,
+            self.workspace_splitter,
+            self.information_column,
+            self.presentation_column,
+        ):
+            splitter.splitterMoved.connect(self.schedule_layout_save)
+        self._restoring_layout = False
 
     def _install_shortcuts(self):
         self.new_case_shortcut = QShortcut(QKeySequence("Ctrl+Shift+N"), self)
@@ -2135,8 +1892,87 @@ class MainWindow(QMainWindow):
         self.rename_shortcut = QShortcut(QKeySequence("F2"), self)
         self.rename_shortcut.activated.connect(self.rename_selected_file)
 
+    @staticmethod
+    def _valid_layout_sizes(value: object, count: int, fallback: list[int]) -> list[int]:
+        if not isinstance(value, list) or len(value) != count:
+            return list(fallback)
+        try:
+            sizes = [max(0, int(size)) for size in value]
+        except (TypeError, ValueError):
+            return list(fallback)
+        return sizes if sum(sizes) > 0 else list(fallback)
+
+    def restore_layout(self):
+        state = self.store.settings.layout_state
+        body_sizes = self._valid_layout_sizes(state.get("body"), 2, [235, 1215])
+        workspace_sizes = self._valid_layout_sizes(
+            state.get("workspace"), 2, self._visible_workspace_sizes
+        )
+        information_sizes = self._valid_layout_sizes(
+            state.get("information"), 2, [155, 760]
+        )
+        presentation_sizes = self._valid_layout_sizes(
+            state.get("presentation"), 2, [560, 270]
+        )
+        self._visible_workspace_sizes = workspace_sizes
+        self.body_splitter.setSizes(body_sizes)
+        self.information_column.setSizes(information_sizes)
+        self.presentation_column.setSizes(presentation_sizes)
+        visible = state.get("compilation_visible", True)
+        self.set_compilation_panel_visible(visible if isinstance(visible, bool) else True)
+
+    def schedule_layout_save(self, *_args):
+        if not self._restoring_layout:
+            self._layout_save_timer.start()
+
+    def save_layout_state(self):
+        if self._restoring_layout:
+            return
+        workspace_sizes = self.workspace_splitter.sizes()
+        if not self.presentation_column.isHidden() and len(workspace_sizes) == 2 and workspace_sizes[1] > 0:
+            self._visible_workspace_sizes = workspace_sizes
+        self.store.set_layout_state(
+            {
+                "body": self.body_splitter.sizes(),
+                "workspace": self._visible_workspace_sizes,
+                "information": self.information_column.sizes(),
+                "presentation": self.presentation_column.sizes(),
+                "compilation_visible": not self.presentation_column.isHidden(),
+            }
+        )
+
+    def set_compilation_panel_visible(self, visible: bool):
+        if not visible and not self.presentation_column.isHidden():
+            sizes = self.workspace_splitter.sizes()
+            if len(sizes) == 2 and sizes[1] > 0:
+                self._visible_workspace_sizes = sizes
+        self.presentation_column.setVisible(visible)
+        self.compilation_toggle_button.setIcon(
+            ui_icon("arrow-right" if visible else "arrow-left")
+        )
+        tooltip = "Ocultar panel de compilación" if visible else "Mostrar panel de compilación"
+        self.compilation_toggle_button.setToolTip(tooltip)
+        self.compilation_toggle_button.setAccessibleName(tooltip)
+        if visible:
+            self.workspace_splitter.setSizes(self._visible_workspace_sizes)
+        self.schedule_layout_save()
+
+    def toggle_compilation_panel(self):
+        self.set_compilation_panel_visible(self.presentation_column.isHidden())
+
+    def reset_layout(self):
+        self._visible_workspace_sizes = [930, 285]
+        self.body_splitter.setSizes([235, 1215])
+        self.workspace_splitter.setSizes(self._visible_workspace_sizes)
+        self.information_column.setSizes([155, 760])
+        self.presentation_column.setSizes([560, 270])
+        self.set_compilation_panel_visible(True)
+        self.save_layout_state()
+        self.statusBar().showMessage("Distribución restablecida", 4000)
+
     def open_preparation_dialog(self):
-        self.work_tabs.setCurrentIndex(self.compilation_tab_index)
+        if self.presentation_column.isHidden():
+            self.set_compilation_panel_visible(True)
         self.compilation.setFocus()
 
     def toggle_directory_expanded(self):
@@ -2410,6 +2246,7 @@ class MainWindow(QMainWindow):
                 database_warning = str(database_error)
             if was_current:
                 self.case = renamed
+                self.replace_path_everywhere(previous_path, renamed.path)
             self.reload_cases(renamed.path)
             message = (
                 f"Caso renombrado; no se pudo actualizar el índice: {database_warning}"
@@ -2421,16 +2258,20 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No pudimos renombrar el caso", str(error))
 
     def set_case(self, case: Case | None):
+        self.save_compilation_draft()
+        self._loading_compilation = True
         self.case = case
         self.case_directory = case.path if case else None
         self.current_writing = None
         self.last_compiled = None
+        self.last_signed = None
         self.compilation.clear()
         self.last_output.setText("Aún no compilaste")
         self.workspace.setEnabled(case is not None)
         self.open_case_button.setEnabled(case is not None)
         self.sisfe_sync_button.setEnabled(case is not None)
         if not case:
+            self.limit_combo.setCurrentIndex(self.limit_combo.findText(DEFAULT_PROFILE))
             self.case_title.setText("Elegí un caso")
             self.load_metadata({})
             self.case_badge.hide()
@@ -2440,7 +2281,9 @@ class MainWindow(QMainWindow):
             self.update_output_preview()
             self.reload_novedades()
             self.reload_pending_documents()
+            self._loading_compilation = False
             return
+        self.restore_compilation_draft(load_compilation_draft(case))
         self.sync_case_projection()
         self.case_title.setText(case.name)
         self.load_metadata(read_case_metadata(case))
@@ -2451,6 +2294,58 @@ class MainWindow(QMainWindow):
         self.update_compilation_count()
         self.update_case_badge()
         self.update_output_preview()
+        self._loading_compilation = False
+
+    def restore_compilation_draft(self, draft: CompilationDraft):
+        self.current_writing = draft.current_writing
+        self.last_compiled = draft.last_compiled
+        self.last_signed = draft.last_signed
+        profile_index = self.limit_combo.findText(draft.profile)
+        self.limit_combo.setCurrentIndex(
+            profile_index if profile_index >= 0 else self.limit_combo.findText(DEFAULT_PROFILE)
+        )
+        for draft_item in draft.items:
+            self.add_compilation_path(draft_item.path, draft_item.kind)
+        self.update_last_output_label()
+
+    def save_compilation_draft(self):
+        if not self.case or self._loading_compilation:
+            return
+        items = tuple(
+            DraftItem(
+                Path(self.compilation.item(index).data(PATH_ROLE)),
+                str(self.compilation.item(index).data(TYPE_ROLE) or "document"),
+            )
+            for index in range(self.compilation.count())
+        )
+        try:
+            persist_compilation_draft(
+                self.case,
+                items,
+                current_writing=self.current_writing,
+                last_compiled=self.last_compiled,
+                last_signed=self.last_signed,
+                profile=self.limit_combo.currentText(),
+            )
+        except (OSError, ValueError) as error:
+            self.statusBar().showMessage(
+                f"No se pudo guardar el borrador de compilación: {error}", 7000
+            )
+
+    def update_last_output_label(self):
+        output = self.last_signed or self.last_compiled
+        if not output or not output.is_file():
+            self.last_output.setText("Aún no compilaste")
+            return
+        signed = "FIRMADO · " if output == self.last_signed else ""
+        try:
+            size = human_size(output.stat().st_size)
+        except OSError:
+            size = "tamaño no disponible"
+        self.last_output.setText(f"{output.name}\n{signed}{size}")
+
+    def compilation_profile_changed(self, _profile: str):
+        self.save_compilation_draft()
 
     def sync_case_projection(self):
         """Refresh SQLite without making it a prerequisite for file work."""
@@ -2469,9 +2364,12 @@ class MainWindow(QMainWindow):
         dialog = SisfeLoginDialog(self.sisfe_session, self)
         if dialog.exec() and self.sisfe_session.active:
             self._sisfe_login_dialog = dialog
-            self.sisfe_status.setText("Preparando el área de expedientes SISFE…")
+            self.sisfe_status.set_state(
+                OperationState.RUNNING,
+                "Preparando el área de expedientes SISFE…",
+            )
         else:
-            self.sisfe_status.setText("Sesión SISFE sin confirmar")
+            self.sisfe_status.set_state(OperationState.ERROR, "Sesión SISFE sin confirmar")
 
     def sync_sisfe(self):
         if not self.require_case():
@@ -2493,25 +2391,28 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Sincronización SISFE", "El caso necesita CUIJ para sincronizar.")
             return
         self.sisfe_sync_button.setEnabled(False)
-        self.sisfe_status.setText("Consultando novedades SISFE…")
+        self.sisfe_status.set_state(OperationState.RUNNING, "Consultando novedades SISFE…")
 
         def completed(snapshot, error):
             self.sisfe_sync_button.setEnabled(True)
             if error:
-                self.sisfe_status.setText("No se pudo sincronizar")
+                self.sisfe_status.set_state(OperationState.ERROR, "No se pudo sincronizar")
                 QMessageBox.warning(self, "No pudimos sincronizar SISFE", str(error))
                 return
             try:
-                result = self.sisfe_sync.importer.import_snapshot(
+                result = self.sisfe_portal.import_snapshot(
                     self.case, snapshot, self.case.path / "Documentos SISFE"
                 )
             except Exception as import_error:
-                self.sisfe_status.setText("No se pudo importar")
+                self.sisfe_status.set_state(OperationState.ERROR, "No se pudo importar")
                 QMessageBox.warning(self, "No pudimos importar SISFE", str(import_error))
                 return
             self.reload_novedades()
             self.reload_case_files()
-            self.sisfe_status.setText("Sesión manual lista para sincronizar")
+            self.sisfe_status.set_state(
+                OperationState.SUCCESS,
+                "Sesión manual lista para sincronizar",
+            )
             self.statusBar().showMessage(
                 f"SISFE sincronizado: {result.movements_registered} novedades nuevas", 5000
             )
@@ -2558,23 +2459,39 @@ class MainWindow(QMainWindow):
     def reload_pending_documents(self):
         if not hasattr(self, "pending_documents_list"):
             return
+        self._loading_pending = True
         self.pending_documents_list.clear()
         values = []
+        received = set()
         if self.case:
-            raw = str(read_case_metadata(self.case).get("Documentación pendiente", ""))
+            metadata = read_case_metadata(self.case)
+            raw = str(metadata.get("Documentación pendiente", ""))
             values = [" ".join(line.split()) for line in raw.splitlines() if line.strip()]
+            received = {
+                " ".join(line.split())
+                for line in str(metadata.get("Documentación recibida", "")).splitlines()
+                if line.strip()
+            }
         for value in values:
-            item = QListWidgetItem(ui_icon("file", "#8A5B12"), value)
-            item.setToolTip("Pendiente de recibir")
+            is_received = value in received
+            color = "#2B7564" if is_received else "#8A5B12"
+            item = QListWidgetItem(ui_icon("check" if is_received else "file", color), value)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if is_received else Qt.CheckState.Unchecked)
+            item.setToolTip("Recibido" if is_received else "Pendiente de recibir")
             self.pending_documents_list.addItem(item)
-        count = len(values)
+        self._loading_pending = False
+        pending_count = sum(value not in received for value in values)
+        received_count = len(values) - pending_count
         self.pending_documents_count.setText(
-            "Sin pendientes" if not count else f"{count} pendiente{'s' if count != 1 else ''}"
+            "Sin documentos solicitados"
+            if not values
+            else f"{pending_count} pendientes · {received_count} recibidos"
         )
         if hasattr(self, "work_tabs"):
             self.work_tabs.setTabText(
                 self.pending_tab_index,
-                f"Pendientes · {count}",
+                f"Pendientes · {pending_count}",
             )
         self.update_pending_document_actions()
 
@@ -2615,16 +2532,34 @@ class MainWindow(QMainWindow):
         if not selected or not self.case:
             return
         received = {item.text() for item in selected}
-        remaining = [
+        metadata = read_case_metadata(self.case)
+        stored_received = {
+            " ".join(line.split())
+            for line in str(metadata.get("Documentación recibida", "")).splitlines()
+            if line.strip()
+        }
+        stored_received.update(received)
+        values = [
             self.pending_documents_list.item(index).text()
             for index in range(self.pending_documents_list.count())
-            if self.pending_documents_list.item(index).text() not in received
         ]
-        self.save_pending_documents(remaining)
+        self.save_pending_documents(values, stored_received)
         label = next(iter(received)) if len(received) == 1 else f"{len(received)} documentos"
         self.statusBar().showMessage(f"Documentación recibida: {label}", 4500)
 
-    def save_pending_documents(self, values: list[str]):
+    def pending_document_changed(self, _item: QListWidgetItem):
+        if self._loading_pending or not self.case:
+            return
+        values = []
+        received = set()
+        for index in range(self.pending_documents_list.count()):
+            item = self.pending_documents_list.item(index)
+            values.append(item.text())
+            if item.checkState() == Qt.CheckState.Checked:
+                received.add(item.text())
+        self.save_pending_documents(values, received)
+
+    def save_pending_documents(self, values: list[str], received: set[str] | None = None):
         if not self.case:
             return
         metadata = read_case_metadata(self.case)
@@ -2632,6 +2567,12 @@ class MainWindow(QMainWindow):
             metadata["Documentación pendiente"] = "\n".join(values)
         else:
             metadata.pop("Documentación pendiente", None)
+        if received is not None:
+            ordered_received = [value for value in values if value in received]
+            if ordered_received:
+                metadata["Documentación recibida"] = "\n".join(ordered_received)
+            else:
+                metadata.pop("Documentación recibida", None)
         try:
             save_case_metadata(self.case, metadata)
             self._loaded_metadata = read_case_metadata(self.case)
@@ -2675,14 +2616,21 @@ class MainWindow(QMainWindow):
             return
         cuij = read_case_metadata(self.case).get("CUIJ", "") if self.case else ""
         self.novedad_detail_button.setEnabled(False)
-        self.sisfe_status.setText("Consultando detalle SISFE…")
+        self.sisfe_status.set_state(OperationState.RUNNING, "Consultando detalle SISFE…")
 
         def completed(detail, error):
             self.update_novedad_actions()
-            self.sisfe_status.setText("Sesión manual lista para sincronizar")
             if error:
+                self.sisfe_status.set_state(
+                    OperationState.ERROR,
+                    "No se pudo consultar la novedad",
+                )
                 QMessageBox.warning(self, "No pudimos consultar la novedad", str(error))
                 return
+            self.sisfe_status.set_state(
+                OperationState.SUCCESS,
+                "Sesión manual lista para sincronizar",
+            )
             stamp = _format_sisfe_date(detail.get("occurred_at"))
             observation = detail.get("observation") or "Sin observaciones adicionales."
             attachments = []
@@ -2705,10 +2653,19 @@ class MainWindow(QMainWindow):
                 "Abrir expediente en SISFE",
                 QMessageBox.ButtonRole.ActionRole,
             )
+            download_button = None
+            if detail.get("has_primary_document") or detail.get("has_additional_documents"):
+                download_button = box.addButton(
+                    "Descargar documentos",
+                    QMessageBox.ButtonRole.ActionRole,
+                )
             box.addButton(QMessageBox.StandardButton.Close)
             box.exec()
-            if box.clickedButton() is open_button:
-                self.open_sisfe_case(str(detail.get("remote_case_id") or ""))
+            remote_case_id = str(detail.get("remote_case_id") or "")
+            if download_button and box.clickedButton() is download_button:
+                self.start_sisfe_download(remote_case_id, detail)
+            elif box.clickedButton() is open_button:
+                self.open_sisfe_case(remote_case_id, movement_detail=detail)
 
         self._sisfe_login_dialog.request_movement_detail(
             cuij,
@@ -2716,18 +2673,90 @@ class MainWindow(QMainWindow):
             completed,
         )
 
-    def open_sisfe_case(self, remote_case_id: str):
+    def open_sisfe_case(
+        self,
+        remote_case_id: str,
+        *,
+        movement_detail: dict | None = None,
+        auto_download: bool = False,
+    ):
         if not remote_case_id or not self._sisfe_login_dialog or not self.case:
             return
+        if self._sisfe_case_dialog is not None:
+            self._sisfe_case_dialog.close()
+            self._sisfe_case_dialog.deleteLater()
         self._sisfe_case_dialog = SisfeCaseBrowserDialog(
             self._sisfe_login_dialog.profile,
             remote_case_id,
             self.case,
             self,
+            movement_detail=movement_detail,
+            auto_download=auto_download,
         )
+        self._sisfe_case_dialog.documentSaved.connect(self.sisfe_document_saved)
         self._sisfe_case_dialog.show()
         self._sisfe_case_dialog.raise_()
         self._sisfe_case_dialog.activateWindow()
+
+    def start_sisfe_download(self, remote_case_id: str, movement_detail: dict):
+        if not remote_case_id or not self._sisfe_login_dialog or not self.case:
+            return
+        if self._sisfe_case_dialog is not None:
+            self._sisfe_case_dialog.close()
+            self._sisfe_case_dialog.deleteLater()
+        self._sisfe_download_request = (remote_case_id, dict(movement_detail))
+        self._sisfe_case_dialog = SisfeCaseBrowserDialog(
+            self._sisfe_login_dialog.profile,
+            remote_case_id,
+            self.case,
+            self,
+            movement_detail=movement_detail,
+            auto_download=True,
+        )
+        self._sisfe_case_dialog.documentSaved.connect(self.sisfe_document_saved)
+        self._sisfe_case_dialog.automationFinished.connect(self.sisfe_download_finished)
+        self.sisfe_retry_button.setVisible(False)
+        self.sisfe_show_download_button.setVisible(False)
+        self.sisfe_status.set_state(OperationState.RUNNING, "Descargando desde SISFE…")
+        self.statusBar().showMessage("La descarga SISFE continúa en segundo plano", 5000)
+
+    def sisfe_download_finished(self, success: bool, message: str):
+        if success:
+            self.sisfe_status.set_state(OperationState.SUCCESS, "Descarga SISFE completada")
+            self.statusBar().showMessage(f"SISFE: {message}", 6500)
+            dialog = self._sisfe_case_dialog
+            self._sisfe_case_dialog = None
+            if dialog is not None:
+                dialog.close()
+                dialog.deleteLater()
+            self.sisfe_retry_button.setVisible(False)
+            self.sisfe_show_download_button.setVisible(False)
+            return
+        self.sisfe_status.set_state(OperationState.ERROR, "No se pudo descargar desde SISFE")
+        self.sisfe_status.setToolTip(message)
+        self.sisfe_retry_button.setVisible(True)
+        self.sisfe_show_download_button.setVisible(True)
+        self.statusBar().showMessage(f"SISFE: {message}", 9000)
+
+    def retry_sisfe_download(self):
+        if self._sisfe_download_request:
+            remote_case_id, movement_detail = self._sisfe_download_request
+            self.start_sisfe_download(remote_case_id, movement_detail)
+
+    def show_sisfe_download(self):
+        if self._sisfe_case_dialog is None:
+            return
+        self._sisfe_case_dialog.show()
+        self._sisfe_case_dialog.raise_()
+        self._sisfe_case_dialog.activateWindow()
+
+    def sisfe_document_saved(self, path: str, duplicate: bool):
+        self.reload_case_files()
+        if duplicate:
+            message = "SISFE: el documento ya estaba guardado"
+        else:
+            message = f"SISFE: archivo guardado en {Path(path).parent.name}"
+        self.statusBar().showMessage(message, 6000)
 
     def require_study(self) -> bool:
         if self.store.settings.study_root:
@@ -2769,6 +2798,7 @@ class MainWindow(QMainWindow):
             self.store.set_active_study_root(root)
             case = create_case(root, name)
             self.reload_cases(case.path)
+            self.set_case(case)
             self.begin_metadata_edit()
             self.statusBar().showMessage(f"Caso creado: {case.name}", 5000)
         except Exception as error:
@@ -2850,6 +2880,7 @@ class MainWindow(QMainWindow):
                         source,
                         dialog.normalized_name,
                         dialog.convert_to_pdf,
+                        dialog.selected_image_mode,
                     )
                 imported.append(target)
             except Exception as error:
@@ -3128,13 +3159,16 @@ class MainWindow(QMainWindow):
             if not current.is_dir() or not self.path_is_inside_case(current):
                 current = self.case.path
                 self.case_directory = current
-            entries = sorted(
-                (
-                    path for path in current.iterdir()
-                    if not path.name.startswith(".")
-                ),
-                key=lambda path: (0 if path.is_dir() else 1, path.name.casefold()),
-            )
+            try:
+                entries = sorted(
+                    (
+                        path for path in current.iterdir()
+                        if not path.name.startswith(".")
+                    ),
+                    key=lambda path: (0 if path.is_dir() else 1, path.name.casefold()),
+                )
+            except OSError:
+                entries = []
             for path in entries:
                 category = document_categories.get(path.resolve(), "otro")
                 label = self.case_file_label(path, category)
@@ -3171,6 +3205,19 @@ class MainWindow(QMainWindow):
         self._loading_files = False
         count = self.case_files.count()
         self.files_count.setText(f"{count} elemento" if count == 1 else f"{count} elementos")
+        self.refresh_case_file_watcher()
+
+    def refresh_case_file_watcher(self):
+        watched = self._file_watcher.directories()
+        if watched:
+            self._file_watcher.removePaths(watched)
+        current = self.case_directory if self.case else None
+        if current and current.is_dir():
+            self._file_watcher.addPath(str(current))
+
+    def schedule_case_files_refresh(self, _path: str = ""):
+        if self.case and not self._loading_files:
+            self._file_refresh_timer.start()
 
     def icon_for_path(self, path: Path) -> QIcon:
         if path.is_dir():
@@ -3266,6 +3313,7 @@ class MainWindow(QMainWindow):
                         source,
                         dialog.normalized_name,
                         dialog.convert_to_pdf,
+                        dialog.selected_image_mode,
                     )
                 else:
                     continue
@@ -3333,6 +3381,8 @@ class MainWindow(QMainWindow):
 
         self.current_writing = moved(self.current_writing)
         self.last_compiled = moved(self.last_compiled)
+        self.last_signed = moved(self.last_signed)
+        self.case_directory = moved(self.case_directory)
         for index in range(self.compilation.count()):
             item = self.compilation.item(index)
             old_path = Path(item.data(PATH_ROLE))
@@ -3342,6 +3392,7 @@ class MainWindow(QMainWindow):
                 kind = item.data(TYPE_ROLE)
                 item.setText(self.compilation_text(new_path, kind))
         self.update_writing_label()
+        self.save_compilation_draft()
 
     def selected_case_paths(self) -> list[Path]:
         return [Path(item.data(PATH_ROLE)) for item in self.case_files.selectedItems()]
@@ -3361,6 +3412,9 @@ class MainWindow(QMainWindow):
         if item:
             menu.addAction("Abrir", self.open_selected_file)
             menu.addAction("Renombrar…", self.rename_selected_file)
+            menu.addSeparator()
+            menu.addAction("Cortar", self.cut_selected_case_files).setShortcut(QKeySequence.StandardKey.Cut)
+            menu.addAction("Copiar", self.copy_selected_case_files).setShortcut(QKeySequence.StandardKey.Copy)
             path = Path(item.data(PATH_ROLE))
             if path.is_dir():
                 menu.addAction("Abrir en el Explorador", lambda: open_file(path))
@@ -3383,7 +3437,88 @@ class MainWindow(QMainWindow):
                     classify.addAction(label, lambda checked=False, value=category: self.set_document_category(path, value))
             menu.addSeparator()
             menu.addAction("Enviar a la Papelera", self.remove_selected_case_files)
+        clipboard_paths = self.clipboard_file_paths()
+        if clipboard_paths:
+            if item:
+                menu.addSeparator()
+            menu.addAction("Pegar", self.paste_case_files).setShortcut(QKeySequence.StandardKey.Paste)
         menu.exec(self.case_files.mapToGlobal(point))
+
+    def clipboard_file_paths(self) -> list[Path]:
+        mime = QApplication.clipboard().mimeData()
+        if not mime or not mime.hasUrls():
+            return []
+        return [Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()]
+
+    def copy_selected_case_files(self):
+        paths = self.selected_case_paths()
+        if not paths:
+            return
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(path)) for path in paths])
+        QApplication.clipboard().setMimeData(mime)
+        self._cut_paths = []
+        self.statusBar().showMessage(
+            f"{len(paths)} elemento{'s' if len(paths) != 1 else ''} listo para copiar",
+            3500,
+        )
+
+    def cut_selected_case_files(self):
+        paths = self.selected_case_paths()
+        if not paths:
+            return
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(path)) for path in paths])
+        QApplication.clipboard().setMimeData(mime)
+        self._cut_paths = [path.resolve() for path in paths]
+        self.statusBar().showMessage(
+            f"{len(paths)} elemento{'s' if len(paths) != 1 else ''} listo para mover",
+            3500,
+        )
+
+    def paste_case_files(self):
+        if not self.require_case():
+            return
+        sources = [path for path in self.clipboard_file_paths() if path.exists()]
+        if not sources:
+            return
+        destination = self.case_directory or self.case.path
+        moved_sources = {path.resolve() for path in self._cut_paths}
+        results = []
+        try:
+            for source in sources:
+                source_resolved = source.resolve()
+                move = source_resolved in moved_sources
+                if move and source.parent.resolve() == destination.resolve():
+                    results.append(source)
+                    continue
+                if source.is_dir():
+                    try:
+                        destination.resolve().relative_to(source_resolved)
+                    except ValueError:
+                        pass
+                    else:
+                        raise ValueError("No se puede pegar una carpeta dentro de sí misma.")
+                target = unique_path(destination / source.name)
+                if move:
+                    shutil.move(str(source), str(target))
+                    if self.path_is_inside_case(source):
+                        self.replace_path_everywhere(source, target)
+                elif source.is_dir():
+                    shutil.copytree(source, target)
+                else:
+                    shutil.copy2(source, target)
+                results.append(target)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "No pudimos pegar los elementos", str(error))
+        finally:
+            self._cut_paths = []
+        if results:
+            self.reload_case_files(results[-1])
+            self.statusBar().showMessage(
+                f"{len(results)} elemento{'s' if len(results) != 1 else ''} pegado",
+                4000,
+            )
 
     def set_document_category(self, path: Path, category: str):
         if not self.case:
@@ -3598,6 +3733,7 @@ class MainWindow(QMainWindow):
         item = self.compilation.takeItem(current)
         self.compilation.insertItem(target, item)
         self.compilation.setCurrentItem(item)
+        self.update_compilation_count()
 
     def clear_compilation(self):
         self.compilation.clear()
@@ -3608,8 +3744,7 @@ class MainWindow(QMainWindow):
         self.compilation_count.setText(
             f"{count} elemento" if count == 1 else f"{count} elementos"
         )
-        if hasattr(self, "work_tabs"):
-            self.work_tabs.setTabText(self.compilation_tab_index, f"Compilación · {count}")
+        self.save_compilation_draft()
 
     def compilation_paths(self) -> list[Path]:
         return [
@@ -3760,7 +3895,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Faltan archivos",
-                "Agregá la documental y el escrito en la pestaña Compilación.",
+                "Agregá la documental y el escrito en el panel Compilación.",
             )
             return
         if not self.confirm_pending_metadata_change():
@@ -3853,7 +3988,9 @@ class MainWindow(QMainWindow):
         if self._close_after_compile:
             return
         self.last_compiled = result.output
-        self.last_output.setText(f"{result.output.name}\n{human_size(result.output.stat().st_size)}")
+        self.last_signed = None
+        self.update_last_output_label()
+        self.save_compilation_draft()
         self.case_directory = result.output.parent
         self.work_tabs.setCurrentIndex(self.files_tab_index)
         self.reload_case_files(result.output)
@@ -3942,6 +4079,18 @@ class MainWindow(QMainWindow):
         if not self.confirm_pending_metadata_change():
             event.ignore()
             return
+        self._layout_save_timer.stop()
+        self._file_refresh_timer.stop()
+        watched = self._file_watcher.directories()
+        if watched:
+            self._file_watcher.removePaths(watched)
+        self.save_layout_state()
+        self.save_compilation_draft()
+        if self._sisfe_case_dialog is not None:
+            self._sisfe_case_dialog.close()
+        if self._sisfe_login_dialog is not None:
+            self._sisfe_login_dialog.close()
+        self.sisfe_session.close()
         self.digital_signer.close()
         super().closeEvent(event)
 
@@ -3952,6 +4101,17 @@ class MainWindow(QMainWindow):
         if self.last_compiled and self.last_compiled.exists():
             return self.last_compiled
         return None
+
+    def sign_current_pdf(self):
+        pdf = self.current_pdf_for_signing()
+        if pdf is None:
+            QMessageBox.information(
+                self,
+                "Falta el PDF",
+                "Seleccioná un PDF del expediente o compilá la presentación primero.",
+            )
+            return
+        self.sign_with_token(pdf)
 
     def show_sign_menu(self):
         pdf = self.current_pdf_for_signing()
@@ -3984,7 +4144,8 @@ class MainWindow(QMainWindow):
         menu.addAction("Configurar aplicación de firma…", self.configure_signer)
         if self.case:
             menu.addAction("Abrir carpeta del caso", lambda: open_file(self.case.path))
-        menu.exec(self.sign_button.mapToGlobal(self.sign_button.rect().bottomLeft()))
+        anchor = getattr(self, "sign_options_button", self.sign_button)
+        menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
 
     def choose_signing_certificate(self) -> SigningCertificate | None:
         certificates = select_current_certificates(discover_signing_certificates())
@@ -4038,6 +4199,7 @@ class MainWindow(QMainWindow):
             self.reload_case_files(signed)
             size = signed.stat().st_size
             self.last_output.setText(f"{signed.name}\nFIRMADO · {human_size(size)}")
+            self.save_compilation_draft()
             limit = int(self.limit_combo.currentData())
             if size > limit:
                 QMessageBox.warning(

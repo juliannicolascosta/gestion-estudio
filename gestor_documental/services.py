@@ -216,6 +216,8 @@ class SettingsStore:
         if active not in roots:
             active = roots[0] if roots else None
         signer = payload.get("signer_path")
+        raw_layout = payload.get("layout_state", {})
+        layout_state = dict(raw_layout) if isinstance(raw_layout, dict) else {}
         return AppSettings(
             study_roots=roots,
             active_study_root=active,
@@ -227,6 +229,7 @@ class SettingsStore:
                 for name, data in (payload.get("mev_profiles", {}) or {}).items()
                 if isinstance(data, dict)
             },
+            layout_state=layout_state,
         )
 
     def save(self):
@@ -240,6 +243,7 @@ class SettingsStore:
             "current_professional": self.settings.current_professional,
             "signer_path": str(self.settings.signer_path) if self.settings.signer_path else None,
             "mev_profiles": self.settings.mev_profiles,
+            "layout_state": self.settings.layout_state,
         }
         self.config.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -295,6 +299,11 @@ class SettingsStore:
 
     def set_signer(self, path: Path | None):
         self.settings.signer_path = path
+        self.save()
+
+    def set_layout_state(self, state: dict[str, object]):
+        """Persist machine-local splitter proportions and panel visibility."""
+        self.settings.layout_state = dict(state)
         self.save()
 
 
@@ -482,7 +491,13 @@ def can_convert_to_pdf(path: Path) -> bool:
     return path.suffix.lower() in OFFICE_EXTENSIONS | IMAGE_EXTENSIONS
 
 
-def import_file(case: Case, source: Path, name: str, convert_to_pdf: bool = False) -> Path:
+def import_file(
+    case: Case,
+    source: Path,
+    name: str,
+    convert_to_pdf: bool = False,
+    image_mode: str = "color",
+) -> Path:
     if not source.is_file():
         raise FileNotFoundError(f"No encontramos {source.name}.")
     case.ensure()
@@ -490,7 +505,7 @@ def import_file(case: Case, source: Path, name: str, convert_to_pdf: bool = Fals
         if not can_convert_to_pdf(source):
             raise ValueError(f"{source.name} no necesita conversión a PDF.")
         with tempfile.TemporaryDirectory(prefix="gestor-documental-") as directory:
-            converted = to_pdf(source, Path(directory))
+            converted = to_pdf(source, Path(directory), image_mode=image_mode)
             target = unique_path(case.path / normalize_filename(name, ".pdf"))
             shutil.copy2(converted, target)
             return target
@@ -950,6 +965,7 @@ def to_pdf(
     source: Path,
     destination: Path,
     cancelled: Callable[[], bool] = lambda: False,
+    image_mode: str = "color",
 ) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
     _check_cancelled(cancelled)
@@ -984,12 +1000,22 @@ def to_pdf(
     if extension in IMAGE_EXTENSIONS:
         from PIL import Image, ImageOps
 
+        if image_mode not in {"color", "grayscale", "black_white"}:
+            raise ValueError("Elegí color, escala de grises o blanco y negro.")
         output = destination / f"{source.stem}.pdf"
         with Image.open(source) as image:
             frames = []
             for index in range(getattr(image, "n_frames", 1)):
                 image.seek(index)
-                frames.append(ImageOps.exif_transpose(image.copy()).convert("RGB"))
+                frame = ImageOps.exif_transpose(image.copy())
+                if image_mode == "grayscale":
+                    frame = ImageOps.grayscale(frame)
+                elif image_mode == "black_white":
+                    gray = ImageOps.grayscale(frame)
+                    frame = gray.point(lambda value: 255 if value >= 180 else 0, mode="1")
+                else:
+                    frame = frame.convert("RGB")
+                frames.append(frame)
             frames[0].save(
                 output,
                 "PDF",

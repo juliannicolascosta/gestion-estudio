@@ -1,7 +1,8 @@
-"""Cliente SISFE de sólo lectura para una sesión ya autenticada en memoria.
+"""Cliente SISFE HTTP heredado, conservado sólo para compatibilidad de pruebas.
 
-No realiza login, no resuelve CAPTCHA y no guarda cookies. La sesión HTTP debe
-ser creada por un puente manual futuro y se descarta al cerrar la aplicación.
+La aplicación no selecciona este transporte. El flujo operativo usa únicamente
+el navegador oficial autenticado porque los endpoints internos y las descargas
+pueden exigir validaciones dinámicas que una sesión ``requests`` no reproduce.
 """
 
 from __future__ import annotations

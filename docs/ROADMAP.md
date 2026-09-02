@@ -9,7 +9,10 @@
 - [x] Casos nuevos sin subcarpetas automáticas y reconocimiento de carpetas internas existentes.
 - [x] Datos del caso.
 - [x] Drag & drop de archivos hacia dentro y fuera.
+- [x] Copiar, cortar y pegar archivos o carpetas con actualización automática de la vista.
 - [x] Normalización y conversión al importar.
+- [x] Conversión a PDF optativa y desmarcada de forma predeterminada.
+- [x] Tratamiento opcional de imágenes en color, escala de grises o blanco y negro al convertirlas a PDF.
 - [x] Escritos base y desde modelos.
 - [x] Compilación ordenada en PDF único.
 - [x] Límites, compresión y división confirmada.
@@ -49,9 +52,19 @@
 - [x] Ficha cotidiana reducida a los cinco metadatos solicitados.
 - [x] Directorio y biblioteca ampliables o contraíbles.
 - [x] Alta de profesional desde el selector y engranaje de configuración rápida.
+- [x] Compilación permanente a la derecha, visible al mismo tiempo que los archivos del caso.
+- [x] Columnas y secciones verticales redimensionables, persistentes y con Compilación contraíble.
+- [x] Indicador visual común para tareas SISFE en espera, ejecución, éxito o error.
+- [x] Borrador de compilación portátil y persistente por expediente.
+- [x] Bandeja del Portal sin el recorte anterior de veinte movimientos.
+- [x] Servicio único de aplicación para importar la información obtenida en el navegador SISFE.
 
 ## Próxima iteración
 
+- [ ] Completar la separación de `app.py` en paneles y controladores; los componentes de compilación y los diálogos SISFE ya fueron extraídos sin cambiar el flujo probado.
+- [x] Automatizar la acción oficial de descarga dentro del navegador SISFE y vincular cada archivo con su movimiento.
+- [ ] Ejecutar las descargas SISFE en una cola oculta y reflejar check, error y reintento en el Portal.
+- [ ] Retirar el transporte HTTP SISFE heredado cuando existan pruebas de aceptación suficientes del flujo de navegador.
 - [ ] Pantalla completa de configuración: profesionales, modelos y firmador.
 - [ ] Vincular carpeta externa como caso mediante copia normalizada y vista previa.
 - [ ] Reglas avanzadas configurables de nomenclatura para quienes no usen el formato recomendado.
@@ -67,7 +80,8 @@
 - [x] Cancelación segura de conversiones en segundo plano.
 - [x] Compresión que preserve texto vectorial cuando sea posible.
 - [ ] Vista previa de páginas y validación visual.
-- [ ] Historial de compilaciones y repetición del armado.
+- [x] Conservación del armado vigente por expediente.
+- [ ] Historial versionado de compilaciones anteriores y repetición de un armado histórico.
 - [ ] Instalador firmado y actualización controlada.
 
 ## Fuera de alcance hasta decisión expresa

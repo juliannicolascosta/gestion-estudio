@@ -3,11 +3,11 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QMimeData, Qt, QUrl
 from PyQt6.QtGui import QPalette
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton
@@ -30,6 +30,7 @@ from gestor_documental.services import (
     study_library_path,
 )
 from gestor_documental.study_database import StudyDatabase, study_database_path
+from gestor_documental.ui.operation_status import OperationState
 
 
 class AppSmokeTests(unittest.TestCase):
@@ -63,7 +64,7 @@ class AppSmokeTests(unittest.TestCase):
                 store.settings.current_professional,
             )
             self.assertFalse(window.professional_settings_button.icon().isNull())
-            self.assertEqual(window.work_tabs.count(), 4)
+            self.assertEqual(window.work_tabs.count(), 3)
             self.assertEqual(window.work_tabs.tabText(window.files_tab_index), "Archivos")
             self.assertEqual(
                 window.work_tabs.tabText(window.portal_tab_index),
@@ -73,10 +74,13 @@ class AppSmokeTests(unittest.TestCase):
                 window.work_tabs.tabText(window.pending_tab_index),
                 "Pendientes · 0",
             )
-            self.assertEqual(
-                window.work_tabs.tabText(window.compilation_tab_index),
-                "Compilación · 0",
-            )
+            self.assertIs(window.compilation_card.parentWidget(), window.presentation_column)
+            self.assertIs(window.presentation_column.parentWidget(), window.workspace_splitter)
+            self.assertIs(window.workspace_splitter.widget(0), window.information_column)
+            self.assertEqual(window.presentation_column.minimumWidth(), 240)
+            self.assertLess(window._visible_workspace_sizes[1], 350)
+            self.assertEqual(window.compilation_count.text(), "0 elementos")
+            self.assertEqual(window.sisfe_status.state, OperationState.IDLE)
             self.assertIn("expediente", window.search.placeholderText().lower())
             self.assertEqual(window.case_tree.topLevelItem(0).childCount(), 1)
             self.assertFalse(window.case_tree.topLevelItem(0).child(0).icon(0).isNull())
@@ -164,6 +168,61 @@ class AppSmokeTests(unittest.TestCase):
             self.assertTrue(window.novedad_detail_button.isEnabled())
             window.close()
 
+    def test_layout_can_collapse_restore_and_persist_per_computer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.show()
+            self.app.processEvents()
+            window.body_splitter.setSizes([225, 1225])
+            window.workspace_splitter.setSizes([1000, 300])
+            window.information_column.setSizes([175, 700])
+            window.presentation_column.setSizes([500, 260])
+            window.set_compilation_panel_visible(False)
+            window.save_layout_state()
+
+            self.assertTrue(window.presentation_column.isHidden())
+            self.assertFalse(store.settings.layout_state["compilation_visible"])
+            self.assertEqual(len(store.settings.layout_state["body"]), 2)
+            window.close()
+
+            reopened_store = SettingsStore(root / "appdata")
+            reopened = MainWindow(reopened_store)
+            self.assertTrue(reopened.presentation_column.isHidden())
+            reopened.toggle_compilation_panel()
+            self.assertFalse(reopened.presentation_column.isHidden())
+            reopened.reset_layout()
+            self.assertFalse(reopened.presentation_column.isHidden())
+            self.assertTrue(reopened_store.settings.layout_state["compilation_visible"])
+            reopened.close()
+
+    def test_portal_tab_shows_more_than_the_previous_twenty_movement_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                for index in range(25):
+                    database.add_movement(
+                        expediente.id,
+                        f"Movimiento {index + 1}",
+                        source="sisfe",
+                        external_id=f"mov-{index + 1}",
+                    )
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            self.assertEqual(window.novedades_list.count(), 25)
+            self.assertEqual(window.work_tabs.tabText(window.portal_tab_index), "Portal · 25")
+            window.close()
+
     def test_pending_documents_have_an_operational_case_tab(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -196,11 +255,17 @@ class AppSmokeTests(unittest.TestCase):
 
             window.pending_documents_list.setCurrentRow(0)
             window.complete_pending_documents()
-            self.assertNotIn(
+            self.assertIn(
                 "DNI del cliente",
                 read_case_metadata(case)["Documentación pendiente"],
             )
-            self.assertEqual(window.pending_documents_list.count(), 2)
+            self.assertIn(
+                "DNI del cliente",
+                read_case_metadata(case)["Documentación recibida"],
+            )
+            self.assertEqual(window.pending_documents_list.count(), 3)
+            self.assertEqual(window.pending_documents_list.item(0).checkState(), Qt.CheckState.Checked)
+            self.assertEqual(window.work_tabs.tabText(window.pending_tab_index), "Pendientes · 2")
             window.close()
 
     def test_manual_sisfe_session_is_confirmed_without_storing_credentials(self):
@@ -225,7 +290,46 @@ class AppSmokeTests(unittest.TestCase):
 
             self.assertTrue(window.sisfe_session.active)
             self.assertIn("preparando", window.sisfe_status.text().lower())
+            self.assertEqual(window.sisfe_status.state, OperationState.RUNNING)
             self.assertNotIn("password", vars(window.sisfe_session))
+            window.close()
+
+    def test_official_sisfe_download_receives_the_selected_movement_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+            window._sisfe_login_dialog = MagicMock()
+            detail = {
+                "movement_id": "mov-20",
+                "title": "Decreto",
+                "page_number": 2,
+                "row_number": 3,
+                "has_primary_document": True,
+            }
+
+            with patch("gestor_documental.app.SisfeCaseBrowserDialog") as dialog_class:
+                dialog = dialog_class.return_value
+                window.open_sisfe_case(
+                    "exp-7",
+                    movement_detail=detail,
+                    auto_download=True,
+                )
+
+            dialog_class.assert_called_once_with(
+                window._sisfe_login_dialog.profile,
+                "exp-7",
+                case,
+                window,
+                movement_detail=detail,
+                auto_download=True,
+            )
+            dialog.documentSaved.connect.assert_called_once_with(window.sisfe_document_saved)
+            dialog.show.assert_called_once()
             window.close()
 
     def test_professional_selector_starts_with_add_action_and_keeps_selection(self):
@@ -340,7 +444,74 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(picker.list.count(), 1)
             self.assertEqual(picker.selected_model, second)
             self.assertEqual(picker.title, "Cédula LABVC")
+            picker.clear_selection()
+            self.assertEqual(picker.search.text(), "")
+            self.assertIsNone(picker.selected_model)
+            self.assertEqual(picker.title, "")
             picker.close()
+
+    def test_new_case_immediately_becomes_the_active_folder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            with patch(
+                "gestor_documental.app.QInputDialog.getText",
+                return_value=("Caso nuevo", True),
+            ):
+                window.new_case_in_root(study)
+            self.assertIsNotNone(window.case)
+            self.assertEqual(window.case.path, study / "Caso nuevo")
+            self.assertEqual(window.case_directory, study / "Caso nuevo")
+            self.assertEqual(
+                Path(window.case_tree.currentItem().data(0, PATH_ROLE)),
+                study / "Caso nuevo",
+            )
+            window.close()
+
+    def test_case_files_can_be_copied_cut_pasted_and_refresh_from_disk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            source = root / "documento.txt"
+            source.write_text("original", encoding="utf-8")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(str(source))])
+            QApplication.clipboard().setMimeData(mime)
+            window.paste_case_files()
+            copied = case.path / source.name
+            self.assertTrue(copied.is_file())
+
+            destination = case.path / "Subcarpeta"
+            destination.mkdir()
+            window.case_directory = destination
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(str(copied))])
+            QApplication.clipboard().setMimeData(mime)
+            window._cut_paths = [copied.resolve()]
+            window.paste_case_files()
+            self.assertFalse(copied.exists())
+            self.assertTrue((destination / source.name).is_file())
+
+            external_change = destination / "pegado desde afuera.txt"
+            external_change.write_text("nuevo", encoding="utf-8")
+            QTest.qWait(650)
+            self.app.processEvents()
+            names = {
+                Path(window.case_files.item(index).data(PATH_ROLE)).name
+                for index in range(window.case_files.count())
+            }
+            self.assertIn(external_change.name, names)
+            window.close()
 
     def test_extended_metadata_keeps_repeated_rows_and_reuses_case_data_for_raeo(self):
         dialog = ExtendedMetadataDialog(
@@ -408,14 +579,29 @@ class AppSmokeTests(unittest.TestCase):
             )
             window.close()
 
-    def test_import_dialog_keeps_pdf_conversion_selected_after_close(self):
+    def test_import_dialog_leaves_pdf_conversion_unselected_by_default(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "documento.docx"
             source.touch()
             dialog = ImportFileDialog(source)
+            self.assertFalse(dialog.convert_to_pdf)
             dialog.convert.setChecked(True)
             dialog.close()
             self.assertTrue(dialog.convert_to_pdf)
+
+    def test_image_import_options_only_appear_when_conversion_is_selected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "foto.png"
+            source.touch()
+            dialog = ImportFileDialog(source)
+            self.assertFalse(dialog.image_mode.isVisible())
+            dialog.show()
+            dialog.convert.setChecked(True)
+            self.app.processEvents()
+            self.assertTrue(dialog.image_mode.isVisible())
+            dialog.image_mode.setCurrentIndex(2)
+            self.assertEqual(dialog.selected_image_mode, "black_white")
+            dialog.close()
 
     def test_compilation_order_can_move_and_delete_with_keyboard(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -492,11 +678,103 @@ class AppSmokeTests(unittest.TestCase):
             window.add_selected_to_compilation()
             self.assertEqual(window.compilation.count(), 1)
             self.assertEqual(Path(window.compilation.item(0).data(PATH_ROLE)), pdf)
-            self.assertEqual(window.work_tabs.currentIndex(), window.compilation_tab_index)
+            self.assertEqual(window.work_tabs.currentIndex(), window.files_tab_index)
+            self.assertEqual(window.compilation_count.text(), "1 elemento")
+            window.close()
+
+    def test_compilation_draft_survives_case_switch_and_window_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            first_case = create_case(study, "Caso uno")
+            second_case = create_case(study, "Caso dos")
+            documentary = first_case.path / "documental.pdf"
+            writing = first_case.path / "escrito.docx"
+            other = second_case.path / "otro.pdf"
+            documentary.touch()
+            writing.touch()
+            other.touch()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+
+            window = MainWindow(store)
+            window.set_case(first_case)
+            window.add_compilation_path(documentary)
+            window.set_current_writing(writing)
+            special_profile = "SISFE demanda/contestación · 6 MB"
+            window.limit_combo.setCurrentIndex(window.limit_combo.findText(special_profile))
+            window.set_case(second_case)
+            self.assertEqual(window.compilation.count(), 0)
+            window.add_compilation_path(other)
+            window.set_case(first_case)
+
+            self.assertEqual(window.compilation.count(), 2)
             self.assertEqual(
-                window.work_tabs.tabText(window.compilation_tab_index),
-                "Compilación · 1",
+                [Path(window.compilation.item(index).data(PATH_ROLE)) for index in range(2)],
+                [documentary, writing],
             )
+            self.assertEqual(window.current_writing, writing)
+            self.assertEqual(window.limit_combo.currentText(), special_profile)
+            window.close()
+
+            reopened = MainWindow(store)
+            reopened.set_case(first_case)
+            self.assertEqual(reopened.compilation.count(), 2)
+            self.assertEqual(reopened.current_writing, writing)
+            self.assertEqual(reopened.limit_combo.currentText(), special_profile)
+            reopened.close()
+
+    def test_renaming_case_preserves_portable_compilation_draft(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            case = create_case(study, "Nombre anterior")
+            pdf = case.path / "documental.pdf"
+            pdf.touch()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.set_case(case)
+            window.add_compilation_path(pdf)
+
+            with patch(
+                "gestor_documental.app.QInputDialog.getText",
+                return_value=("Nombre nuevo", True),
+            ):
+                window.rename_case_folder(case)
+
+            renamed_pdf = study / "Nombre nuevo" / pdf.name
+            self.assertEqual(window.case.path, study / "Nombre nuevo")
+            self.assertEqual(Path(window.compilation.item(0).data(PATH_ROLE)), renamed_pdf)
+            window.close()
+
+            reopened = MainWindow(store)
+            reopened.set_case(create_case(study, "Caso temporal"))
+            reopened.set_case(type(case)(study / "Nombre nuevo"))
+            self.assertEqual(Path(reopened.compilation.item(0).data(PATH_ROLE)), renamed_pdf)
+            reopened.close()
+
+    def test_primary_sign_button_uses_selected_or_last_compiled_pdf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            case = create_case(study, "Caso")
+            pdf = case.path / "presentación.pdf"
+            pdf.touch()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.set_case(case)
+            window.last_compiled = pdf
+
+            with patch.object(window, "sign_with_token") as sign:
+                window.sign_current_pdf()
+
+            sign.assert_called_once_with(pdf)
+            self.assertEqual(window.sign_options_button.accessibleName(), "Otras opciones de firma")
             window.close()
 
     def test_close_cancels_background_compilation_and_then_closes(self):

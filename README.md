@@ -20,14 +20,16 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - **Más datos** se organiza en tres pestañas: **Datos generales**, **Entrevista inicial** y **RAEO**. La pantalla principal conserva sólo Actor, Demandado, Causa, Número de expediente y Radicación, mientras que la ficha ampliada incorpora datos personales, laborales, procesales, médicos, prueba, campos repetibles y datos propios del formulario RAEO.
 - Carátula y número de expediente se reutilizan del caso: nunca se vuelven a cargar en RAEO. El sistema genera además una identificación interna, fecha de creación y profesional creador.
 - Cálculos automáticos de edad, antigüedad, días entre hitos médicos/laborales, remuneración mensual estimada y diferencia con convenio; alertas de datos RAEO faltantes y sugerencias contextuales.
-- Archivos del caso con arrastre hacia adentro y hacia otras aplicaciones, iconos de tipo y navegación interna por subcarpetas mediante doble clic, `Enter` y **Atrás**.
-- Normalización de nombre al importar, con conversión opcional de Word o imagen a PDF.
+- Archivos del caso con arrastre, copiar/cortar/pegar, actualización ante cambios externos, iconos de tipo y navegación interna por subcarpetas mediante doble clic, `Enter` y **Atrás**.
+- Normalización de nombre al importar, con conversión opcional de Word o imagen a PDF; las imágenes admiten color, escala de grises o blanco y negro.
 - Apertura de archivos con doble clic o `Enter`, renombrado con `F2` y envío recuperable a la Papelera con `Supr`.
 - Escritos nuevos desde el modelo oficio provisto por el usuario, editable externamente en Word, y escritos desde modelos precargables mediante una lista moderna con búsqueda y título editable en el mismo paso.
 - Inserción automática del profesional seleccionado y de la carátula `ACTOR C/ DEMANDADO S/ CAUSA` con CUIJ.
 - Modelo precargado **Cedula LABVC**, basado en el formulario aportado por el usuario: completa fecha extensa, Actor, Demandado, Causa y Número de expediente.
 - Idioma predeterminado del modelo base: Español (Argentina).
-- Área central con pestañas **Archivos**, **Portal jurídico**, **Documentación pendiente** y **Compilación**: cada contexto usa todo el espacio disponible y conserva su contador visible.
+- Área central con pestañas **Archivos**, **Portal jurídico** y **Documentación pendiente**; la **Compilación** permanece a la derecha junto con las acciones finales, pero ahora puede redimensionarse u ocultarse desde el encabezado.
+- Los anchos del Directorio, el área de trabajo y la Compilación, junto con las divisiones verticales internas, se recuerdan en esta computadora. El engranaje permite **Restablecer distribución**.
+- Borrador de compilación guardado por expediente con rutas portátiles: conserva orden, escrito, perfil de tamaño y último resultado al cambiar de caso, reiniciar o abrir el Estudio desde otra computadora.
 - Lista ordenable de documental y escrito; el escrito nuevo se coloca al final y puede moverse con arrastre o con **Subir/Bajar**.
 - Compilación de todos los elementos en un único PDF, respetando el orden visible.
 - Al pulsar **Compilar PDF** propone un nombre identificable `ACTOR_FECHA_TÍTULO.pdf`, editable antes de comenzar. Si ya existe, permite reemplazarlo de forma segura o crear `_V2`, `_V3`, etc.
@@ -41,8 +43,9 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 
 - Compresión automática. Si el resultado todavía excede el límite, pregunta antes de dividirlo.
 - Compilación en segundo plano con una ventana de progreso, cancelación segura y sin mostrar PowerShell.
-- Pestaña **Portal jurídico** de altura completa, con novedades SISFE consultadas desde la sesión manual del navegador integrado, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
-- Descargas realizadas desde la vista oficial de SISFE guardadas en `Documentos SISFE`, con estado visible, registro por hash y descarte recuperable de copias idénticas.
+- Pestaña **Portal jurídico** de altura completa, con todas las novedades SISFE almacenadas, consultadas desde la sesión manual del navegador integrado, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
+- Indicador compacto de estado SISFE preparado para distinguir espera, operación en curso, finalización correcta y error sin ocupar espacio documental.
+- Desde el detalle de una novedad, **Descargar documentos** abre el expediente, ubica la página correcta y acciona los clips oficiales de SISFE. Los PDF se guardan en `Documentos SISFE`, se vinculan con el movimiento de origen, se registran por hash y las copias idénticas se descartan de forma recuperable. Si SISFE no inicia la descarga, la vista oficial queda abierta para reintentar manualmente.
 - Pestaña **Documentación pendiente** con un checklist operativo para agregar lo solicitado al cliente y marcarlo como recibido; reutiliza la misma información de la entrevista.
 - Liberación inmediata de los PDF leídos: al terminar de compilar o dividir, las carpetas del caso pueden renombrarse o eliminarse desde el Explorador de Windows.
 - Conversión de Word aislada del proceso principal, con tiempo máximo y caché local para no reconvertir escritos sin cambios.
@@ -73,7 +76,7 @@ Microsoft Word o LibreOffice es necesario para convertir documentos Word. La int
 3. Arrastrá a **Acceso rápido** los documentos que usás en distintos casos o correos.
 4. Pulsá **Editar datos**, completá lo necesario y guardá. **Más datos** abre las pestañas de ficha general, entrevista y RAEO.
 5. Creá o elegí un escrito y, desde **Archivos**, enviá la documental a **Compilación**.
-6. Ordená los elementos en la pestaña **Compilación**, elegí el límite y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.
+6. Ordená los elementos en el panel derecho **Compilación**, elegí el límite y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.
 7. Pulsá **Firmar → Firmar dentro del Gestor**. La primera firma de la sesión solicita el PIN del token; las siguientes reutilizan la sesión. También podés continuar usando Xólido.
 
 Atajos: `Ctrl+Shift+N` crea un caso, `Ctrl+N` abre las opciones de escrito, `Ctrl+O` agrega archivos, `Ctrl+P` compila, `F2` renombra, `Enter` abre y `Supr` envía a la Papelera (o quita de la compilación, según el panel activo).

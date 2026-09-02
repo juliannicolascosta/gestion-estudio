@@ -184,10 +184,19 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(store.settings.current_professional, "Profesional")
             store.set_study_root(study)
             store.add_professional("Dra. Ana Pérez")
+            store.set_layout_state(
+                {
+                    "body": [220, 1180],
+                    "workspace": [900, 300],
+                    "compilation_visible": False,
+                }
+            )
             reloaded = SettingsStore(app_dir)
             self.assertEqual(reloaded.settings.study_root, study)
             self.assertIn("Dra. Ana Pérez", reloaded.settings.professionals)
             self.assertEqual(reloaded.settings.current_professional, "Dra. Ana Pérez")
+            self.assertEqual(reloaded.settings.layout_state["body"], [220, 1180])
+            self.assertFalse(reloaded.settings.layout_state["compilation_visible"])
 
     def test_settings_support_multiple_study_locations_and_safe_removal(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -294,6 +303,40 @@ class ServiceTests(unittest.TestCase):
             imported = import_file(case, source, "Documento", convert_to_pdf=True)
             self.assertEqual(imported.suffix, ".pdf")
             self.assertEqual(len(PdfReader(str(imported)).pages), 1)
+
+    def test_image_import_supports_grayscale_and_black_white(self):
+        with tempfile.TemporaryDirectory() as directory:
+            from PIL import Image
+            import pymupdf
+
+            root = Path(directory)
+            case = create_case(root, "Caso")
+            source = root / "foto.png"
+            image = Image.new("RGB", (40, 20), "red")
+            image.paste("white", (20, 0, 40, 20))
+            image.save(source)
+
+            grayscale = import_file(
+                case, source, "Grises", convert_to_pdf=True, image_mode="grayscale"
+            )
+            black_white = import_file(
+                case, source, "Blanco y negro", convert_to_pdf=True, image_mode="black_white"
+            )
+
+            minima = []
+            for pdf in (grayscale, black_white):
+                document = pymupdf.open(pdf)
+                try:
+                    image_info = document[0].get_images(full=True)[0]
+                    extracted = document.extract_image(image_info[0])["image"]
+                finally:
+                    document.close()
+                from io import BytesIO
+                with Image.open(BytesIO(extracted)) as converted:
+                    self.assertEqual(converted.mode, "L")
+                    minima.append(converted.getextrema()[0])
+            self.assertGreater(minima[0], 0)
+            self.assertEqual(minima[1], 0)
 
     def test_writing_is_created_directly_in_case(self):
         with tempfile.TemporaryDirectory() as directory:

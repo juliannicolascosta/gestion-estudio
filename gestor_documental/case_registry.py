@@ -13,8 +13,8 @@ def register_case_as_expediente(case: Case) -> Expediente:
         return database.import_case(case)
 
 
-def recent_case_novedades(case: Case, limit: int = 20) -> list[Movimiento]:
-    """Read the selected expediente's latest movements for its integrated inbox."""
+def recent_case_novedades(case: Case, limit: int | None = None) -> list[Movimiento]:
+    """Read the expediente movements; by default the inbox shows them all."""
     with StudyDatabase(study_database_path(case.path.parent)) as database:
         expediente = database.find_expediente_by_folder(case.path)
         return database.list_recent_movements(expediente.id, limit) if expediente else []

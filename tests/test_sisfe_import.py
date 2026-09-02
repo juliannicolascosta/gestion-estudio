@@ -47,7 +47,11 @@ class SisfeImportTests(unittest.TestCase):
                         title="Cédula electrónica",
                         occurred_at=datetime(2026, 8, 31, 12, tzinfo=timezone.utc),
                         documents=(
-                            SisfeDocumentPayload("Cédula de prueba.pdf", b"PDF SINTETICO"),
+                            SisfeDocumentPayload(
+                                "Cédula de prueba.pdf",
+                                b"PDF SINTETICO",
+                                role="primary",
+                            ),
                         ),
                     ),
                 ),
@@ -70,6 +74,10 @@ class SisfeImportTests(unittest.TestCase):
                 self.assertEqual(
                     database.connection.execute("SELECT tribunal FROM expedientes").fetchone()[0], "Juzgado Laboral 1"
                 )
+                relation = database.connection.execute(
+                    "SELECT role FROM movimiento_documentos"
+                ).fetchall()
+                self.assertEqual([row["role"] for row in relation], ["primary"])
 
     def test_rejects_snapshot_for_another_case_before_creating_documents(self):
         with tempfile.TemporaryDirectory() as directory:

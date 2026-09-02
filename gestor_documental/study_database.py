@@ -17,7 +17,7 @@ from .models import Case
 from .services import read_case_metadata
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DATABASE_NAME = ".gestor-estudio.sqlite3"
 
 
@@ -74,6 +74,10 @@ class StudyDatabase:
         if current < 4:
             self._migrate_to_4()
             self.connection.execute("PRAGMA user_version = 4")
+            current = 4
+        if current < 5:
+            self._migrate_to_5()
+            self.connection.execute("PRAGMA user_version = 5")
         self.connection.commit()
 
     def _migrate_to_1(self):
@@ -162,6 +166,22 @@ class StudyDatabase:
         columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(documentos)")}
         if "category" not in columns:
             self.connection.execute("ALTER TABLE documentos ADD COLUMN category TEXT NOT NULL DEFAULT 'otro'")
+
+    def _migrate_to_5(self):
+        """Relate downloaded files to one or more procedural movements."""
+        self.connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS movimiento_documentos (
+                movimiento_id TEXT NOT NULL REFERENCES movimientos(id) ON DELETE CASCADE,
+                documento_id TEXT NOT NULL REFERENCES documentos(id) ON DELETE CASCADE,
+                role TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (movimiento_id, documento_id)
+            );
+            CREATE INDEX IF NOT EXISTS movimiento_documentos_documento
+            ON movimiento_documentos(documento_id);
+            """
+        )
 
     def import_case(self, case: Case) -> Expediente:
         """Register or refresh a case folder, preserving its JSON unchanged.
@@ -364,6 +384,22 @@ class StudyDatabase:
         self.connection.commit()
         return record
 
+    def find_movement_by_external_id(
+        self,
+        expediente_id: str,
+        external_id: str,
+        *,
+        source: str = "sisfe",
+    ) -> Movimiento | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM movimientos
+            WHERE expediente_id = ? AND source = ? AND external_id = ?
+            """,
+            (expediente_id, source.strip() or "sisfe", external_id.strip()),
+        ).fetchone()
+        return self._movimiento_from_row(row) if row else None
+
     def find_document_by_sha256(self, expediente_id: str, sha256: str) -> Documento | None:
         """Find a previously registered content hash within an expediente."""
         digest = sha256.strip().lower()
@@ -401,16 +437,19 @@ class StudyDatabase:
         )
         self.connection.commit()
 
-    def list_recent_movements(self, expediente_id: str, limit: int = 20) -> list[Movimiento]:
+    def list_recent_movements(
+        self, expediente_id: str, limit: int | None = 20
+    ) -> list[Movimiento]:
         """Return newest operational movements first for the expediente inbox."""
-        rows = self.connection.execute(
-            """
+        sql = """
             SELECT * FROM movimientos WHERE expediente_id = ?
             ORDER BY COALESCE(occurred_at, created_at) DESC, created_at DESC
-            LIMIT ?
-            """,
-            (expediente_id, max(1, limit)),
-        ).fetchall()
+        """
+        parameters: tuple[object, ...] = (expediente_id,)
+        if limit is not None:
+            sql += " LIMIT ?"
+            parameters += (max(1, int(limit)),)
+        rows = self.connection.execute(sql, parameters).fetchall()
         return [self._movimiento_from_row(row) for row in rows]
 
     def add_document(
@@ -454,6 +493,40 @@ class StudyDatabase:
         self._audit("documento", record.id, "registered", now)
         self.connection.commit()
         return record
+
+    def link_document_to_movement(
+        self,
+        movement_id: str,
+        document_id: str,
+        *,
+        role: str = "",
+    ) -> None:
+        """Associate a stored document with its source movement idempotently."""
+        if not movement_id.strip() or not document_id.strip():
+            raise ValueError("Movimiento y documento son obligatorios para vincularlos.")
+        now = utc_now().isoformat()
+        self.connection.execute(
+            """
+            INSERT INTO movimiento_documentos (movimiento_id, documento_id, role, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(movimiento_id, documento_id) DO UPDATE SET role = excluded.role
+            """,
+            (movement_id, document_id, role.strip().casefold(), now),
+        )
+        self.connection.commit()
+
+    def list_movement_documents(self, movement_id: str) -> list[Documento]:
+        rows = self.connection.execute(
+            """
+            SELECT documentos.* FROM documentos
+            INNER JOIN movimiento_documentos
+                ON movimiento_documentos.documento_id = documentos.id
+            WHERE movimiento_documentos.movimiento_id = ?
+            ORDER BY movimiento_documentos.created_at, documentos.relative_path
+            """,
+            (movement_id,),
+        ).fetchall()
+        return [self._documento_from_row(row) for row in rows]
 
     def suggest_task(
         self,

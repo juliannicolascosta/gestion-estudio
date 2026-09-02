@@ -2,8 +2,10 @@ import unittest
 from base64 import b64encode
 
 from gestor_documental.sisfe_browser import (
+    browser_click_official_additional_attachment_script,
+    browser_click_official_movement_attachment_script,
     browser_movement_detail_script,
-    browser_movement_documents_script,
+    browser_prepare_official_movement_page_script,
     browser_sync_script,
     browser_validation_script,
     snapshot_from_browser_payload,
@@ -38,24 +40,26 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("has_primary_document", script)
         self.assertIn("has_additional_documents", script)
         self.assertIn("collectPaged", script)
+        self.assertIn("page_number", script)
+        self.assertIn("row_number", script)
         self.assertIn("Authorization: 'Bearer ' + currentUser.token", script)
         self.assertNotIn("__gestorSisfeMovement = currentUser", script)
 
-    def test_document_script_uses_official_movement_attachment_endpoints(self):
-        script = browser_movement_documents_script("21-12345678-9", "44")
-        self.assertIn("actuaciones/findDocumentoAdjuntoById", script)
-        self.assertIn("cargos/findDocumentosAdjuntosById", script)
-        self.assertIn("cargos/findDocumentoAdjuntoByAdjuntoCargoId", script)
-        self.assertIn("config/getRecaptchaVisible", script)
-        self.assertIn("config.sitekeyV3", script)
-        self.assertIn("findDocumentoAdjuntoById'", script)
-        self.assertIn("findDocumentoAdjuntoByAdjuntoCargoId'", script)
-        self.assertIn("grecaptcha.execute", script)
-        self.assertIn("FileReader", script)
-        self.assertIn("Documento principal", script)
-        self.assertIn("Adjunto de cargo", script)
-        self.assertIn("warnings: warnings", script)
-        self.assertNotIn("document.cookie", script)
+    def test_official_download_scripts_click_the_rendered_sisfe_controls(self):
+        prepare = browser_prepare_official_movement_page_script("123", 3)
+        primary = browser_click_official_movement_attachment_script("Resolución", 4, "primary")
+        additional = browser_click_official_additional_attachment_script(2)
+
+        self.assertIn("paginaDetalle", prepare)
+        self.assertIn("PaginaActual: 3", prepare)
+        self.assertIn("app-grilla tbody tr", primary)
+        self.assertIn(".fa-paperclip", primary)
+        self.assertIn("clickable.click()", primary)
+        self.assertIn("clips[0]", primary)
+        self.assertIn("rows[2]", additional)
+        self.assertIn("complete: true", additional)
+        self.assertNotIn("findDocumentoAdjuntoById", primary)
+        self.assertNotIn("fetch(", primary)
 
     def test_browser_payload_maps_to_import_snapshot(self):
         snapshot = snapshot_from_browser_payload(

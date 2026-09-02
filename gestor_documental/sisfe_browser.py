@@ -121,7 +121,8 @@ def browser_movement_detail_script(cuij: str, movement_id: str) -> str:
               '/iol/expedientes/findNovedadesById?idExpediente=' + encodeURIComponent(selected.id) +
               '&page=' + page + '&size=' + size
             ));
-            const movement = news.find(row => String(row.id || '') === movementId);
+            const movementIndex = news.findIndex(row => String(row.id || '') === movementId);
+            const movement = movementIndex >= 0 ? news[movementIndex] : null;
             if (!movement) throw new Error('SISFE no devolvió el movimiento seleccionado');
             window.__gestorSisfeMovement = {{
               ok: true,
@@ -130,6 +131,8 @@ def browser_movement_detail_script(cuij: str, movement_id: str) -> str:
               title: String(movement.novedad || movement.tipoActuacion || 'Movimiento SISFE'),
               occurred_at: movement.fecha || null,
               observation: String(movement.observacion || ''),
+              page_number: Math.floor(movementIndex / 25) + 1,
+              row_number: movementIndex % 25,
               has_primary_document: movement.adjunto1 != null,
               has_related_organizations: movement.adjunto2 != null,
               has_additional_documents: movement.adjunto3 != null
@@ -141,144 +144,78 @@ def browser_movement_detail_script(cuij: str, movement_id: str) -> str:
     """
 
 
-def browser_movement_documents_script(cuij: str, movement_id: str) -> str:
-    target = json.dumps("".join(char for char in cuij if char.isdigit()))
-    remote_movement = json.dumps(str(movement_id))
+def browser_prepare_official_movement_page_script(
+    remote_case_id: str,
+    page_number: int,
+) -> str:
+    """Select the official SISFE grid page before opening case details."""
+
+    case_id = json.dumps(str(remote_case_id))
+    page = max(1, int(page_number))
     return f"""
-        window.__gestorSisfeDocuments = null;
-        (async () => {{
-          try {{
-            const target = {target};
-            const movementId = {remote_movement};
-            const currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
-            if (!currentUser || !currentUser.token) {{
-              throw new Error('SISFE no entregó el token de la sesión');
-            }}
-            const options = {{
-              credentials: 'include',
-              headers: {{Authorization: 'Bearer ' + currentUser.token}}
-            }};
-            const getJson = async (path) => {{
-              const response = await fetch(path, options);
-              if (!response.ok) throw new Error('SISFE devolvió ' + response.status + ' al consultar ' + path);
-              return response.json();
-            }};
-{_PAGINATION_HELPERS}
-            const captchaSetting = await getJson('/iol/config/getRecaptchaVisible');
-            const captchaRequired = captchaSetting === true || captchaSetting === 1 || captchaSetting === '1';
-            const captchaFor = async (action) => {{
-              if (!captchaRequired) return '';
-              const config = await getJson('/assets/config/config.json');
-              const siteKey = config.sitekeyV3;
-              if (!siteKey) throw new Error('SISFE no informó la configuración de CAPTCHA');
-              if (!window.grecaptcha || !window.grecaptcha.execute) {{
-                await new Promise((resolve, reject) => {{
-                  const existing = document.querySelector('script[data-gestor-recaptcha]');
-                  if (existing) {{
-                    existing.addEventListener('load', resolve, {{once: true}});
-                    existing.addEventListener('error', reject, {{once: true}});
-                    return;
-                  }}
-                  const script = document.createElement('script');
-                  script.src = 'https://www.google.com/recaptcha/api.js?render=' + encodeURIComponent(siteKey);
-                  script.async = true;
-                  script.dataset.gestorRecaptcha = 'true';
-                  script.onload = resolve;
-                  script.onerror = () => reject(new Error('No pudimos cargar la validación CAPTCHA'));
-                  document.head.appendChild(script);
-                }});
-              }}
-              await new Promise(resolve => window.grecaptcha.ready(resolve));
-              return window.grecaptcha.execute(siteKey, {{action: action}});
-            }};
-            const getPdf = async (path, fallbackName, captchaAction) => {{
-              const captcha = await captchaFor(captchaAction);
-              const requestPath = captcha
-                ? path + '&grecaptchaResponse=' + encodeURIComponent(captcha)
-                : path;
-              const response = await fetch(requestPath, options);
-              if (!response.ok) {{
-                if (response.status === 401 || response.status === 403) {{
-                  throw new Error('SISFE exige validar nuevamente la sesión o completar el CAPTCHA');
-                }}
-                throw new Error('SISFE devolvió ' + response.status + ' al descargar el documento');
-              }}
-              const blob = await response.blob();
-              if (!blob.size) throw new Error('SISFE devolvió un documento vacío');
-              if (blob.size > 20 * 1024 * 1024) {{
-                throw new Error('El documento supera 20 MB; abrilo directamente en SISFE');
-              }}
-              const dataUrl = await new Promise((resolve, reject) => {{
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result));
-                reader.onerror = () => reject(new Error('No pudimos leer el documento descargado'));
-                reader.readAsDataURL(blob);
-              }});
-              return {{name: fallbackName, content_base64: dataUrl.split(',', 2)[1] || ''}};
-            }};
-            const selected = await findPaged(
-              (page, size) => getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=' + page + '&size=' + size),
-              row => JSON.stringify(row).replace(/\\D/g, '').includes(target)
-            );
-            if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
-            const details = await getJson('/iol/expedientes/findById?idExpediente=' + encodeURIComponent(selected.id));
-            const news = await collectPaged((page, size) => getJson(
-              '/iol/expedientes/findNovedadesById?idExpediente=' + encodeURIComponent(selected.id) +
-              '&page=' + page + '&size=' + size
-            ));
-            const movement = news.find(row => String(row.id || '') === movementId);
-            if (!movement) throw new Error('SISFE no devolvió el movimiento seleccionado');
-            const documents = [];
-            const warnings = [];
-            const tryDownload = async (label, download) => {{
-              try {{
-                documents.push(await download());
-              }} catch (error) {{
-                warnings.push(label + ': ' + String(error.message || error));
-              }}
-            }};
-            if (movement.adjunto1 != null) {{
-              await tryDownload('Documento principal', () => getPdf(
-                '/iol/actuaciones/findDocumentoAdjuntoById?idActuacion=' + encodeURIComponent(movementId),
-                'Movimiento SISFE ' + movementId + '.pdf',
-                'findDocumentoAdjuntoById'
-              ));
-            }}
-            if (movement.adjunto3 != null) {{
-              try {{
-                const attached = await getJson('/iol/cargos/findDocumentosAdjuntosById?idCargo=' +
-                  encodeURIComponent(movementId));
-                for (const row of (attached.lista || [])) {{
-                  await tryDownload('Adjunto de cargo', () => getPdf(
-                  '/iol/cargos/findDocumentoAdjuntoByAdjuntoCargoId?idAdjuntoCargo=' +
-                    encodeURIComponent(row.idAdjuntoCargo),
-                  String(row.adjunto || ('Adjunto SISFE ' + row.idAdjuntoCargo + '.pdf')),
-                  'findDocumentoAdjuntoByAdjuntoCargoId'
-                  ));
-                }}
-              }} catch (error) {{
-                warnings.push('Adjuntos de cargo: ' + String(error.message || error));
-              }}
-            }}
-            if (!documents.length) {{
-              throw new Error(warnings.join(' · ') || 'Este movimiento no tiene documentos descargables');
-            }}
-            window.__gestorSisfeDocuments = {{
-              ok: true,
-              cuij: target,
-              title: details.expCaratula || selected.expCaratula || '',
-              tribunal: details.radicado || selected.radicacionActual || '',
-              movements: [{{
-                internal_id: movementId,
-                title: String(movement.novedad || movement.tipoActuacion || 'Movimiento SISFE'),
-                occurred_at: movement.fecha || null,
-                documents: documents
-              }}],
-              warnings: warnings
-            }};
-          }} catch (error) {{
-            window.__gestorSisfeDocuments = {{ok: false, error: String(error.message || error)}};
+        (() => {{
+          const caseId = {case_id};
+          let previous = {{}};
+          try {{ previous = JSON.parse(localStorage.getItem('paginaDetalle') || '{{}}'); }} catch (_) {{}}
+          localStorage.setItem('paginaDetalle', JSON.stringify({{
+            IdExpediente: Number(caseId),
+            Orden: previous.Orden || {{}},
+            PaginaActual: {page}
+          }}));
+          return true;
+        }})();
+    """
+
+
+def browser_click_official_movement_attachment_script(
+    title: str,
+    row_number: int,
+    attachment: str,
+) -> str:
+    """Click a movement clip in SISFE's rendered grid, exactly as a user would."""
+
+    expected_title = json.dumps(str(title))
+    row = max(0, int(row_number))
+    use_last_clip = "true" if attachment == "additional" else "false"
+    return f"""
+        (() => {{
+          const simplify = value => String(value || '').normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\\s+/g, ' ').trim();
+          const rows = Array.from(document.querySelectorAll('app-grilla tbody tr'));
+          if (!rows.length) return {{ok: false, pending: true, error: 'Esperando la grilla oficial'}};
+          const expected = simplify({expected_title});
+          let selected = rows[{row}];
+          if (!selected || (expected && !simplify(selected.innerText).includes(expected))) {{
+            selected = rows.find(item => simplify(item.innerText).includes(expected));
           }}
+          if (!selected) return {{ok: false, error: 'No encontramos el movimiento en la página oficial'}};
+          const clips = Array.from(selected.querySelectorAll('.fa-paperclip'));
+          if (!clips.length) return {{ok: false, error: 'El movimiento no muestra un clip descargable'}};
+          const icon = {use_last_clip} ? clips[clips.length - 1] : clips[0];
+          const clickable = icon.closest('span, a, button, [role="button"]') || icon;
+          clickable.click();
+          return {{ok: true, clip_count: clips.length}};
+        }})();
+    """
+
+
+def browser_click_official_additional_attachment_script(row_number: int) -> str:
+    """Click one row in SISFE's official additional-attachments screen."""
+
+    row = max(0, int(row_number))
+    return f"""
+        (() => {{
+          if (!location.pathname.includes('/documentos-adjuntos/')) {{
+            return {{ok: false, pending: true, error: 'Esperando la pantalla oficial de adjuntos'}};
+          }}
+          const rows = Array.from(document.querySelectorAll('app-grilla tbody tr'));
+          if (!rows.length) return {{ok: false, pending: true, error: 'Esperando los adjuntos oficiales'}};
+          if ({row} >= rows.length) return {{ok: true, complete: true, row_count: rows.length}};
+          const icon = rows[{row}].querySelector('.fa-paperclip');
+          if (!icon) return {{ok: false, error: 'El adjunto no muestra un clip descargable'}};
+          const clickable = icon.closest('span, a, button, [role="button"]') || icon;
+          clickable.click();
+          return {{ok: true, complete: false, row_count: rows.length}};
         }})();
     """
 
@@ -373,6 +310,7 @@ def _documents_from_browser_row(row: dict) -> tuple[SisfeDocumentPayload, ...]:
             SisfeDocumentPayload(
                 name=str(item.get("name") or "Documento SISFE.pdf"),
                 content=content,
+                role=str(item.get("role") or ""),
             )
         )
     return tuple(documents)

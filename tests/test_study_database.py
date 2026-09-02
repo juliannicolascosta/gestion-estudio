@@ -23,7 +23,17 @@ class StudyDatabaseTests(unittest.TestCase):
                 }
 
             self.assertEqual(version, SCHEMA_VERSION)
-            self.assertTrue({"expedientes", "movimientos", "documentos", "tareas", "audit_events"} <= tables)
+            self.assertTrue(
+                {
+                    "expedientes",
+                    "movimientos",
+                    "documentos",
+                    "movimiento_documentos",
+                    "tareas",
+                    "audit_events",
+                }
+                <= tables
+            )
 
     def test_import_is_idempotent_and_preserves_case_folder_and_json(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -112,6 +122,23 @@ class StudyDatabaseTests(unittest.TestCase):
 
             with self.assertRaises(RuntimeError):
                 StudyDatabase(database_path)
+
+    def test_repair_migration_does_not_add_category_twice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = Path(directory) / "repair.sqlite3"
+            with StudyDatabase(database_path) as database:
+                database.connection.execute("PRAGMA user_version = 3")
+                database.connection.commit()
+
+            with StudyDatabase(database_path) as database:
+                columns = [
+                    row["name"]
+                    for row in database.connection.execute("PRAGMA table_info(documentos)")
+                ]
+                version = database.connection.execute("PRAGMA user_version").fetchone()[0]
+
+            self.assertEqual(columns.count("category"), 1)
+            self.assertEqual(version, SCHEMA_VERSION)
 
     def test_external_movements_deduplicate_but_manual_movements_do_not(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -203,6 +230,35 @@ class StudyDatabaseTests(unittest.TestCase):
             self.assertEqual(confirmed.status, "confirmada")
             self.assertEqual(confirmed.confirmed_by, "Dra. Ana Pérez")
             self.assertEqual(audit_actions, ["suggested", "confirmed"])
+
+    def test_document_links_to_its_external_movement_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                movement = database.add_movement(
+                    expediente.id,
+                    "Decreto",
+                    source="sisfe",
+                    external_id="mov-500",
+                )
+                document = database.add_document(
+                    expediente.id,
+                    Path("Documentos SISFE") / "decreto.pdf",
+                    sha256="abc",
+                    source="sisfe",
+                )
+                database.link_document_to_movement(movement.id, document.id, role="primary")
+                database.link_document_to_movement(movement.id, document.id, role="primary")
+                linked = database.list_movement_documents(movement.id)
+                relation = database.connection.execute(
+                    "SELECT role FROM movimiento_documentos WHERE movimiento_id = ?",
+                    (movement.id,),
+                ).fetchall()
+
+            self.assertEqual(linked, [document])
+            self.assertEqual([row["role"] for row in relation], ["primary"])
 
 
 if __name__ == "__main__":

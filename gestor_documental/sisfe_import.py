@@ -26,6 +26,7 @@ class SisfeDocumentPayload:
     name: str
     content: bytes
     sha256: str = ""
+    role: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,7 +115,7 @@ class SisfeImportService:
             documents_skipped = 0
             for movement in snapshot.movements:
                 before = database.connection.total_changes
-                database.add_movement(
+                movement_record = database.add_movement(
                     expediente.id,
                     movement.title,
                     occurred_at=movement.occurred_at,
@@ -129,18 +130,29 @@ class SisfeImportService:
                     expected = document.sha256.strip().lower()
                     if expected and expected != digest:
                         raise ValueError("El hash del documento SISFE no coincide con su contenido.")
-                    if database.find_document_by_sha256(expediente.id, digest):
+                    existing = database.find_document_by_sha256(expediente.id, digest)
+                    if existing:
+                        database.link_document_to_movement(
+                            movement_record.id,
+                            existing.id,
+                            role=document.role,
+                        )
                         documents_skipped += 1
                         continue
                     directory.mkdir(parents=True, exist_ok=True)
                     filename = normalize_filename(document.name, ".pdf")
                     target = unique_path(directory / filename)
                     target.write_bytes(document.content)
-                    database.add_document(
+                    document_record = database.add_document(
                         expediente.id,
                         target.relative_to(case.path),
                         sha256=digest,
                         source=self.source,
+                    )
+                    database.link_document_to_movement(
+                        movement_record.id,
+                        document_record.id,
+                        role=document.role,
                     )
                     documents_registered += 1
             return SisfeImportResult(

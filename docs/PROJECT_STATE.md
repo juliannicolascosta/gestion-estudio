@@ -29,6 +29,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Las credenciales ARCA/AFIP y ANSES no se almacenan: sólo se registra si el acceso fue informado o verificado.
 - Indicador visible de ubicación y estado de carga de datos del caso actual.
 - Archivos del caso con drag & drop de entrada y salida.
+- Copiar, cortar y pegar archivos o carpetas desde el menú contextual o con `Ctrl+C`, `Ctrl+X` y `Ctrl+V`; la carpeta visible se actualiza cuando Windows detecta cambios externos.
 - Reconocimiento recursivo, importación, apertura, renombrado y eliminación recuperable de carpetas creadas por el usuario.
 - Navegación dentro de subcarpetas sin salir del panel, con ubicación visible y botón Atrás.
 - Iconos de Windows por tipo de archivo en el caso y en Acceso rápido.
@@ -47,10 +48,15 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Español (Argentina) configurado en el modelo base.
 - Biblioteca de modelos en `%APPDATA%\GestorDocumental\Modelos`.
 - Compilación ordenada en un único PDF dentro del caso, con control explícito de la posición del escrito.
+- Compilación y acciones finales visibles simultáneamente junto a Archivos, Portal y Pendientes.
+- Directorio, información del expediente y Compilación distribuidos mediante divisores ajustables; la columna derecha parte de un ancho compacto, puede ocultarse y recuerda tamaños por computadora.
+- Acción **Restablecer distribución** disponible en el engranaje para recuperar proporciones seguras.
+- Borrador portátil por caso en `.gestor-compilacion.json`: conserva orden, escrito, perfil y último resultado mediante rutas relativas, incluso al cambiar de computadora.
 - Nombre de salida propuesto al compilar como `ACTOR_FECHA_TÍTULO.pdf`, con Actor abreviado configurable y confirmación editable.
 - Recompilación mediante reemplazo recuperable del PDF anterior o versiones legibles `_V2`, `_V3`, sin sufijos ambiguos `(2)`.
 - Identificación visual de Word editable, PDF para firmar y PDF firmado sin crear nuevas subcarpetas.
 - Conversión a PDF al importar corregida para Word e imágenes.
+- Tratamiento opcional de imágenes en color, escala de grises o blanco y negro, visible sólo al activar la conversión a PDF.
 - Compilación en un hilo de trabajo con progreso visible y procesos auxiliares ocultos.
 - Botón de cancelación y cierre seguro: detiene el proceso auxiliar, no produce un PDF parcial y cierra al terminar la limpieza.
 - Automatización de Word fuera del proceso principal, con límite de 45 segundos por conversión.
@@ -62,6 +68,12 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Firma PAdES interna mediante token SafeNet y PKCS#11, con SHA-256, validación inmediata y conservación del PDF original.
 - Inicio de sesión del token una sola vez por ejecución: el PIN no se persiste y la sesión puede cerrarse manualmente desde el menú Firmar.
 - Portal jurídico separado del área cotidiana de archivos, con contador propio, lista de altura completa y acceso a los movimientos integrados.
+- Indicador visual reutilizable para estados del Portal: espera, proceso, resultado correcto y error; será alimentado por el gestor de descargas en segundo plano.
+- La bandeja del Portal muestra todos los movimientos guardados; ya no recorta silenciosamente la vista a los últimos veinte.
+- El flujo operativo de SISFE entra por un único servicio de aplicación y usa el navegador autenticado; el antiguo transporte HTTP queda fuera de la selección normal.
+- El detalle de una novedad ofrece descarga automática mediante los controles renderizados por SISFE: selecciona la página oficial, acciona el documento principal y recorre los adjuntos adicionales sin copiar credenciales ni reproducir los endpoints de descarga.
+- Cada PDF descargado se registra por hash y queda relacionado en SQLite con el movimiento SISFE exacto y su rol (principal o adicional); la relación y la deduplicación son idempotentes.
+- Los diálogos SISFE, la lista ordenable de compilación y los roles de interfaz ya viven en módulos propios, primer corte efectivo para reducir `app.py` sin modificar el flujo visible.
 - Selector de profesionales con acción de alta incorporada y menú de configuración rápida en el engranaje.
 - Checklist operativo de documentación pendiente, compartido con la entrevista del caso y actualizable al recibir cada elemento.
 - Proyección SQLite refrescada desde los metadatos vigentes del caso y conservación de la identidad relacional al renombrar su carpeta.
@@ -82,10 +94,12 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - El monto reclamado permanece manual hasta acordar una regla de cálculo jurídico; la aplicación no inventa una fórmula.
 - No se migran automáticamente casos creados con la estructura anterior.
 - Google Drive se usa a través de una carpeta visible en Windows y sincronizada o montada por Google Drive para escritorio; no existe todavía una conexión directa con la web de Drive.
+- La automatización depende de que SISFE conserve sus rutas y controles actuales. Ante una demora, cambio del portal o error 500 del servidor, el Gestor detiene el intento y deja la vista oficial abierta para reintentar con el clip, sin recurrir al transporte alternativo que producía respuestas inconsistentes.
+- La descarga automática individual ya trabaja con la ventana oficial oculta y refleja éxito o error en el Portal. Falta convertirla en una cola de varios pedidos consecutivos.
 
 ## Alcance preservado
 
-La app sigue siendo documental. No incluye agenda, clientes, estrategia, seguimiento procesal ni presentación automática en sistemas judiciales.
+La prioridad inmediata sigue siendo consolidar el flujo documental y SISFE. Agenda, clientes y seguimiento procesal se incorporarán por etapas después de separar dominio, servicios e interfaz; MEV y SRT permanecen pausados.
 
 ## Publicación
 

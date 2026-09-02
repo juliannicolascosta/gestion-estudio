@@ -277,6 +277,7 @@ SYSTEM_METADATA_KEYS = {
     "Identificación interna del expediente",
     "Fecha de creación del registro",
     "Profesional creador",
+    "Documentación recibida",
 }
 
 
