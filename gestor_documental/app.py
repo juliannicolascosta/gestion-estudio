@@ -1864,8 +1864,6 @@ class MainWindow(QMainWindow):
         self.novedad_detail_button.setEnabled(False)
         novedades_actions.addWidget(self.novedad_detail_button)
         novedades_layout.addLayout(novedades_actions)
-        information_column.addWidget(novedades_card)
-
         files_card, files_layout = make_card()
         files_header = QHBoxLayout()
         files_header.addLayout(section_heading("Archivos del caso", "Archivos y carpetas · arrastrá hacia adentro o afuera"))
@@ -1977,16 +1975,62 @@ class MainWindow(QMainWindow):
         prep_actions.addStretch()
         preparation_layout.addLayout(prep_actions)
 
+        pending_card, pending_layout = make_card()
+        pending_header = QHBoxLayout()
+        pending_header.addLayout(
+            section_heading(
+                "Documentación pendiente",
+                "Checklist de lo solicitado al cliente y todavía no recibido",
+            )
+        )
+        pending_header.addStretch()
+        self.pending_documents_count = QLabel("Sin pendientes")
+        self.pending_documents_count.setObjectName("muted")
+        pending_header.addWidget(self.pending_documents_count)
+        pending_layout.addLayout(pending_header)
+        self.pending_documents_list = QListWidget()
+        self.pending_documents_list.setObjectName("pendingDocumentsList")
+        self.pending_documents_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
+        self.pending_documents_list.itemSelectionChanged.connect(
+            self.update_pending_document_actions
+        )
+        pending_layout.addWidget(self.pending_documents_list, 1)
+        pending_actions = QHBoxLayout()
+        pending_add = QPushButton("Agregar pendiente")
+        decorate_button(pending_add, "plus")
+        pending_add.clicked.connect(self.add_pending_document)
+        self.pending_received_button = QPushButton("Marcar como recibido")
+        self.pending_received_button.setObjectName("green")
+        decorate_button(self.pending_received_button, "check", "#FFFFFF")
+        self.pending_received_button.clicked.connect(self.complete_pending_documents)
+        self.pending_received_button.setEnabled(False)
+        pending_actions.addWidget(pending_add)
+        pending_actions.addStretch()
+        pending_actions.addWidget(self.pending_received_button)
+        pending_layout.addLayout(pending_actions)
+
         self.work_tabs = QTabWidget()
         self.work_tabs.setDocumentMode(True)
         self.files_tab_index = self.work_tabs.addTab(files_card, ui_icon("folder-open", "#2B7564"), "Archivos")
+        self.portal_tab_index = self.work_tabs.addTab(
+            novedades_card,
+            ui_icon("bell", "#2B7564"),
+            "Portal · 0",
+        )
+        self.pending_tab_index = self.work_tabs.addTab(
+            pending_card,
+            ui_icon("check", "#2B7564"),
+            "Pendientes · 0",
+        )
         self.compilation_tab_index = self.work_tabs.addTab(
             preparation_card,
             ui_icon("layers", "#2B7564"),
             "Compilación · 0",
         )
         information_column.addWidget(self.work_tabs)
-        information_column.setSizes([155, 140, 620])
+        information_column.setSizes([155, 760])
         workspace_layout.addWidget(information_column, 7)
 
         actions_card, actions_layout = make_card("actionCard")
@@ -2274,11 +2318,23 @@ class MainWindow(QMainWindow):
             return
         try:
             was_current = self.case is not None and self.case.path == case.path
+            previous_path = case.path
             renamed = rename_case(case, name)
+            database_warning = ""
+            try:
+                with StudyDatabase(study_database_path(renamed.path.parent)) as database:
+                    database.relocate_case(previous_path, renamed)
+            except (OSError, RuntimeError, sqlite3.Error) as database_error:
+                database_warning = str(database_error)
             if was_current:
                 self.case = renamed
             self.reload_cases(renamed.path)
-            self.statusBar().showMessage(f"Caso renombrado: {renamed.name}", 4500)
+            message = (
+                f"Caso renombrado; no se pudo actualizar el índice: {database_warning}"
+                if database_warning
+                else f"Caso renombrado: {renamed.name}"
+            )
+            self.statusBar().showMessage(message, 7000 if database_warning else 4500)
         except Exception as error:
             QMessageBox.warning(self, "No pudimos renombrar el caso", str(error))
 
@@ -2301,25 +2357,31 @@ class MainWindow(QMainWindow):
             self.update_compilation_count()
             self.update_output_preview()
             self.reload_novedades()
+            self.reload_pending_documents()
             return
-        try:
-            # El registro sólo vincula la carpeta existente con SQLite y
-            # conserva los archivos y el JSON del gestor como están.
-            register_case_as_expediente(case)
-        except (OSError, RuntimeError, sqlite3.Error) as error:
-            # Una ubicación de sólo lectura no debe impedir el uso del gestor
-            # documental que ya funciona sobre sus carpetas.
-            self.statusBar().showMessage(
-                f"No se pudo vincular el expediente: {error}", 7000
-            )
+        self.sync_case_projection()
         self.case_title.setText(case.name)
         self.load_metadata(read_case_metadata(case))
         self.reload_novedades()
+        self.reload_pending_documents()
         self.reload_case_files()
         self.update_writing_label()
         self.update_compilation_count()
         self.update_case_badge()
         self.update_output_preview()
+
+    def sync_case_projection(self):
+        """Refresh SQLite without making it a prerequisite for file work."""
+        if not self.case:
+            return
+        try:
+            register_case_as_expediente(self.case)
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            # A read-only or temporarily disconnected location must not block
+            # the established document workflow.
+            self.statusBar().showMessage(
+                f"No se pudo actualizar el índice del expediente: {error}", 7000
+            )
 
     def open_sisfe_session(self):
         dialog = SisfeLoginDialog(self.sisfe_session, self)
@@ -2379,12 +2441,16 @@ class MainWindow(QMainWindow):
         self.update_novedad_actions()
         if not self.case:
             self.novedades_count.setText("Sin novedades")
+            if hasattr(self, "work_tabs"):
+                self.work_tabs.setTabText(self.portal_tab_index, "Portal · 0")
             return
         try:
             movements = recent_case_novedades(self.case)
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.novedades_count.setText("No disponibles")
             self.novedades_list.addItem(f"No pudimos cargar las novedades: {error}")
+            if hasattr(self, "work_tabs"):
+                self.work_tabs.setTabText(self.portal_tab_index, "Portal jurídico")
             return
         for movement in movements:
             stamp = movement.occurred_at.strftime("%d/%m/%Y %H:%M") if movement.occurred_at else "Sin fecha"
@@ -2404,6 +2470,99 @@ class MainWindow(QMainWindow):
         self.novedades_count.setText(
             "Sin novedades" if not count else f"{count} novedad{'es' if count != 1 else ''}"
         )
+        if hasattr(self, "work_tabs"):
+            self.work_tabs.setTabText(self.portal_tab_index, f"Portal · {count}")
+
+    def reload_pending_documents(self):
+        if not hasattr(self, "pending_documents_list"):
+            return
+        self.pending_documents_list.clear()
+        values = []
+        if self.case:
+            raw = str(read_case_metadata(self.case).get("Documentación pendiente", ""))
+            values = [" ".join(line.split()) for line in raw.splitlines() if line.strip()]
+        for value in values:
+            item = QListWidgetItem(ui_icon("file", "#8A5B12"), value)
+            item.setToolTip("Pendiente de recibir")
+            self.pending_documents_list.addItem(item)
+        count = len(values)
+        self.pending_documents_count.setText(
+            "Sin pendientes" if not count else f"{count} pendiente{'s' if count != 1 else ''}"
+        )
+        if hasattr(self, "work_tabs"):
+            self.work_tabs.setTabText(
+                self.pending_tab_index,
+                f"Pendientes · {count}",
+            )
+        self.update_pending_document_actions()
+
+    def update_pending_document_actions(self):
+        if hasattr(self, "pending_received_button"):
+            self.pending_received_button.setEnabled(
+                bool(self.pending_documents_list.selectedItems()) and self.case is not None
+            )
+
+    def add_pending_document(self):
+        if not self.require_case():
+            return
+        description, accepted = QInputDialog.getText(
+            self,
+            "Documentación pendiente",
+            "Documento solicitado al cliente:",
+        )
+        normalized = " ".join(description.split()).strip()
+        if not accepted or not normalized:
+            return
+        current = [
+            self.pending_documents_list.item(index).text()
+            for index in range(self.pending_documents_list.count())
+        ]
+        if normalized.casefold() in {value.casefold() for value in current}:
+            QMessageBox.information(
+                self,
+                "Documentación pendiente",
+                "Ese documento ya figura como pendiente.",
+            )
+            return
+        current.append(normalized)
+        self.save_pending_documents(current)
+        self.work_tabs.setCurrentIndex(self.pending_tab_index)
+
+    def complete_pending_documents(self):
+        selected = self.pending_documents_list.selectedItems()
+        if not selected or not self.case:
+            return
+        received = {item.text() for item in selected}
+        remaining = [
+            self.pending_documents_list.item(index).text()
+            for index in range(self.pending_documents_list.count())
+            if self.pending_documents_list.item(index).text() not in received
+        ]
+        self.save_pending_documents(remaining)
+        label = next(iter(received)) if len(received) == 1 else f"{len(received)} documentos"
+        self.statusBar().showMessage(f"Documentación recibida: {label}", 4500)
+
+    def save_pending_documents(self, values: list[str]):
+        if not self.case:
+            return
+        metadata = read_case_metadata(self.case)
+        if values:
+            metadata["Documentación pendiente"] = "\n".join(values)
+        else:
+            metadata.pop("Documentación pendiente", None)
+        try:
+            save_case_metadata(self.case, metadata)
+            self._loaded_metadata = read_case_metadata(self.case)
+            self.sync_case_projection()
+            self.update_more_metadata_count()
+            self.update_case_badge()
+            self.reload_pending_documents()
+        except Exception as error:
+            QMessageBox.warning(
+                self,
+                "No pudimos actualizar la documentación pendiente",
+                str(error),
+            )
 
     def update_novedad_actions(self):
         if hasattr(self, "novedad_detail_button"):
@@ -2736,12 +2895,14 @@ class MainWindow(QMainWindow):
         try:
             save_case_metadata(self.case, metadata)
             self._loaded_metadata = read_case_metadata(self.case)
+            self.sync_case_projection()
             self._metadata_snapshot = self.basic_metadata_values()
             self._metadata_dirty = False
             self.set_metadata_editing(False)
             self.update_more_metadata_count()
             self.update_case_badge()
             self.update_output_preview()
+            self.reload_pending_documents()
             self.statusBar().showMessage("Datos del caso guardados", 2500)
             return True
         except Exception as error:
@@ -2821,8 +2982,10 @@ class MainWindow(QMainWindow):
         try:
             save_case_metadata(self.case, payload)
             self.load_metadata(read_case_metadata(self.case))
+            self.sync_case_projection()
             self.update_case_badge()
             self.update_output_preview()
+            self.reload_pending_documents()
             self.statusBar().showMessage("Datos ampliados guardados", 3000)
         except Exception as error:
             QMessageBox.warning(self, "No pudimos guardar los datos", str(error))

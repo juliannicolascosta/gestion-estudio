@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-Actualizado: 21 de agosto de 2026
+Actualizado: 2 de septiembre de 2026
 
 Ubicación canónica: `C:\Proyectos\Gestor de documental`
 
@@ -61,6 +61,9 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Selección ampliable de profesionales.
 - Firma PAdES interna mediante token SafeNet y PKCS#11, con SHA-256, validación inmediata y conservación del PDF original.
 - Inicio de sesión del token una sola vez por ejecución: el PIN no se persiste y la sesión puede cerrarse manualmente desde el menú Firmar.
+- Portal jurídico separado del área cotidiana de archivos, con contador propio y acceso a los movimientos integrados.
+- Checklist operativo de documentación pendiente, compartido con la entrevista del caso y actualizable al recibir cada elemento.
+- Proyección SQLite refrescada desde los metadatos vigentes del caso y conservación de la identidad relacional al renombrar su carpeta.
 - Nombre `_FIRMADO` con versiones legibles y advertencia si el tamaño posterior a la firma supera el perfil seleccionado.
 - Apertura o preparación del PDF para una aplicación externa de firma configurable como alternativa.
 - Reutilización de la sesión abierta de Xólido y archivo arrastrable hacia su grilla.
@@ -85,4 +88,4 @@ La app sigue siendo documental. No incluye agenda, clientes, estrategia, seguimi
 
 ## Publicación
 
-El trabajo es local. No se realizó commit, push, release ni despliegue.
+El desarrollo está versionado en GitHub. Todavía no se generó una versión estable, actualización automática ni instalador firmado para distribución general.

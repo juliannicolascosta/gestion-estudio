@@ -53,8 +53,16 @@ class AppSmokeTests(unittest.TestCase):
                 "Número de expediente",
             )
             self.assertNotIn("Expediente SRT", window.metadata_edits)
-            self.assertEqual(window.work_tabs.count(), 2)
+            self.assertEqual(window.work_tabs.count(), 4)
             self.assertEqual(window.work_tabs.tabText(window.files_tab_index), "Archivos")
+            self.assertEqual(
+                window.work_tabs.tabText(window.portal_tab_index),
+                "Portal · 0",
+            )
+            self.assertEqual(
+                window.work_tabs.tabText(window.pending_tab_index),
+                "Pendientes · 0",
+            )
             self.assertEqual(
                 window.work_tabs.tabText(window.compilation_tab_index),
                 "Compilación · 0",
@@ -124,10 +132,53 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.novedades_list.count(), 1)
             self.assertIn("Cédula electrónica", window.novedades_list.item(0).text())
             self.assertEqual(window.novedades_count.text(), "1 novedad")
+            self.assertEqual(
+                window.work_tabs.tabText(window.portal_tab_index),
+                "Portal · 1",
+            )
             self.assertFalse(window.novedad_detail_button.isEnabled())
             window.novedades_list.setCurrentRow(0)
             self.app.processEvents()
             self.assertTrue(window.novedad_detail_button.isEnabled())
+            window.close()
+
+    def test_pending_documents_have_an_operational_case_tab(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            save_case_metadata(
+                case,
+                {"Documentación pendiente": "DNI del cliente\nRecibo de sueldo"},
+            )
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            self.assertEqual(window.pending_documents_list.count(), 2)
+            self.assertEqual(
+                window.work_tabs.tabText(window.pending_tab_index),
+                "Pendientes · 2",
+            )
+            with patch(
+                "gestor_documental.app.QInputDialog.getText",
+                return_value=("Partida de nacimiento", True),
+            ):
+                window.add_pending_document()
+            self.assertEqual(window.pending_documents_list.count(), 3)
+            self.assertIn(
+                "Partida de nacimiento",
+                read_case_metadata(case)["Documentación pendiente"],
+            )
+
+            window.pending_documents_list.setCurrentRow(0)
+            window.complete_pending_documents()
+            self.assertNotIn(
+                "DNI del cliente",
+                read_case_metadata(case)["Documentación pendiente"],
+            )
+            self.assertEqual(window.pending_documents_list.count(), 2)
             window.close()
 
     def test_manual_sisfe_session_is_confirmed_without_storing_credentials(self):

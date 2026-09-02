@@ -164,15 +164,48 @@ class StudyDatabase:
             self.connection.execute("ALTER TABLE documentos ADD COLUMN category TEXT NOT NULL DEFAULT 'otro'")
 
     def import_case(self, case: Case) -> Expediente:
-        """Register an existing case folder once, preserving its JSON unchanged."""
+        """Register or refresh a case folder, preserving its JSON unchanged.
+
+        ``.gestor-caso.json`` remains the source of truth during the transition
+        to SQLite.  Reopening or saving a case therefore refreshes the small
+        relational projection used by movements, documents and tasks.  Remote
+        context received from SISFE is kept when the local JSON has no value.
+        """
         folder_path = str(case.path.resolve())
+        metadata = read_case_metadata(case)
         row = self.connection.execute(
             "SELECT * FROM expedientes WHERE folder_path = ?", (folder_path,)
         ).fetchone()
         if row:
+            title = case.name
+            client_name = metadata.get("Actor", "").strip()
+            case_number = metadata.get("CUIJ", "").strip() or row["case_number"]
+            tribunal = metadata.get("Juzgado o tribunal", "").strip() or row["tribunal"]
+            changed = any(
+                (
+                    title != row["title"],
+                    client_name != row["client_name"],
+                    case_number != row["case_number"],
+                    tribunal != row["tribunal"],
+                )
+            )
+            if changed:
+                now = utc_now().isoformat()
+                self.connection.execute(
+                    """
+                    UPDATE expedientes
+                    SET title = ?, client_name = ?, case_number = ?, tribunal = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (title, client_name, case_number, tribunal, now, row["id"]),
+                )
+                self._audit("expediente", row["id"], "synced_from_case_metadata", now)
+                self.connection.commit()
+                row = self.connection.execute(
+                    "SELECT * FROM expedientes WHERE id = ?", (row["id"],)
+                ).fetchone()
             return self._expediente_from_row(row)
 
-        metadata = read_case_metadata(case)
         now = utc_now().isoformat()
         record = Expediente(
             id=str(uuid.uuid4()),
@@ -211,6 +244,40 @@ class StudyDatabase:
         )
         self.connection.commit()
         return record
+
+    def relocate_case(self, previous_folder_path: Path, case: Case) -> Expediente:
+        """Keep the relational identity when the user renames a case folder."""
+        previous = str(Path(previous_folder_path).resolve())
+        row = self.connection.execute(
+            "SELECT * FROM expedientes WHERE folder_path = ?", (previous,)
+        ).fetchone()
+        if not row:
+            return self.import_case(case)
+        metadata = read_case_metadata(case)
+        now = utc_now().isoformat()
+        self.connection.execute(
+            """
+            UPDATE expedientes
+            SET folder_path = ?, title = ?, client_name = ?,
+                case_number = ?, tribunal = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                str(case.path.resolve()),
+                case.name,
+                metadata.get("Actor", "").strip(),
+                metadata.get("CUIJ", "").strip() or row["case_number"],
+                metadata.get("Juzgado o tribunal", "").strip() or row["tribunal"],
+                now,
+                row["id"],
+            ),
+        )
+        self._audit("expediente", row["id"], "case_folder_relocated", now)
+        self.connection.commit()
+        updated = self.connection.execute(
+            "SELECT * FROM expedientes WHERE id = ?", (row["id"],)
+        ).fetchone()
+        return self._expediente_from_row(updated)
 
     def fill_sisfe_context(self, expediente_id: str, cuij: str, tribunal: str) -> Expediente:
         """Fill missing operational context without replacing user-entered case data."""

@@ -42,6 +42,9 @@
 - [x] Validación de datos faltantes y sugerencias contextuales para casos LRT/RAEO.
 - [x] Firma PAdES con token SafeNet/PKCS#11 y sesión autenticada reutilizable sin persistir el PIN.
 - [x] Validación inmediata de integridad y control de tamaño posterior a la firma.
+- [x] Portal jurídico como contexto propio dentro del caso.
+- [x] Checklist operativo de documentación pendiente compartido con la entrevista.
+- [x] Sincronización incremental de la proyección SQLite al editar o renombrar casos.
 
 ## Próxima iteración
 
@@ -52,6 +55,8 @@
 - [ ] Generación automática del oficio y formulario RAEO desde la ficha validada.
 - [ ] Definir con el profesional una regla asistida para monto reclamado sin reemplazar la edición manual.
 - [ ] Sellado de tiempo y validación de largo plazo PAdES-LT/LTA, si los organismos receptores lo requieren.
+- [ ] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.
+- [ ] Recordatorios confirmados por el profesional para documentación todavía pendiente.
 
 ## Robustez
 

@@ -27,7 +27,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Inserción automática del profesional seleccionado y de la carátula `ACTOR C/ DEMANDADO S/ CAUSA` con CUIJ.
 - Modelo precargado **Cedula LABVC**, basado en el formulario aportado por el usuario: completa fecha extensa, Actor, Demandado, Causa y Número de expediente.
 - Idioma predeterminado del modelo base: Español (Argentina).
-- Área central con pestañas **Archivos** y **Compilación**: ambas usan todo el espacio disponible, el contador permanece visible y agregar un PDF lleva directamente al orden de presentación.
+- Área central con pestañas **Archivos**, **Portal jurídico**, **Documentación pendiente** y **Compilación**: cada contexto usa todo el espacio disponible y conserva su contador visible.
 - Lista ordenable de documental y escrito; el escrito nuevo se coloca al final y puede moverse con arrastre o con **Subir/Bajar**.
 - Compilación de todos los elementos en un único PDF, respetando el orden visible.
 - Al pulsar **Compilar PDF** propone un nombre identificable `ACTOR_FECHA_TÍTULO.pdf`, editable antes de comenzar. Si ya existe, permite reemplazarlo de forma segura o crear `_V2`, `_V3`, etc.
@@ -41,8 +41,9 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 
 - Compresión automática. Si el resultado todavía excede el límite, pregunta antes de dividirlo.
 - Compilación en segundo plano con una ventana de progreso, cancelación segura y sin mostrar PowerShell.
-- Novedades SISFE consultadas desde la sesión manual del navegador integrado, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
+- Pestaña **Portal jurídico** con novedades SISFE consultadas desde la sesión manual del navegador integrado, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
 - Descargas realizadas desde la vista oficial de SISFE guardadas en `Documentos SISFE`, con estado visible, registro por hash y descarte recuperable de copias idénticas.
+- Pestaña **Documentación pendiente** con un checklist operativo para agregar lo solicitado al cliente y marcarlo como recibido; reutiliza la misma información de la entrevista.
 - Liberación inmediata de los PDF leídos: al terminar de compilar o dividir, las carpetas del caso pueden renombrarse o eliminarse desde el Explorador de Windows.
 - Conversión de Word aislada del proceso principal, con tiempo máximo y caché local para no reconvertir escritos sin cambios.
 - Optimización de PDF que conserva el texto y evita rasterizar todas las páginas.
@@ -93,4 +94,4 @@ Para cambiar lo que genera **Escrito nuevo**, elegí **+ Escrito → Modificar m
 
 ## Estado
 
-La versión en desarrollo es la `0.12.0`, una evolución local del MVP `delivery-sisfe`. Incorpora firma PAdES con sesión de token reutilizable y una ficha ampliada por uso —general, entrevista y RAEO— sin convertir la aplicación en un gestor jurídico integral. Conserva las varias **Ubicaciones del Estudio**, la búsqueda conjunta y Xólido como alternativa. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio. No hay push ni publicación de esta versión.
+La versión en desarrollo es la `0.12.0`, una evolución del MVP `delivery-sisfe`. Incorpora firma PAdES con sesión de token reutilizable, una ficha ampliada por uso —general, entrevista y RAEO— y contextos operativos para portal y documentación pendiente, sin convertir todavía la aplicación en un gestor jurídico integral. Conserva las varias **Ubicaciones del Estudio**, la búsqueda conjunta y Xólido como alternativa. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio. El desarrollo está versionado; todavía no hay una publicación estable para usuarios finales.

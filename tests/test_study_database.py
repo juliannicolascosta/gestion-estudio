@@ -49,6 +49,57 @@ class StudyDatabaseTests(unittest.TestCase):
             self.assertEqual(read_case_metadata(case), metadata)
             self.assertEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
 
+    def test_import_refreshes_relational_projection_from_case_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso inicial")
+            save_case_metadata(case, {"Actor": "Ana", "CUIJ": "21-1"})
+
+            with StudyDatabase(study_database_path(study)) as database:
+                original = database.import_case(case)
+                save_case_metadata(
+                    case,
+                    {
+                        "Actor": "Beatriz",
+                        "CUIJ": "21-2",
+                        "Juzgado o tribunal": "Juzgado Laboral 1",
+                    },
+                )
+                refreshed = database.import_case(case)
+                events = database.connection.execute(
+                    "SELECT action FROM audit_events WHERE entity_id = ? ORDER BY rowid",
+                    (original.id,),
+                ).fetchall()
+
+            self.assertEqual(refreshed.id, original.id)
+            self.assertEqual(refreshed.title, "Caso inicial")
+            self.assertEqual(refreshed.client_name, "Beatriz")
+            self.assertEqual(refreshed.case_number, "21-2")
+            self.assertEqual(refreshed.tribunal, "Juzgado Laboral 1")
+            self.assertEqual(
+                [row["action"] for row in events],
+                ["imported_from_case_folder", "synced_from_case_metadata"],
+            )
+
+    def test_relocate_case_preserves_relational_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso inicial")
+            with StudyDatabase(study_database_path(study)) as database:
+                original = database.import_case(case)
+                previous_path = case.path
+                renamed_path = previous_path.with_name("Caso actualizado")
+                previous_path.rename(renamed_path)
+                relocated = database.relocate_case(previous_path, type(case)(renamed_path))
+                count = database.connection.execute(
+                    "SELECT COUNT(*) FROM expedientes"
+                ).fetchone()[0]
+
+            self.assertEqual(relocated.id, original.id)
+            self.assertEqual(relocated.folder_path, renamed_path.resolve())
+            self.assertEqual(relocated.title, "Caso actualizado")
+            self.assertEqual(count, 1)
+
     def test_rejects_database_from_a_future_schema(self):
         with tempfile.TemporaryDirectory() as directory:
             database_path = Path(directory) / "future.sqlite3"
