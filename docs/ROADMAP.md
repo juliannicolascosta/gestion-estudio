@@ -45,6 +45,10 @@
 - [x] Portal jurídico como contexto propio dentro del caso.
 - [x] Checklist operativo de documentación pendiente compartido con la entrevista.
 - [x] Sincronización incremental de la proyección SQLite al editar o renombrar casos.
+- [x] Portal jurídico con lista expansible de altura completa.
+- [x] Ficha cotidiana reducida a los cinco metadatos solicitados.
+- [x] Directorio y biblioteca ampliables o contraíbles.
+- [x] Alta de profesional desde el selector y engranaje de configuración rápida.
 
 ## Próxima iteración
 

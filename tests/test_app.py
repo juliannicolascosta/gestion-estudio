@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton
 from pypdf import PdfWriter
 
 from gestor_documental.app import (
+    ADD_PROFESSIONAL_LABEL,
     ExtendedMetadataDialog,
     ImportFileDialog,
     MainWindow,
@@ -52,7 +53,16 @@ class AppSmokeTests(unittest.TestCase):
                 window.metadata_edits["CUIJ"].placeholderText(),
                 "Número de expediente",
             )
-            self.assertNotIn("Expediente SRT", window.metadata_edits)
+            self.assertEqual(
+                tuple(window.metadata_edits),
+                ("Actor", "Demandado", "Causa", "CUIJ", "Radicación"),
+            )
+            self.assertEqual(window.professional_combo.itemText(0), ADD_PROFESSIONAL_LABEL)
+            self.assertEqual(
+                window.professional_combo.currentText(),
+                store.settings.current_professional,
+            )
+            self.assertFalse(window.professional_settings_button.icon().isNull())
             self.assertEqual(window.work_tabs.count(), 4)
             self.assertEqual(window.work_tabs.tabText(window.files_tab_index), "Archivos")
             self.assertEqual(
@@ -86,6 +96,17 @@ class AppSmokeTests(unittest.TestCase):
             self.assertGreaterEqual(len(icon_controls), 6)
             self.assertTrue(all(button.accessibleName() for button in icon_controls))
             self.assertTrue(window.quick_access.isEnabled())
+            self.assertFalse(window.quick_access.isHidden())
+            window.toggle_quick_access()
+            self.assertTrue(window.quick_access.isHidden())
+            window.toggle_quick_access()
+            self.assertFalse(window.quick_access.isHidden())
+            window.toggle_directory_expanded()
+            self.assertTrue(window.quick_label.isHidden())
+            self.assertTrue(window.quick_access.isHidden())
+            window.toggle_directory_expanded()
+            self.assertFalse(window.quick_label.isHidden())
+            self.assertFalse(window.quick_access.isHidden())
             self.assertTrue(study_library_path(study).is_dir())
             window.reload_cases(case.path)
             self.assertEqual(window.case_title.text(), case.name)
@@ -132,6 +153,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.novedades_list.count(), 1)
             self.assertIn("Cédula electrónica", window.novedades_list.item(0).text())
             self.assertEqual(window.novedades_count.text(), "1 novedad")
+            self.assertGreaterEqual(window.novedades_list.minimumHeight(), 220)
             self.assertEqual(
                 window.work_tabs.tabText(window.portal_tab_index),
                 "Portal · 1",
@@ -204,6 +226,27 @@ class AppSmokeTests(unittest.TestCase):
             self.assertTrue(window.sisfe_session.active)
             self.assertIn("preparando", window.sisfe_status.text().lower())
             self.assertNotIn("password", vars(window.sisfe_session))
+            window.close()
+
+    def test_professional_selector_starts_with_add_action_and_keeps_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+
+            with patch(
+                "gestor_documental.app.QInputDialog.getText",
+                return_value=("Dra. Ana Pérez", True),
+            ):
+                window.professional_combo.setCurrentIndex(0)
+
+            self.assertEqual(window.professional_combo.itemText(0), ADD_PROFESSIONAL_LABEL)
+            self.assertEqual(window.professional_combo.currentText(), "Dra. Ana Pérez")
+            self.assertEqual(store.settings.current_professional, "Dra. Ana Pérez")
+            self.assertGreaterEqual(len(window.professional_settings_button.menu().actions()), 4)
             window.close()
 
     def test_metadata_is_read_only_until_explicit_edit_and_save(self):

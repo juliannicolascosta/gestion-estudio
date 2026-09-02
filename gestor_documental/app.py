@@ -132,6 +132,7 @@ PATH_ROLE = int(Qt.ItemDataRole.UserRole)
 TYPE_ROLE = PATH_ROLE + 1
 ROOT_ROLE = TYPE_ROLE + 1
 MOVEMENT_ROLE = ROOT_ROLE + 1
+ADD_PROFESSIONAL_LABEL = "Añadir nuevo profesional…"
 
 
 def _format_sisfe_date(value: object) -> str:
@@ -1604,6 +1605,8 @@ class MainWindow(QMainWindow):
         self._signer_dialog: SignerDropDialog | None = None
         self._sisfe_login_dialog: SisfeLoginDialog | None = None
         self._sisfe_case_dialog: SisfeCaseBrowserDialog | None = None
+        self._directory_expanded = False
+        self._quick_access_collapsed = False
         self.setWindowTitle("Gestor de documental")
         self.setMinimumSize(1120, 700)
         self.resize(1450, 880)
@@ -1643,14 +1646,25 @@ class MainWindow(QMainWindow):
         professional_stack.addWidget(professional_label)
         professional_stack.addWidget(self.professional_combo)
         top_layout.addLayout(professional_stack)
-        add_professional = icon_button(
-            "user-plus",
-            "Agregar profesional",
-            self.add_professional,
+        self.professional_settings_button = icon_button(
+            "settings",
+            "Opciones del profesional y del sistema",
+            lambda: None,
             bordered=True,
             color="#173F37",
         )
-        top_layout.addWidget(add_professional, 0, Qt.AlignmentFlag.AlignBottom)
+        professional_menu = QMenu(self.professional_settings_button)
+        professional_menu.addAction("Añadir profesional…", self.add_professional)
+        professional_menu.addAction("Configurar acceso MEV…", self.configure_mev_profile)
+        professional_menu.addSeparator()
+        professional_menu.addAction("Configurar firmador externo…", self.configure_signer)
+        professional_menu.addAction("Abrir modelos de escritos", self.open_models_folder)
+        self.professional_settings_button.setMenu(professional_menu)
+        top_layout.addWidget(
+            self.professional_settings_button,
+            0,
+            Qt.AlignmentFlag.AlignBottom,
+        )
         outer.addWidget(top)
 
         body = QHBoxLayout()
@@ -1704,6 +1718,17 @@ class MainWindow(QMainWindow):
         self.case_tree.customContextMenuRequested.connect(self.show_case_menu)
         side_layout.addWidget(self.case_tree, 2)
 
+        self.directory_expand_button = icon_button(
+            "arrow-down",
+            "Expandir directorio y ocultar temporalmente la biblioteca",
+            self.toggle_directory_expanded,
+        )
+        side_layout.addWidget(
+            self.directory_expand_button,
+            0,
+            Qt.AlignmentFlag.AlignHCenter,
+        )
+
         quick_header = QHBoxLayout()
         self.quick_label = QLabel("ACCESO RÁPIDO")
         self.quick_label.setObjectName("eyebrow")
@@ -1712,11 +1737,17 @@ class MainWindow(QMainWindow):
         self.quick_count = QLabel("0")
         self.quick_count.setObjectName("muted")
         quick_header.addWidget(self.quick_count)
+        self.quick_toggle_button = icon_button(
+            "arrow-up",
+            "Contraer biblioteca",
+            self.toggle_quick_access,
+        )
+        quick_header.addWidget(self.quick_toggle_button)
         side_layout.addLayout(quick_header)
-        quick_note = QLabel("Biblioteca siempre disponible para adjuntar o reutilizar")
-        quick_note.setObjectName("muted")
-        quick_note.setWordWrap(True)
-        side_layout.addWidget(quick_note)
+        self.quick_note = QLabel("Biblioteca siempre disponible para adjuntar o reutilizar")
+        self.quick_note.setObjectName("muted")
+        self.quick_note.setWordWrap(True)
+        side_layout.addWidget(self.quick_note)
         self.quick_access = QuickAccessList()
         self.quick_access.setMinimumHeight(130)
         self.quick_access.setMaximumHeight(210)
@@ -1724,7 +1755,9 @@ class MainWindow(QMainWindow):
         self.quick_access.itemChanged.connect(self.finish_quick_rename)
         self.quick_access.customContextMenuRequested.connect(self.show_quick_menu)
         side_layout.addWidget(self.quick_access, 1)
-        quick_actions = QHBoxLayout()
+        self.quick_actions_widget = QWidget()
+        quick_actions = QHBoxLayout(self.quick_actions_widget)
+        quick_actions.setContentsMargins(0, 0, 0, 0)
         quick_add = QPushButton("Agregar")
         decorate_button(quick_add, "paperclip")
         quick_add.clicked.connect(self.pick_quick_files)
@@ -1736,12 +1769,12 @@ class MainWindow(QMainWindow):
         )
         quick_actions.addWidget(quick_add)
         quick_actions.addWidget(quick_folder)
-        side_layout.addLayout(quick_actions)
-        models_button = QPushButton("Modelos de escritos")
-        models_button.setObjectName("quiet")
-        decorate_button(models_button, "template")
-        models_button.clicked.connect(self.open_models_folder)
-        side_layout.addWidget(models_button)
+        side_layout.addWidget(self.quick_actions_widget)
+        self.models_button = QPushButton("Modelos de escritos")
+        self.models_button.setObjectName("quiet")
+        decorate_button(self.models_button, "template")
+        self.models_button.clicked.connect(self.open_models_folder)
+        side_layout.addWidget(self.models_button)
         body.addWidget(sidebar)
 
         workspace_wrap = QWidget()
@@ -1785,9 +1818,9 @@ class MainWindow(QMainWindow):
         fields_grid.setVerticalSpacing(4)
         self.metadata_edits: dict[str, QLineEdit] = {}
         for index, field in enumerate(VISIBLE_CASE_FIELDS):
-            group = index // 4
+            group = index // 5
             row = group * 2
-            column = index % 4
+            column = index % 5
             display_name = CASE_FIELD_LABELS.get(field, field)
             label = QLabel(display_name)
             label.setObjectName("muted")
@@ -1798,7 +1831,7 @@ class MainWindow(QMainWindow):
             self.metadata_edits[field] = edit
             fields_grid.addWidget(label, row, column)
             fields_grid.addWidget(edit, row + 1, column)
-        for column in range(4):
+        for column in range(5):
             fields_grid.setColumnStretch(column, 1)
         metadata_layout.addWidget(fields_widget)
         metadata_actions = QHBoxLayout()
@@ -1837,10 +1870,10 @@ class MainWindow(QMainWindow):
         novedades_layout.addLayout(novedades_header)
         self.novedades_list = QListWidget()
         self.novedades_list.setObjectName("novedadesList")
-        self.novedades_list.setFixedHeight(82)
+        self.novedades_list.setMinimumHeight(220)
         self.novedades_list.itemSelectionChanged.connect(self.update_novedad_actions)
         self.novedades_list.itemDoubleClicked.connect(lambda _: self.show_selected_novedad())
-        novedades_layout.addWidget(self.novedades_list)
+        novedades_layout.addWidget(self.novedades_list, 1)
         novedades_actions = QHBoxLayout()
         self.sisfe_status = QLabel("SISFE sin iniciar")
         self.sisfe_status.setObjectName("muted")
@@ -2106,15 +2139,64 @@ class MainWindow(QMainWindow):
         self.work_tabs.setCurrentIndex(self.compilation_tab_index)
         self.compilation.setFocus()
 
+    def toggle_directory_expanded(self):
+        self._directory_expanded = not self._directory_expanded
+        header_visible = not self._directory_expanded
+        for widget in (
+            self.quick_label,
+            self.quick_count,
+            self.quick_toggle_button,
+        ):
+            widget.setVisible(header_visible)
+        self.directory_expand_button.setIcon(
+            ui_icon("arrow-up" if self._directory_expanded else "arrow-down")
+        )
+        self.directory_expand_button.setToolTip(
+            "Volver a mostrar la biblioteca"
+            if self._directory_expanded
+            else "Expandir directorio y ocultar temporalmente la biblioteca"
+        )
+        self.directory_expand_button.setAccessibleName(
+            self.directory_expand_button.toolTip()
+        )
+        self.apply_quick_access_visibility()
+
+    def toggle_quick_access(self):
+        self._quick_access_collapsed = not self._quick_access_collapsed
+        self.quick_toggle_button.setIcon(
+            ui_icon("arrow-down" if self._quick_access_collapsed else "arrow-up")
+        )
+        self.quick_toggle_button.setToolTip(
+            "Expandir biblioteca"
+            if self._quick_access_collapsed
+            else "Contraer biblioteca"
+        )
+        self.quick_toggle_button.setAccessibleName(self.quick_toggle_button.toolTip())
+        self.apply_quick_access_visibility()
+
+    def apply_quick_access_visibility(self):
+        content_visible = not self._directory_expanded and not self._quick_access_collapsed
+        for widget in (
+            self.quick_note,
+            self.quick_access,
+            self.quick_actions_widget,
+            self.models_button,
+        ):
+            widget.setVisible(content_visible)
+
     def reload_professionals(self):
         self.professional_combo.blockSignals(True)
         self.professional_combo.clear()
+        self.professional_combo.addItem(ADD_PROFESSIONAL_LABEL)
         self.professional_combo.addItems(self.store.settings.professionals)
         index = self.professional_combo.findText(self.store.settings.current_professional)
-        self.professional_combo.setCurrentIndex(max(0, index))
+        self.professional_combo.setCurrentIndex(max(1, index))
         self.professional_combo.blockSignals(False)
 
     def professional_changed(self, name: str):
+        if name == ADD_PROFESSIONAL_LABEL:
+            self.add_professional()
+            return
         if name:
             self.store.set_professional(name)
 
@@ -2126,7 +2208,7 @@ class MainWindow(QMainWindow):
         )
         if accepted and name.strip():
             self.store.add_professional(name)
-            self.reload_professionals()
+        self.reload_professionals()
 
     def configure_mev_profile(self):
         professional = self.professional_combo.currentText().strip()

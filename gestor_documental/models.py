@@ -29,10 +29,16 @@ CASE_FIELDS = (
     "Contraparte",
 )
 
-# Campos estables que forman parte del flujo principal. Los campos de
-# integraciones postergadas se conservan en CASE_FIELDS para no perder datos
-# ya guardados, pero no ocupan lugar en la ficha cotidiana del expediente.
-VISIBLE_CASE_FIELDS = tuple(field for field in CASE_FIELDS if field != "Expediente SRT")
+# La ficha cotidiana conserva sólo los cinco datos necesarios para identificar
+# el caso y generar escritos sencillos. Los demás siguen disponibles en
+# ``Más datos`` y en los modelos Word, sin pérdida de compatibilidad.
+VISIBLE_CASE_FIELDS = (
+    "Actor",
+    "Demandado",
+    "Causa",
+    "CUIJ",
+    "Radicación",
+)
 
 CASE_FIELD_LABELS = {
     "CUIJ": "Número de expediente",

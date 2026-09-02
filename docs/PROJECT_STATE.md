@@ -18,11 +18,11 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Botones secundarios compactos basados en iconos con texto de ayuda accesible; las acciones críticas mantienen etiquetas explícitas.
 - Ubicación activa para decidir dónde crear casos y qué biblioteca cotidiana mostrar.
 - Desconexión segura de ubicaciones sin eliminar archivos y estado visible para unidades temporalmente no disponibles.
-- Acceso rápido siempre visible, almacenado en `00 - ACCESO RÁPIDO` dentro de cada ubicación activa y excluido del árbol de casos.
+- Acceso rápido almacenado en `00 - ACCESO RÁPIDO` dentro de cada ubicación activa y excluido del árbol de casos, con contracción independiente y expansión temporal del Directorio.
 - Entrada con normalización/conversión, arrastre al caso y salida hacia correo u otras aplicaciones desde Acceso rápido.
 - Creación y renombrado contextual de casos.
 - Metadatos básicos protegidos en modo lectura, con edición explícita, Guardar/Cancelar y confirmación al cambiar de caso o cerrar.
-- Ficha ampliada organizada por uso en **Datos generales**, **Entrevista inicial** y **RAEO**, para mantener breve la pantalla cotidiana.
+- Ficha principal reducida a Actor, Demandado, Causa, Número de expediente y Radicación; la ficha ampliada se organiza por uso en **Datos generales**, **Entrevista inicial** y **RAEO**.
 - Datos personales, laborales, procesales, médicos y probatorios, con filas repetibles para testigos, documentación, responsables, antecedentes LRT, afecciones, atenciones y estudios.
 - Carátula y número de expediente derivados de los datos ya existentes; identificación interna, fecha de creación y profesional creador generados por el sistema.
 - Cálculos de edad, antigüedad, intervalos entre hitos y remuneraciones, más alertas contextuales y control de datos faltantes para RAEO.
@@ -61,7 +61,8 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Selección ampliable de profesionales.
 - Firma PAdES interna mediante token SafeNet y PKCS#11, con SHA-256, validación inmediata y conservación del PDF original.
 - Inicio de sesión del token una sola vez por ejecución: el PIN no se persiste y la sesión puede cerrarse manualmente desde el menú Firmar.
-- Portal jurídico separado del área cotidiana de archivos, con contador propio y acceso a los movimientos integrados.
+- Portal jurídico separado del área cotidiana de archivos, con contador propio, lista de altura completa y acceso a los movimientos integrados.
+- Selector de profesionales con acción de alta incorporada y menú de configuración rápida en el engranaje.
 - Checklist operativo de documentación pendiente, compartido con la entrevista del caso y actualizable al recibir cada elemento.
 - Proyección SQLite refrescada desde los metadatos vigentes del caso y conservación de la identidad relacional al renombrar su carpeta.
 - Nombre `_FIRMADO` con versiones legibles y advertencia si el tamaño posterior a la firma supera el perfil seleccionado.

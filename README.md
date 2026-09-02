@@ -13,11 +13,11 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Iconografía vectorial moderna para ubicaciones, casos, tipos de archivo y acciones; los comandos secundarios repetitivos usan iconos con ayuda emergente y las acciones principales conservan su nombre.
 - Ubicación activa seleccionable: determina dónde se crea el próximo caso y qué biblioteca de Acceso rápido se muestra.
 - Las ubicaciones temporalmente desconectadas permanecen visibles como **Ubicación no disponible** y pueden quitarse del Gestor sin borrar sus archivos.
-- **Acceso rápido** siempre visible para DNI, matrícula, CBU, constancias y documental reutilizable.
+- **Acceso rápido** disponible para DNI, matrícula, CBU, constancias y documental reutilizable, con controles para contraer la biblioteca o ampliar temporalmente el Directorio.
 - Cada ubicación tiene su propia biblioteca en `00 - ACCESO RÁPIDO`, pero esa carpeta no aparece como si fuera un caso.
 - Creación de casos vacíos, sin subcarpetas automáticas; reconocimiento, importación y renombrado de carpetas creadas por el usuario.
 - Datos del caso protegidos contra cambios involuntarios: se muestran en modo lectura y sólo se modifican mediante **Editar datos**, con Guardar/Cancelar y aviso si se intenta cambiar de caso con cambios pendientes.
-- **Más datos** se organiza en tres pestañas: **Datos generales**, **Entrevista inicial** y **RAEO**. La pantalla principal sigue siendo breve, mientras que la ficha ampliada incorpora datos personales, laborales, procesales, médicos, prueba, campos repetibles y datos propios del formulario RAEO.
+- **Más datos** se organiza en tres pestañas: **Datos generales**, **Entrevista inicial** y **RAEO**. La pantalla principal conserva sólo Actor, Demandado, Causa, Número de expediente y Radicación, mientras que la ficha ampliada incorpora datos personales, laborales, procesales, médicos, prueba, campos repetibles y datos propios del formulario RAEO.
 - Carátula y número de expediente se reutilizan del caso: nunca se vuelven a cargar en RAEO. El sistema genera además una identificación interna, fecha de creación y profesional creador.
 - Cálculos automáticos de edad, antigüedad, días entre hitos médicos/laborales, remuneración mensual estimada y diferencia con convenio; alertas de datos RAEO faltantes y sugerencias contextuales.
 - Archivos del caso con arrastre hacia adentro y hacia otras aplicaciones, iconos de tipo y navegación interna por subcarpetas mediante doble clic, `Enter` y **Atrás**.
@@ -41,7 +41,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 
 - Compresión automática. Si el resultado todavía excede el límite, pregunta antes de dividirlo.
 - Compilación en segundo plano con una ventana de progreso, cancelación segura y sin mostrar PowerShell.
-- Pestaña **Portal jurídico** con novedades SISFE consultadas desde la sesión manual del navegador integrado, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
+- Pestaña **Portal jurídico** de altura completa, con novedades SISFE consultadas desde la sesión manual del navegador integrado, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
 - Descargas realizadas desde la vista oficial de SISFE guardadas en `Documentos SISFE`, con estado visible, registro por hash y descarte recuperable de copias idénticas.
 - Pestaña **Documentación pendiente** con un checklist operativo para agregar lo solicitado al cliente y marcarlo como recibido; reutiliza la misma información de la entrevista.
 - Liberación inmediata de los PDF leídos: al terminar de compilar o dividir, las carpetas del caso pueden renombrarse o eliminarse desde el Explorador de Windows.
@@ -50,7 +50,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Firma digital PAdES dentro del Gestor mediante token SafeNet/PKCS#11. El PIN se solicita una vez, no se guarda y la sesión se reutiliza hasta cerrarla manualmente o salir de la aplicación.
 - Cada firma se valida inmediatamente y crea un archivo `_FIRMADO.pdf` sin modificar el PDF original. Si el tamaño firmado supera el límite elegido, se advierte sin alterar el documento ya firmado.
 - Xólido continúa disponible como alternativa: reutiliza su sesión abierta y muestra el PDF listo para arrastrar a su cuadro de documentos.
-- Selector ampliable de profesionales.
+- Selector de profesionales con **Añadir nuevo profesional…** como primera opción y un menú de configuración para MEV, firmador y modelos.
 
 ## Iniciar
 
