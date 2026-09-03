@@ -140,9 +140,48 @@ COMMON_GENERAL_SECTIONS = (
 def process_sections() -> tuple[SectionSpec, ...]:
     return (
         SectionSpec(
-            "Datos procesales",
-            "Información común del expediente judicial; los datos propios de cada tipo se cargan aparte.",
-            tuple(field for field in GENERAL_SECTIONS[2].fields if field.key != "Tipo de proceso"),
+            "Portal y radicación",
+            "Define dónde se tramita el expediente. Sólo SISFE tiene sincronización operativa por ahora.",
+            (
+                FieldSpec(
+                    "Portal jurídico asociado",
+                    "Portal jurídico asociado",
+                    "combo",
+                    ("SISFE", "MEV SCBA", "PJN", "SRT", "Sin integración"),
+                ),
+                FieldSpec("Radicación", "Radicación de primera instancia"),
+                FieldSpec("Radicación segunda instancia", "Radicación de segunda instancia"),
+                FieldSpec("Jurisdicción", "Jurisdicción"),
+                FieldSpec("Fuero", "Fuero"),
+                FieldSpec("Juzgado o tribunal", "Juzgado o tribunal"),
+                FieldSpec("Secretaría", "Secretaría"),
+                FieldSpec("Sala", "Sala"),
+                FieldSpec("Localidad del juzgado", "Localidad del juzgado"),
+                FieldSpec("Fecha de inicio de la causa", "Fecha de inicio", "date", placeholder=DATE_PLACEHOLDER),
+            ),
+        ),
+        SectionSpec(
+            "Representación propia",
+            "Datos del profesional y domicilios constituidos por esta parte.",
+            (
+                FieldSpec("Abogado", "Profesional interviniente"),
+                FieldSpec("Matrícula", "Matrícula"),
+                FieldSpec("Tomo/Folio", "Tomo / Folio"),
+                FieldSpec("Domicilio legal", "Domicilio procesal propio"),
+                FieldSpec("Domicilio electrónico", "Domicilio electrónico propio"),
+            ),
+        ),
+        SectionSpec(
+            "Contraparte",
+            "Datos procesales de la parte contraria, sin volver a cargar su nombre.",
+            (
+                FieldSpec("Domicilio del demandado", "Domicilio del demandado", aliases=("Domicilio demandado",)),
+                FieldSpec("Abogado de la contraparte", "Abogado de la contraparte"),
+                FieldSpec("Domicilio procesal de la contraparte", "Domicilio procesal de la contraparte"),
+                FieldSpec("Domicilio electrónico de la contraparte", "Domicilio electrónico de la contraparte"),
+                FieldSpec("Nombre corto para archivos", "Nombre corto para archivos", placeholder="Ej.: PÉREZ"),
+                FieldSpec("Observaciones procesales", "Observaciones procesales", "textarea"),
+            ),
         ),
     )
 

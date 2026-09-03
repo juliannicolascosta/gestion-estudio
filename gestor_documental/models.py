@@ -77,10 +77,16 @@ ADVANCED_FIELD_VARIABLES = {
     "DNI/CUIT demandado": "DOCUMENTO_DEMANDADO",
     "Domicilio actor": "DOMICILIO_ACTOR",
     "Domicilio demandado": "DOMICILIO_DEMANDADO",
+    "Domicilio del demandado": "DOMICILIO_DEMANDADO",
     "Domicilio legal": "DOMICILIO_LEGAL",
     "Domicilio electrónico": "DOMICILIO_ELECTRONICO",
     "Matrícula": "MATRICULA",
     "Tomo/Folio": "TOMO_FOLIO",
+    "Portal jurídico asociado": "PORTAL_JURIDICO",
+    "Radicación segunda instancia": "RADICACION_SEGUNDA_INSTANCIA",
+    "Abogado de la contraparte": "ABOGADO_CONTRAPARTE",
+    "Domicilio procesal de la contraparte": "DOMICILIO_PROCESAL_CONTRAPARTE",
+    "Domicilio electrónico de la contraparte": "DOMICILIO_ELECTRONICO_CONTRAPARTE",
 }
 
 

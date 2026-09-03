@@ -506,6 +506,17 @@ class ExtendedMetadataDialog(QDialog):
 
     def _build_process_tab(self):
         tab, content = self._scroll_tab()
+        reference, reference_layout = make_card("softCard")
+        reference_layout.addLayout(
+            section_heading(
+                "Datos ya cargados",
+                "Se reutilizan automáticamente y no se vuelven a editar en esta pestaña.",
+            )
+        )
+        self.process_summary = QLabel()
+        self.process_summary.setWordWrap(True)
+        reference_layout.addWidget(self.process_summary)
+        content.addWidget(reference)
         self._add_sections(content, process_sections())
         content.addStretch()
         self.tabs.addTab(tab, "Datos procesales")
@@ -800,6 +811,13 @@ class ExtendedMetadataDialog(QDialog):
             f"<b>Registro creado:</b> {metadata.get('Fecha de creación del registro', '')} · "
             f"<b>Profesional creador:</b> {metadata.get('Profesional creador', 'Sin registrar')}"
         )
+        if hasattr(self, "process_summary"):
+            self.process_summary.setText(
+                f"<b>Actor:</b> {metadata.get('Actor', '') or 'Sin cargar'}<br>"
+                f"<b>Demandado:</b> {metadata.get('Demandado', '') or 'Sin cargar'}<br>"
+                f"<b>Causa:</b> {metadata.get('Causa', '') or 'Sin cargar'}<br>"
+                f"<b>Número de expediente:</b> {case_number or 'Sin cargar'}"
+            )
         computed = computed_values(metadata)
         calculation_rows = []
         labels = (
@@ -2506,6 +2524,14 @@ class MainWindow(QMainWindow):
 
     def sync_sisfe(self):
         if not self.require_case():
+            return
+        configured_portal = read_case_metadata(self.case).get("Portal jurídico asociado", "").strip()
+        if configured_portal and configured_portal != "SISFE":
+            QMessageBox.information(
+                self,
+                "Portal jurídico del caso",
+                f"Este caso está asociado a {configured_portal}. Por ahora la sincronización automática sólo está disponible para SISFE.",
+            )
             return
         if not self.sisfe_session.active or not self._sisfe_login_dialog:
             QMessageBox.information(

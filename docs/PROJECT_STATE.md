@@ -23,6 +23,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Creación y renombrado contextual de casos.
 - Metadatos básicos protegidos en modo lectura, con edición explícita, Guardar/Cancelar y confirmación al cambiar de caso o cerrar.
 - Ficha principal reducida a Actor, Demandado, Causa, Número de expediente y Radicación; la ficha ampliada se organiza por uso en **Datos generales**, **Entrevista inicial** y **RAEO**.
+- Datos procesales organizados por portal/radicación, representación propia y contraparte; Actor, Demandado, Causa y expediente se reutilizan como referencia sin volver a cargarlos.
 - Datos personales, laborales, procesales, médicos y probatorios, con filas repetibles para testigos, documentación, responsables, antecedentes LRT, afecciones, atenciones y estudios.
 - Carátula y número de expediente derivados de los datos ya existentes; identificación interna, fecha de creación y profesional creador generados por el sistema.
 - Cálculos de edad, antigüedad, intervalos entre hitos y remuneraciones, más alertas contextuales y control de datos faltantes para RAEO.

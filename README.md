@@ -17,6 +17,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Cada ubicación tiene su propia biblioteca en `00 - ACCESO RÁPIDO`, pero esa carpeta no aparece como si fuera un caso.
 - Creación de casos vacíos, sin subcarpetas automáticas; reconocimiento, importación y renombrado de carpetas creadas por el usuario.
 - Datos del caso protegidos contra cambios involuntarios: se muestran en modo lectura y sólo se modifican mediante **Editar datos**, con Guardar/Cancelar y aviso si se intenta cambiar de caso con cambios pendientes.
+- Datos procesales con portal asociado, radicaciones de ambas instancias y domicilios de las partes, sin duplicar la identidad principal del expediente.
 - **Más datos** se organiza en tres pestañas: **Datos generales**, **Entrevista inicial** y **RAEO**. La pantalla principal conserva sólo Actor, Demandado, Causa, Número de expediente y Radicación, mientras que la ficha ampliada incorpora datos personales, laborales, procesales, médicos, prueba, campos repetibles y datos propios del formulario RAEO.
 - Carátula y número de expediente se reutilizan del caso: nunca se vuelven a cargar en RAEO. El sistema genera además una identificación interna, fecha de creación y profesional creador.
 - Cálculos automáticos de edad, antigüedad, días entre hitos médicos/laborales, remuneración mensual estimada y diferencia con convenio; alertas de datos RAEO faltantes y sugerencias contextuales.

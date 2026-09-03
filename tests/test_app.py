@@ -457,6 +457,29 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIn("Identificación interna del expediente", values)
             metadata_dialog.close()
 
+            process_dialog = ExtendedMetadataDialog(
+                {
+                    "Actor": "Pérez, Ana",
+                    "Demandado": "Empresa SA",
+                    "Causa": "Despido",
+                    "CUIJ": "21-123",
+                    "Domicilio demandado": "Calle anterior 10",
+                }
+            )
+            for duplicated in ("Actor", "Demandado", "Causa", "CUIJ"):
+                self.assertNotIn(duplicated, process_dialog.edits)
+            self.assertIn("Pérez, Ana", process_dialog.process_summary.text())
+            self.assertEqual(
+                process_dialog.edits["Domicilio del demandado"].text(),
+                "Calle anterior 10",
+            )
+            process_dialog.edits["Portal jurídico asociado"].setCurrentText("SISFE")
+            process_dialog.edits["Radicación segunda instancia"].setText("Sala II")
+            process_values = process_dialog.values()
+            self.assertEqual(process_values["Portal jurídico asociado"], "SISFE")
+            self.assertEqual(process_values["Radicación segunda instancia"], "Sala II")
+            process_dialog.close()
+
             metadata_dialog = ExtendedMetadataDialog({"Tipo de caso": "Responsabilidad Civil"})
             self.assertIn("Responsable civil", metadata_dialog.edits)
             self.assertNotIn("Nombre del causante", metadata_dialog.edits)

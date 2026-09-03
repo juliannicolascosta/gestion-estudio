@@ -10,6 +10,7 @@ from gestor_documental.case_data import (
     ensure_system_metadata,
     person_name_parts,
     person_name_variants,
+    process_sections,
     raeo_effective_values,
     raeo_missing_fields,
 )
@@ -17,6 +18,27 @@ from gestor_documental.services import create_case, read_case_metadata, save_cas
 
 
 class CaseDataTests(unittest.TestCase):
+    def test_process_fields_reuse_identity_and_cover_both_parties(self):
+        keys = {
+            field.key
+            for section in process_sections()
+            for field in section.fields
+        }
+        self.assertFalse({"Actor", "Demandado", "Causa", "CUIJ"} & keys)
+        self.assertTrue(
+            {
+                "Portal jurídico asociado",
+                "Radicación",
+                "Radicación segunda instancia",
+                "Domicilio legal",
+                "Domicilio electrónico",
+                "Domicilio del demandado",
+                "Abogado de la contraparte",
+                "Domicilio procesal de la contraparte",
+                "Domicilio electrónico de la contraparte",
+            }.issubset(keys)
+        )
+
     def test_one_name_entry_supports_comma_and_natural_order(self):
         self.assertEqual(
             person_name_parts("PÉREZ, JUAN CARLOS"),

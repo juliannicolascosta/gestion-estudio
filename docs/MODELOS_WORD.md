@@ -14,6 +14,9 @@ Campos disponibles:
 - `{{APELLIDO}}` y `{{NOMBRES}}`: componentes interpretados del nombre.
 - `{{NOMBRE_APELLIDO}}`: variante natural, por ejemplo `Juan Carlos Pérez`.
 - `{{APELLIDO_NOMBRES}}`: variante para carátulas, por ejemplo `Pérez, Juan Carlos`.
+- `{{PORTAL_JURIDICO}}`: portal asociado al caso.
+- `{{RADICACION}}` y `{{RADICACION_SEGUNDA_INSTANCIA}}`: radicaciones de primera y segunda instancia.
+- `{{DOMICILIO_DEMANDADO}}`, `{{ABOGADO_CONTRAPARTE}}`, `{{DOMICILIO_PROCESAL_CONTRAPARTE}}` y `{{DOMICILIO_ELECTRONICO_CONTRAPARTE}}`: datos procesales de la parte contraria.
 - `{{CUIJ_COMPLETO}}`: espacio, paréntesis y CUIJ, por ejemplo ` (CUIJ N° 21-12345678-9)`. Si no hay número, desaparece todo el bloque.
 - `{{ACTOR}}`, `{{DEMANDADO}}`, `{{CAUSA}}`, `{{RADICACION}}`, `{{ABOGADO}}` y `{{CONTRAPARTE}}`: cada dato individual.
 - `{{NOMBRE_CORTO}}`: identificador breve configurado en **Más datos**; si está vacío se infiere del Actor. También se usa para proponer el nombre del PDF.
