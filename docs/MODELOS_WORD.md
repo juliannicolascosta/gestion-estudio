@@ -7,6 +7,9 @@ Los campos automáticos son textos entre llaves que se escriben directamente en 
 Campos disponibles:
 
 - `{{PROFESIONAL}}`: valor de **Abogado**, convertido a mayúsculas y sin `Dr.`, `Dra.`, `Doctor` o `Doctora`. Si Abogado está vacío, usa el profesional seleccionado arriba.
+- Datos del perfil seleccionado: `{{PROFESIONAL_NOMBRE_COMPLETO}}`, `{{PROFESIONAL_DNI}}`, `{{PROFESIONAL_CUIT}}`, `{{PROFESIONAL_DOMICILIO}}`, `{{PROFESIONAL_LOCALIDAD}}`, `{{PROFESIONAL_PROVINCIA}}`, `{{PROFESIONAL_TELEFONO}}`, `{{PROFESIONAL_CONDICION_FISCAL}}` y `{{PROFESIONAL_CORREO}}`.
+- Matrículas: `{{PROFESIONAL_MATRICULA_SANTA_FE}}`, `{{PROFESIONAL_MATRICULA_BUENOS_AIRES}}` y `{{PROFESIONAL_MATRICULA_FEDERAL}}`.
+- Banco: `{{PROFESIONAL_BANCO}}`, `{{PROFESIONAL_TIPO_CUENTA}}`, `{{PROFESIONAL_NUMERO_CUENTA}}` y `{{PROFESIONAL_CBU}}`.
 - `{{CARATULA}}`: `ACTOR C/ DEMANDADO S/ CAUSA`, en mayúsculas.
 - `{{NUMERO_EXPEDIENTE}}`: Número de expediente o CUIJ, sin texto adicional. `{{CUIJ}}` sigue disponible como alias para modelos anteriores.
 - `{{EXPEDIENTE_SRT}}`: número de expediente o trámite ante la SRT, independiente del expediente judicial.

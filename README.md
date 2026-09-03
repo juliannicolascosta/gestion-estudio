@@ -58,6 +58,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Cada firma se valida inmediatamente y crea un archivo `_FIRMADO.pdf` sin modificar el PDF original. Si el tamaño firmado supera el límite elegido, se advierte sin alterar el documento ya firmado.
 - Xólido continúa disponible como alternativa: reutiliza su sesión abierta y muestra el PDF listo para arrastrar a su cuadro de documentos.
 - Selector de profesionales con **Añadir nuevo profesional…** como primera opción y un menú de configuración para MEV, firmador y modelos.
+- Perfil único y editable por profesional con DNI, CUIT, domicilio, contacto, condición fiscal, matrículas y datos bancarios. La carga se reutiliza automáticamente en los modelos Word y el último perfil utilizado permanece seleccionado.
 
 ## Iniciar
 

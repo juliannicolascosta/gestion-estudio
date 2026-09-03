@@ -206,6 +206,10 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(store.settings.current_professional, "Profesional")
             store.set_study_root(study)
             store.add_professional("Dra. Ana Pérez")
+            store.save_professional_profile(
+                "Dra. Ana Pérez",
+                {"name": "Dra. Ana Pérez", "dni": "30111222", "cbu": "123456"},
+            )
             store.set_layout_state(
                 {
                     "body": [220, 1180],
@@ -220,6 +224,10 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(reloaded.settings.study_root, study)
             self.assertIn("Dra. Ana Pérez", reloaded.settings.professionals)
             self.assertEqual(reloaded.settings.current_professional, "Dra. Ana Pérez")
+            self.assertEqual(
+                reloaded.settings.professional_profiles["Dra. Ana Pérez"]["cbu"],
+                "123456",
+            )
             self.assertEqual(reloaded.settings.layout_state["body"], [220, 1180])
             self.assertFalse(reloaded.settings.layout_state["compilation_visible"])
             self.assertEqual(reloaded.settings.activity_settings["yellow_days"], 30)

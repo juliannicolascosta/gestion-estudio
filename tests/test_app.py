@@ -360,15 +360,27 @@ class AppSmokeTests(unittest.TestCase):
             store.set_study_root(study)
             window = MainWindow(store)
 
-            with patch(
-                "gestor_documental.app.QInputDialog.getText",
-                return_value=("Dra. Ana Pérez", True),
-            ):
+            with patch("gestor_documental.app.ProfessionalProfileDialog") as dialog_class:
+                dialog = dialog_class.return_value
+                dialog.exec.return_value = True
+                dialog.values.return_value = {
+                    "name": "Dra. Ana Pérez",
+                    "dni": "30111222",
+                    "license_santa_fe": "L 123 F 45",
+                }
                 window.professional_combo.setCurrentIndex(0)
 
             self.assertEqual(window.professional_combo.itemText(0), ADD_PROFESSIONAL_LABEL)
             self.assertEqual(window.professional_combo.currentText(), "Dra. Ana Pérez")
             self.assertEqual(store.settings.current_professional, "Dra. Ana Pérez")
+            self.assertEqual(
+                store.settings.professional_profiles["Dra. Ana Pérez"]["dni"],
+                "30111222",
+            )
+            self.assertEqual(
+                window.professional_template_values()["PROFESIONAL_MATRICULA_SANTA_FE"],
+                "L 123 F 45",
+            )
             self.assertGreaterEqual(len(window.professional_settings_button.menu().actions()), 4)
             window.close()
 

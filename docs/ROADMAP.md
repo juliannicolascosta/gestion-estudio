@@ -54,6 +54,7 @@
 - [x] Ficha cotidiana reducida a los cinco metadatos solicitados.
 - [x] Directorio y biblioteca ampliables o contraíbles.
 - [x] Alta de profesional desde el selector y engranaje de configuración rápida.
+- [x] Perfil completo por profesional y variables Word para identidad, contacto, matrículas y banco.
 - [x] Compilación permanente a la derecha, visible al mismo tiempo que los archivos del caso.
 - [x] Columnas y secciones verticales redimensionables, persistentes y con Compilación contraíble.
 - [x] Indicador visual común para tareas SISFE en espera, ejecución, éxito o error.

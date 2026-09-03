@@ -188,6 +188,18 @@ class SettingsStore:
         ]
         if not professionals:
             professionals = ["Profesional"]
+        raw_profiles = payload.get("professional_profiles", {})
+        professional_profiles = {
+            repair_text(str(name)): {
+                str(key): repair_text(str(value).strip())
+                for key, value in data.items()
+                if str(value).strip()
+            }
+            for name, data in (raw_profiles.items() if isinstance(raw_profiles, dict) else [])
+            if isinstance(data, dict) and str(name).strip()
+        }
+        for name in professionals:
+            professional_profiles.setdefault(name, {"name": name})
         current = repair_text(str(payload.get("current_professional", "")).strip())
         if current not in professionals:
             current = professionals[0]
@@ -231,6 +243,7 @@ class SettingsStore:
             study_roots=roots,
             active_study_root=active,
             professionals=professionals,
+            professional_profiles=professional_profiles,
             current_professional=current,
             signer_path=Path(signer) if signer else None,
             mev_profiles={
@@ -254,6 +267,7 @@ class SettingsStore:
                 str(self.settings.study_root) if self.settings.study_root else None
             ),
             "professionals": self.settings.professionals,
+            "professional_profiles": self.settings.professional_profiles,
             "current_professional": self.settings.current_professional,
             "signer_path": str(self.settings.signer_path) if self.settings.signer_path else None,
             "mev_profiles": self.settings.mev_profiles,
@@ -298,7 +312,37 @@ class SettingsStore:
             self.settings.professionals.append(name)
         if name:
             self.settings.current_professional = name
+            self.settings.professional_profiles.setdefault(name, {"name": name})
         self.save()
+
+    def save_professional_profile(
+        self,
+        original_name: str | None,
+        profile: dict[str, str],
+    ) -> str:
+        cleaned = {
+            str(key): " ".join(str(value).split()).strip()
+            for key, value in profile.items()
+            if str(value).strip()
+        }
+        name = cleaned.get("name", "")
+        if not name:
+            raise ValueError("Indicá el nombre del profesional.")
+        original = (original_name or "").strip()
+        if name != original and name in self.settings.professionals:
+            raise ValueError("Ya existe un profesional con ese nombre.")
+        if original in self.settings.professionals:
+            index = self.settings.professionals.index(original)
+            self.settings.professionals[index] = name
+            self.settings.professional_profiles.pop(original, None)
+            if original in self.settings.mev_profiles:
+                self.settings.mev_profiles[name] = self.settings.mev_profiles.pop(original)
+        elif name not in self.settings.professionals:
+            self.settings.professionals.append(name)
+        self.settings.professional_profiles[name] = cleaned
+        self.settings.current_professional = name
+        self.save()
+        return name
 
     def set_professional(self, name: str):
         if name in self.settings.professionals:

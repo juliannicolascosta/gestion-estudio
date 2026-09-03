@@ -145,6 +145,7 @@ class AppSettings:
     study_roots: list[Path] = field(default_factory=list)
     active_study_root: Path | None = None
     professionals: list[str] = field(default_factory=list)
+    professional_profiles: dict[str, dict[str, str]] = field(default_factory=dict)
     current_professional: str = ""
     signer_path: Path | None = None
     mev_profiles: dict[str, dict[str, str]] = field(default_factory=dict)

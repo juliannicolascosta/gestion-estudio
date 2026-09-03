@@ -78,6 +78,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Cada PDF descargado se registra por hash y queda relacionado en SQLite con el movimiento SISFE exacto y su rol (principal o adicional); la relación y la deduplicación son idempotentes.
 - Los diálogos SISFE, la lista ordenable de compilación y los roles de interfaz ya viven en módulos propios, primer corte efectivo para reducir `app.py` sin modificar el flujo visible.
 - Selector de profesionales con acción de alta incorporada y menú de configuración rápida en el engranaje.
+- Perfil persistente por profesional con identidad, contacto, condición fiscal, matrículas y datos bancarios reutilizables como variables Word; el último profesional elegido se restaura al iniciar.
 - Checklist operativo de documentación pendiente, compartido con la entrevista del caso y actualizable al recibir cada elemento.
 - Proyección SQLite refrescada desde los metadatos vigentes del caso y conservación de la identidad relacional al renombrar su carpeta.
 - Nombre `_FIRMADO` con versiones legibles y advertencia si el tamaño posterior a la firma supera el perfil seleccionado.

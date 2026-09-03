@@ -150,6 +150,25 @@ from .ui.sisfe import SisfeCaseBrowserDialog, SisfeLoginDialog
 
 ADD_PROFESSIONAL_LABEL = "Añadir nuevo profesional…"
 
+PROFESSIONAL_PROFILE_FIELDS = (
+    ("name", "Nombre y apellido"),
+    ("dni", "DNI"),
+    ("cuit", "CUIT"),
+    ("address", "Domicilio"),
+    ("city", "Localidad"),
+    ("province", "Provincia"),
+    ("phone", "Teléfono"),
+    ("tax_status", "Condición fiscal"),
+    ("email", "Correo"),
+    ("license_santa_fe", "Matrícula Santa Fe"),
+    ("license_buenos_aires", "Matrícula Buenos Aires"),
+    ("license_federal", "Matrícula Federal"),
+    ("bank", "Banco"),
+    ("account_type", "Tipo de cuenta"),
+    ("account_number", "Número de cuenta"),
+    ("cbu", "CBU"),
+)
+
 
 def _format_sisfe_date(value: object) -> str:
     if not value:
@@ -1147,6 +1166,60 @@ class ActivitySettingsDialog(QDialog):
         return values
 
 
+class ProfessionalProfileDialog(QDialog):
+    def __init__(self, profile: dict[str, str] | None = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Perfil del profesional")
+        self.setMinimumSize(650, 620)
+        profile = profile or {}
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.addLayout(section_heading(
+            "Datos del profesional",
+            "Se cargan una vez y quedan disponibles en todos los modelos Word.",
+        ))
+        tabs = QTabWidget()
+        self.edits: dict[str, QLineEdit] = {}
+        groups = (
+            ("Identidad y contacto", PROFESSIONAL_PROFILE_FIELDS[:9]),
+            ("Matrículas y banco", PROFESSIONAL_PROFILE_FIELDS[9:]),
+        )
+        for title, fields in groups:
+            tab = QWidget()
+            form = QFormLayout(tab)
+            form.setContentsMargins(16, 16, 16, 16)
+            form.setSpacing(10)
+            for key, label in fields:
+                edit = QLineEdit(str(profile.get(key, "")))
+                if key == "name":
+                    edit.setPlaceholderText("Ej.: Julián Nicolás Costa")
+                self.edits[key] = edit
+                form.addRow(label, edit)
+            tabs.addTab(tab, title)
+        layout.addWidget(tabs, 1)
+        note = QLabel("No se almacenan PIN del token ni contraseñas de portales.")
+        note.setObjectName("muted")
+        layout.addWidget(note)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("Guardar perfil")
+        buttons.accepted.connect(self.accept_if_valid)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def accept_if_valid(self):
+        if self.edits["name"].text().strip():
+            self.accept()
+
+    def values(self) -> dict[str, str]:
+        return {
+            key: edit.text().strip()
+            for key, edit in self.edits.items()
+            if edit.text().strip()
+        }
+
+
 class CompileNameDialog(QDialog):
     def __init__(self, case: Case, suggestion: str, identifier_missing: bool, parent=None):
         super().__init__(parent)
@@ -1643,6 +1716,7 @@ class MainWindow(QMainWindow):
         )
         professional_menu = QMenu(self.professional_settings_button)
         professional_menu.addAction("Añadir profesional…", self.add_professional)
+        professional_menu.addAction("Editar perfil actual…", self.edit_current_professional)
         professional_menu.addAction("Configurar acceso MEV…", self.configure_mev_profile)
         professional_menu.addSeparator()
         professional_menu.addAction("Configurar firmador externo…", self.configure_signer)
@@ -2356,14 +2430,29 @@ class MainWindow(QMainWindow):
             self.store.set_professional(name)
 
     def add_professional(self):
-        name, accepted = QInputDialog.getText(
-            self,
-            "Agregar profesional",
-            "Nombre que aparecerá en modelos y presentaciones:",
-        )
-        if accepted and name.strip():
-            self.store.add_professional(name)
+        dialog = ProfessionalProfileDialog(parent=self)
+        if dialog.exec():
+            try:
+                self.store.save_professional_profile(None, dialog.values())
+            except ValueError as error:
+                QMessageBox.warning(self, "No pudimos guardar el perfil", str(error))
         self.reload_professionals()
+
+    def edit_current_professional(self):
+        name = self.professional_combo.currentText().strip()
+        if not name or name == ADD_PROFESSIONAL_LABEL:
+            return
+        profile = dict(self.store.settings.professional_profiles.get(name, {}))
+        profile.setdefault("name", name)
+        dialog = ProfessionalProfileDialog(profile, self)
+        if not dialog.exec():
+            return
+        try:
+            self.store.save_professional_profile(name, dialog.values())
+            self.reload_professionals()
+            self.statusBar().showMessage("Perfil profesional actualizado", 3500)
+        except ValueError as error:
+            QMessageBox.warning(self, "No pudimos guardar el perfil", str(error))
 
     def configure_mev_profile(self):
         professional = self.professional_combo.currentText().strip()
@@ -4111,12 +4200,14 @@ class MainWindow(QMainWindow):
 
         def completed(extracted):
             try:
+                profile_values = self.professional_template_values()
+                profile_values["TEXTO_PROVEIDO"] = extracted.text
                 writing = create_writing(
                     case,
                     f"Cédula - {pdf.stem}",
                     template,
                     self.professional_combo.currentText(),
-                    {"TEXTO_PROVEIDO": extracted.text},
+                    profile_values,
                 )
             except Exception as error:
                 QMessageBox.warning(self, "No pudimos generar la cédula", str(error))
@@ -4332,12 +4423,14 @@ class MainWindow(QMainWindow):
         extra_values: dict[str, str] | None = None,
     ):
         try:
+            profile_values = self.professional_template_values()
+            profile_values.update(extra_values or {})
             path = create_writing(
                 self.case,
                 title,
                 template,
                 self.professional_combo.currentText(),
-                extra_values,
+                profile_values,
             )
             self.set_current_writing(path)
             self.case_directory = path.parent
@@ -4346,6 +4439,32 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Escrito creado: {path.name}", 5000)
         except Exception as error:
             QMessageBox.critical(self, "No pudimos crear el escrito", str(error))
+
+    def professional_template_values(self) -> dict[str, str]:
+        name = self.professional_combo.currentText().strip()
+        profile = self.store.settings.professional_profiles.get(name, {})
+        variable_names = {
+            "name": "PROFESIONAL_NOMBRE_COMPLETO",
+            "dni": "PROFESIONAL_DNI",
+            "cuit": "PROFESIONAL_CUIT",
+            "address": "PROFESIONAL_DOMICILIO",
+            "city": "PROFESIONAL_LOCALIDAD",
+            "province": "PROFESIONAL_PROVINCIA",
+            "phone": "PROFESIONAL_TELEFONO",
+            "tax_status": "PROFESIONAL_CONDICION_FISCAL",
+            "email": "PROFESIONAL_CORREO",
+            "license_santa_fe": "PROFESIONAL_MATRICULA_SANTA_FE",
+            "license_buenos_aires": "PROFESIONAL_MATRICULA_BUENOS_AIRES",
+            "license_federal": "PROFESIONAL_MATRICULA_FEDERAL",
+            "bank": "PROFESIONAL_BANCO",
+            "account_type": "PROFESIONAL_TIPO_CUENTA",
+            "account_number": "PROFESIONAL_NUMERO_CUENTA",
+            "cbu": "PROFESIONAL_CBU",
+        }
+        return {
+            variable: str(profile.get(key, "")).strip()
+            for key, variable in variable_names.items()
+        }
 
     def set_current_writing(self, path: Path):
         self.current_writing = path
@@ -4406,6 +4525,8 @@ class MainWindow(QMainWindow):
             "Escribí estos campos directamente en el lugar del Word donde "
             "querés que aparezca cada dato:\n\n"
             "{{PROFESIONAL}}  Campo Abogado, en mayúsculas y sin Dr./Dra.\n"
+            "{{PROFESIONAL_DNI}}  {{PROFESIONAL_CUIT}}  {{PROFESIONAL_CBU}}  Datos del perfil\n"
+            "{{PROFESIONAL_MATRICULA_SANTA_FE}}  y matrículas de otras jurisdicciones\n"
             "{{CARATULA}}  ACTOR C/ DEMANDADO S/ CAUSA\n"
             "{{NUMERO_EXPEDIENTE}}  Número de expediente o CUIJ\n"
             "{{CUIJ_COMPLETO}}  (CUIJ N° …), si fue cargado\n"
