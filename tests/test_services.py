@@ -144,12 +144,18 @@ class ServiceTests(unittest.TestCase):
                     "Nombre corto para archivos": "PEREZ-ART",
                     "Jurisdicción": "Santa Fe",
                     "Nombre del mediador": "María López",
+                    "Clave fiscal (ARCA)": "clave temporal",
                 },
             )
             values = writing_template_values(case, "Apela")
             self.assertEqual(values["{{NOMBRE_CORTO}}"], "PEREZ-ART")
             self.assertEqual(values["{{JURISDICCION}}"], "Santa Fe")
             self.assertEqual(values["{{NOMBRE_DEL_MEDIADOR}}"], "María López")
+            self.assertEqual(values["{{APELLIDO}}"], "Pérez")
+            self.assertEqual(values["{{NOMBRES}}"], "Ana")
+            self.assertEqual(values["{{NOMBRE_APELLIDO}}"], "Ana Pérez")
+            self.assertEqual(values["{{APELLIDO_NOMBRES}}"], "Pérez, Ana")
+            self.assertEqual(values["{{CLAVE_FISCAL_ARCA}}"], "clave temporal")
 
     def test_new_case_data_and_calculations_are_available_to_word_models(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -478,7 +478,12 @@ class AppSmokeTests(unittest.TestCase):
             lrt_type_combo.setCurrentText("Sucesiones")
             self.app.processEvents()
             self.assertEqual(lrt_dialog.values()["Tipo de caso"], "Sucesiones")
-            self.assertIn("Estado de acceso ARCA/AFIP", lrt_dialog.edits)
+            self.assertIn("Clave fiscal (ARCA)", lrt_dialog.edits)
+            self.assertIn("Clave de Seguridad Social (ANSES)", lrt_dialog.edits)
+            self.assertNotIn("Estado de acceso ARCA/AFIP", lrt_dialog.edits)
+            self.assertNotIn("Estado de acceso ANSES", lrt_dialog.edits)
+            lrt_dialog.edits["Clave fiscal (ARCA)"].setText("clave copiable")
+            self.assertEqual(lrt_dialog.values()["Clave fiscal (ARCA)"], "clave copiable")
             lrt_dialog.close()
 
             picker = ModelPickerDialog([first, second])

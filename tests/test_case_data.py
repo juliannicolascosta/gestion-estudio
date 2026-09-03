@@ -8,6 +8,8 @@ from gestor_documental.case_data import (
     case_suggestions,
     computed_values,
     ensure_system_metadata,
+    person_name_parts,
+    person_name_variants,
     raeo_effective_values,
     raeo_missing_fields,
 )
@@ -15,6 +17,19 @@ from gestor_documental.services import create_case, read_case_metadata, save_cas
 
 
 class CaseDataTests(unittest.TestCase):
+    def test_one_name_entry_supports_comma_and_natural_order(self):
+        self.assertEqual(
+            person_name_parts("PÉREZ, JUAN CARLOS"),
+            ("PÉREZ", "JUAN CARLOS"),
+        )
+        self.assertEqual(
+            person_name_parts("Juan Carlos Pérez"),
+            ("Pérez", "Juan Carlos"),
+        )
+        variants = person_name_variants("Juan Carlos Pérez")
+        self.assertEqual(variants["Nombre y apellido"], "Juan Carlos Pérez")
+        self.assertEqual(variants["Apellido y nombres"], "Pérez, Juan Carlos")
+
     def test_system_data_and_caption_are_derived_without_duplicate_fields(self):
         source = {
             "Apellido del actor": "Pérez",
@@ -35,6 +50,9 @@ class CaseDataTests(unittest.TestCase):
         )
 
         self.assertEqual(first["Actor"], "Pérez, Juan Carlos")
+        self.assertEqual(first["Nombre y apellido"], "Juan Carlos Pérez")
+        self.assertEqual(first["Apellido del actor"], "Pérez")
+        self.assertEqual(first["Nombres del actor"], "Juan Carlos")
         self.assertEqual(first["Nombre completo"], "Pérez, Juan Carlos")
         self.assertEqual(
             build_case_caption(first),

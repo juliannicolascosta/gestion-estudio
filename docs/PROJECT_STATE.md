@@ -26,7 +26,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Datos personales, laborales, procesales, médicos y probatorios, con filas repetibles para testigos, documentación, responsables, antecedentes LRT, afecciones, atenciones y estudios.
 - Carátula y número de expediente derivados de los datos ya existentes; identificación interna, fecha de creación y profesional creador generados por el sistema.
 - Cálculos de edad, antigüedad, intervalos entre hitos y remuneraciones, más alertas contextuales y control de datos faltantes para RAEO.
-- Las credenciales ARCA/AFIP y ANSES no se almacenan: sólo se registra si el acceso fue informado o verificado.
+- Por decisión operativa posterior, la ficha admite guardar claves ARCA/AFIP y ANSES como texto dentro de los metadatos locales del caso; no las utiliza para iniciar sesiones automáticamente.
 - Indicador visible de ubicación y estado de carga de datos del caso actual.
 - Archivos del caso con drag & drop de entrada y salida.
 - Copiar, cortar y pegar archivos o carpetas desde el menú contextual o con `Ctrl+C`, `Ctrl+X` y `Ctrl+V`; la carpeta visible se actualiza cuando Windows detecta cambios externos.

@@ -645,6 +645,8 @@ class ExtendedMetadataDialog(QDialog):
         else:
             editor = QLineEdit(value)
             editor.setPlaceholderText(field.placeholder)
+            if field.key in {"Nombre completo", "Clave fiscal (ARCA)", "Clave de Seguridad Social (ANSES)"}:
+                editor.setClearButtonEnabled(True)
             if field.kind == "money":
                 editor.setPlaceholderText("Ej.: 850.000,00")
             elif field.kind == "integer":
@@ -791,6 +793,8 @@ class ExtendedMetadataDialog(QDialog):
         case_number = metadata.get("CUIJ", "") or metadata.get("Número de expediente", "")
         self.system_summary.setText(
             f"<b>Carátula:</b> {caption or 'Sin datos suficientes'}<br>"
+            f"<b>Nombre natural:</b> {metadata.get('Nombre y apellido', '') or 'Sin cargar'} · "
+            f"<b>Apellido y nombres:</b> {metadata.get('Apellido y nombres', '') or 'Sin cargar'}<br>"
             f"<b>Número de expediente:</b> {case_number or 'Sin cargar'}<br>"
             f"<b>Identificación interna:</b> {metadata.get('Identificación interna del expediente', '')}<br>"
             f"<b>Registro creado:</b> {metadata.get('Fecha de creación del registro', '')} · "

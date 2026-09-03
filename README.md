@@ -90,7 +90,7 @@ Para cambiar lo que genera **Escrito nuevo**, elegí **+ Escrito → Modificar m
 - Caché local de conversiones Word: `%LOCALAPPDATA%\GestorDocumental\conversion-cache`; se invalida automáticamente al cambiar el archivo original.
 - Metadatos de cada caso: `.gestor-caso.json`, dentro de su carpeta.
 - El PIN del token no se almacena en configuración, metadatos ni registros. La sesión autenticada sólo vive mientras el proceso del Gestor está abierto.
-- Las contraseñas de ARCA/AFIP y ANSES tampoco se guardan en los casos: la entrevista registra únicamente si el acceso fue informado o verificado.
+- Por decisión operativa, las claves ARCA/AFIP y ANSES pueden guardarse como texto en los metadatos locales del caso para copiar y pegar. No se envían automáticamente a ningún portal.
 - Los archivos importados se copian; el original externo no se modifica.
 - Quitar una Ubicación del Estudio sólo la desconecta de la aplicación: nunca elimina la carpeta ni sus casos.
 - Quitar un elemento de la compilación no borra el archivo del caso. `Supr` en **Archivos del caso** pide confirmación y lo envía a la Papelera de Windows.

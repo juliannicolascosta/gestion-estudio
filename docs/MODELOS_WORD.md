@@ -10,6 +10,10 @@ Campos disponibles:
 - `{{CARATULA}}`: `ACTOR C/ DEMANDADO S/ CAUSA`, en mayúsculas.
 - `{{NUMERO_EXPEDIENTE}}`: Número de expediente o CUIJ, sin texto adicional. `{{CUIJ}}` sigue disponible como alias para modelos anteriores.
 - `{{EXPEDIENTE_SRT}}`: número de expediente o trámite ante la SRT, independiente del expediente judicial.
+- `{{NOMBRE_COMPLETO}}`: texto ingresado una sola vez en la ficha.
+- `{{APELLIDO}}` y `{{NOMBRES}}`: componentes interpretados del nombre.
+- `{{NOMBRE_APELLIDO}}`: variante natural, por ejemplo `Juan Carlos Pérez`.
+- `{{APELLIDO_NOMBRES}}`: variante para carátulas, por ejemplo `Pérez, Juan Carlos`.
 - `{{CUIJ_COMPLETO}}`: espacio, paréntesis y CUIJ, por ejemplo ` (CUIJ N° 21-12345678-9)`. Si no hay número, desaparece todo el bloque.
 - `{{ACTOR}}`, `{{DEMANDADO}}`, `{{CAUSA}}`, `{{RADICACION}}`, `{{ABOGADO}}` y `{{CONTRAPARTE}}`: cada dato individual.
 - `{{NOMBRE_CORTO}}`: identificador breve configurado en **Más datos**; si está vacío se infiere del Actor. También se usa para proponer el nombre del PDF.

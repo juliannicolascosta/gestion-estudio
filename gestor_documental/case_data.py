@@ -73,6 +73,37 @@ def case_type_from_metadata(metadata: dict[str, str]) -> str:
     return canonical_case_type(metadata.get("Causa", ""))
 
 
+def person_name_parts(value: str | None) -> tuple[str, str]:
+    """Interpret one pasted name and return ``(surname, given_names)``.
+
+    A comma is authoritative (``SURNAME, NAMES``). Without a comma the last
+    word is treated as the surname (``NAMES SURNAME``). This keeps data entry
+    to one field while providing deterministic variants for Word templates.
+    """
+    text = " ".join(str(value or "").replace(";", ",").split()).strip(" ,")
+    if not text:
+        return "", ""
+    if "," in text:
+        surname, given_names = text.split(",", 1)
+        return " ".join(surname.split()), " ".join(given_names.split())
+    words = text.split()
+    if len(words) == 1:
+        return words[0], ""
+    return words[-1], " ".join(words[:-1])
+
+
+def person_name_variants(value: str | None) -> dict[str, str]:
+    surname, given_names = person_name_parts(value)
+    natural = " ".join(part for part in (given_names, surname) if part)
+    filing = ", ".join(part for part in (surname, given_names) if part)
+    return {
+        "Apellido del actor": surname,
+        "Nombres del actor": given_names,
+        "Nombre y apellido": natural,
+        "Apellido y nombres": filing,
+    }
+
+
 COMMON_GENERAL_SECTIONS = (
     SectionSpec(
         "Persona actora / cliente",
@@ -81,6 +112,7 @@ COMMON_GENERAL_SECTIONS = (
             FieldSpec(
                 "Nombre completo",
                 "Nombre completo",
+                placeholder="Ej.: PÉREZ, JUAN CARLOS o Juan Carlos Pérez",
                 aliases=("Actor", "Apellido del actor", "Nombres del actor"),
             ),
             FieldSpec("DNI del actor", "DNI", aliases=("DNI/CUIT actor",)),
@@ -97,18 +129,8 @@ COMMON_GENERAL_SECTIONS = (
             FieldSpec("Provincia del actor", "Provincia"),
             FieldSpec("Teléfono del actor", "Teléfono"),
             FieldSpec("Correo electrónico del actor", "Correo electrónico"),
-            FieldSpec(
-                "Estado de acceso ARCA/AFIP",
-                "Acceso ARCA/AFIP",
-                "combo",
-                ("No informado", "Cliente manifiesta poseerlo", "Verificado"),
-            ),
-            FieldSpec(
-                "Estado de acceso ANSES",
-                "Acceso Seguridad Social ANSES",
-                "combo",
-                ("No informado", "Cliente manifiesta poseerlo", "Verificado"),
-            ),
+            FieldSpec("Clave fiscal (ARCA)", "Clave fiscal (ARCA)"),
+            FieldSpec("Clave de Seguridad Social (ANSES)", "Clave de Seguridad Social (ANSES)"),
             FieldSpec(CASE_TYPE_FIELD, CASE_TYPE_FIELD, "combo", CASE_TYPES, aliases=("Tipo de proceso",)),
         ),
     ),
@@ -380,21 +402,9 @@ GENERAL_REPEATED = (
 INTERVIEW_SECTIONS = (
     SectionSpec(
         "Antecedentes personales y previsionales",
-        "Las credenciales no se guardan: sólo se registra si el acceso fue informado o verificado.",
+        "Antecedentes personales y médicos relevantes para la entrevista.",
         (
             FieldSpec("Obra social", "Obra social"),
-            FieldSpec(
-                "Estado de acceso ARCA/AFIP",
-                "Acceso ARCA/AFIP",
-                "combo",
-                ("No informado", "Cliente manifiesta poseerlo", "Verificado"),
-            ),
-            FieldSpec(
-                "Estado de acceso ANSES",
-                "Acceso Seguridad Social ANSES",
-                "combo",
-                ("No informado", "Cliente manifiesta poseerlo", "Verificado"),
-            ),
             FieldSpec("Mano hábil", "Mano hábil", "combo", ("Diestro/a", "Zurdo/a")),
             FieldSpec("Tiene preexistencias médicas", "Preexistencias médicas", "combo", ("Sí", "No", "No sabe")),
             FieldSpec("Descripción de preexistencias", "Descripción de preexistencias", "textarea"),
@@ -532,6 +542,9 @@ SYSTEM_METADATA_KEYS = {
     "Documentación recibida",
     "Estado SISFE",
     "Estado SISFE desde",
+    # Compatibilidad con fichas creadas antes de habilitar la carga textual.
+    "Estado de acceso ARCA/AFIP",
+    "Estado de acceso ANSES",
 }
 
 
@@ -665,7 +678,11 @@ def ensure_system_metadata(
         full_name = ", ".join(value for value in (surname, names) if value)
     if full_name:
         result["Nombre completo"] = full_name
-        result["Actor"] = full_name
+        variants = person_name_variants(full_name)
+        for key, value in variants.items():
+            if value:
+                result[key] = value
+        result["Actor"] = variants["Apellido y nombres"] or full_name
     if not str(result.get("Identificación interna del expediente", "")).strip():
         result["Identificación interna del expediente"] = (
             f"GD-{current.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"

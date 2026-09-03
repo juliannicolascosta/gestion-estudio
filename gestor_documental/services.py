@@ -13,7 +13,7 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
-from .case_data import build_case_caption, computed_values
+from .case_data import build_case_caption, computed_values, ensure_system_metadata
 from .models import ADVANCED_FIELD_VARIABLES, AppSettings, Case, CompilationResult
 
 
@@ -135,7 +135,7 @@ def suggested_presentation_name(
     writing: Path | None = None,
     value_date: date | None = None,
 ) -> str:
-    metadata = read_case_metadata(case)
+    metadata = ensure_system_metadata(read_case_metadata(case))
     identifier = filename_component(short_case_identifier(case, metadata), 40)
     title = filename_component(writing_title_from_path(writing), 60)
     stamp = (value_date or date.today()).isoformat()
@@ -621,7 +621,7 @@ def writing_template_values(
     professional: str = "",
     extra_values: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    metadata = read_case_metadata(case)
+    metadata = ensure_system_metadata(read_case_metadata(case))
     actor = metadata.get("Actor", "").strip()
     defendant = metadata.get("Demandado", "").strip()
     cause = metadata.get("Causa", "").strip()
@@ -647,6 +647,11 @@ def writing_template_values(
         "CARÁTULA": caption,
         "CASO": case.name,
         "ACTOR": actor,
+        "NOMBRE_COMPLETO": metadata.get("Nombre completo", "").strip() or actor,
+        "APELLIDO": metadata.get("Apellido del actor", "").strip(),
+        "NOMBRES": metadata.get("Nombres del actor", "").strip(),
+        "NOMBRE_APELLIDO": metadata.get("Nombre y apellido", "").strip(),
+        "APELLIDO_NOMBRES": metadata.get("Apellido y nombres", "").strip() or actor,
         "DEMANDADO": defendant,
         "CAUSA": cause,
         "CUIJ": case_number,
