@@ -55,6 +55,7 @@ from .models import (
 from .case_data import (
     CASE_TYPE_FIELD,
     CASE_TYPE_LRT,
+    CASE_TYPE_SUCCESSION,
     CASE_TYPES,
     COMMON_GENERAL_SECTIONS,
     GENERAL_REPEATED,
@@ -69,6 +70,7 @@ from .case_data import (
     all_defined_keys,
     build_case_caption,
     case_type_from_metadata,
+    canonical_case_type,
     case_suggestions,
     computed_values,
     ensure_system_metadata,
@@ -120,6 +122,7 @@ from .services import (
     normalize_filename,
     open_file,
     read_case_metadata,
+    rank_models_for_document,
     rename_case,
     rename_case_entry,
     rename_case_file,
@@ -401,6 +404,8 @@ class RepeatedRowsWidget(QFrame):
 
 
 class ExtendedMetadataDialog(QDialog):
+    documentRequested = pyqtSignal(str, object)
+
     def __init__(
         self,
         metadata: dict[str, str],
@@ -441,6 +446,25 @@ class ExtendedMetadataDialog(QDialog):
         self._build_case_type_tab()
         self._build_process_tab()
         self._build_raeo_tab()
+
+        generated_actions = QHBoxLayout()
+        generated_label = QLabel("GENERAR DESDE LA ENTREVISTA")
+        generated_label.setObjectName("eyebrow")
+        generated_actions.addWidget(generated_label)
+        generated_actions.addStretch()
+        self.interview_document_buttons: dict[str, QPushButton] = {}
+        for action, label in (
+            ("ficha", "Ficha inicial"),
+            ("pacto", "Pacto de cuota litis"),
+            ("poder", "Poder"),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda checked=False, value=action: self.documentRequested.emit(value, self.values())
+            )
+            self.interview_document_buttons[action] = button
+            generated_actions.addWidget(button)
+        layout.addLayout(generated_actions)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save
@@ -898,9 +922,18 @@ class ExtendedMetadataDialog(QDialog):
 
 
 class ModelPickerDialog(QDialog):
-    def __init__(self, models: list[Path], parent=None):
+    def __init__(
+        self,
+        models: list[Path],
+        parent=None,
+        *,
+        model_provider=None,
+        add_model_callback=None,
+    ):
         super().__init__(parent)
         self.models = models
+        self.model_provider = model_provider
+        self.add_model_callback = add_model_callback
         self.setWindowTitle("Crear escrito desde modelo")
         self.setMinimumSize(560, 520)
         layout = QVBoxLayout(self)
@@ -914,7 +947,17 @@ class ModelPickerDialog(QDialog):
         self.search.setPlaceholderText("Buscar modelo…")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self.filter_models)
-        layout.addWidget(self.search)
+        search_row = QHBoxLayout()
+        search_row.addWidget(self.search, 1)
+        if self.model_provider:
+            refresh = QPushButton("Actualizar")
+            refresh.clicked.connect(self.refresh_models)
+            search_row.addWidget(refresh)
+        if self.add_model_callback:
+            add = QPushButton("Agregar modelo…")
+            add.clicked.connect(self.add_model_from_dialog)
+            search_row.addWidget(add)
+        layout.addLayout(search_row)
         self.list = QListWidget()
         self.list.setObjectName("modelList")
         self.list.setIconSize(QSize(22, 22))
@@ -936,6 +979,23 @@ class ModelPickerDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
         self.filter_models("")
+
+    def refresh_models(self, selected: Path | None = None):
+        if self.model_provider:
+            self.models = list(self.model_provider())
+        self.filter_models(self.search.text())
+        if selected:
+            for index in range(self.list.count()):
+                item = self.list.item(index)
+                if Path(item.data(PATH_ROLE)) == selected:
+                    self.list.setCurrentItem(item)
+                    break
+
+    def add_model_from_dialog(self):
+        if not self.add_model_callback:
+            return
+        selected = self.add_model_callback()
+        self.refresh_models(selected)
 
     def clear_selection(self):
         self.search.clear()
@@ -978,6 +1038,46 @@ class ModelPickerDialog(QDialog):
     @property
     def title(self) -> str:
         return self.title_edit.text().strip()
+
+
+class HeirPickerDialog(QDialog):
+    def __init__(self, rows: list[list[str]], parent=None):
+        super().__init__(parent)
+        self.rows = rows
+        self.setWindowTitle("Elegir poderdantes")
+        self.setMinimumSize(560, 420)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.addLayout(section_heading(
+            "¿Para quién se genera el poder?",
+            "Podés seleccionar uno o varios herederos.",
+        ))
+        self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        for index, row in enumerate(rows):
+            detail = " · ".join(value for value in row[1:] if value)
+            item = QListWidgetItem(f"{row[0]}{f' · {detail}' if detail else ''}")
+            item.setData(PATH_ROLE, index)
+            self.list.addItem(item)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+        layout.addWidget(self.list, 1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Continuar")
+        buttons.accepted.connect(self.accept_if_selected)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def accept_if_selected(self):
+        if self.list.selectedItems():
+            self.accept()
+
+    @property
+    def selected_rows(self) -> list[list[str]]:
+        indexes = sorted(int(item.data(PATH_ROLE)) for item in self.list.selectedItems())
+        return [self.rows[index] for index in indexes]
 
 
 class CompileNameDialog(QDialog):
@@ -3318,10 +3418,18 @@ class MainWindow(QMainWindow):
             case_name=self.case.name,
             professional=self.professional_combo.currentText(),
         )
+        dialog.documentRequested.connect(
+            lambda action, values: self.generate_interview_document(action, values, dialog)
+        )
         if not dialog.exec():
             return
+        self.save_extended_metadata_values(dialog.values())
+
+    def save_extended_metadata_values(self, values: dict[str, str]) -> bool:
+        if not self.case:
+            return False
         payload = self.basic_metadata_values()
-        payload.update(dialog.values())
+        payload.update(values)
         try:
             save_case_metadata(self.case, payload)
             self.load_metadata(read_case_metadata(self.case))
@@ -3330,8 +3438,89 @@ class MainWindow(QMainWindow):
             self.update_output_preview()
             self.reload_pending_documents()
             self.statusBar().showMessage("Datos ampliados guardados", 3000)
+            return True
         except Exception as error:
             QMessageBox.warning(self, "No pudimos guardar los datos", str(error))
+            return False
+
+    def generate_interview_document(
+        self,
+        action: str,
+        values: dict[str, str],
+        parent: QWidget | None = None,
+    ):
+        if not self.case or not self.save_extended_metadata_values(values):
+            return
+
+        def available_models() -> list[Path]:
+            models = [
+                path
+                for path in list_models(self.store.models_dir)
+                if path.resolve() != self.base_template.resolve()
+            ]
+            return rank_models_for_document(models, action, values.get(CASE_TYPE_FIELD, ""))
+
+        models = available_models()
+        if not models:
+            QMessageBox.information(
+                parent or self,
+                "Todavía no hay modelos",
+                "Agregá un modelo Word para continuar. El catálogo se actualiza automáticamente.",
+            )
+            added = self.add_writing_model()
+            if not added:
+                return
+            models = available_models()
+
+        dialog = ModelPickerDialog(
+            models,
+            parent or self,
+            model_provider=available_models,
+            add_model_callback=self.add_writing_model,
+        )
+        labels = {
+            "ficha": "Generar ficha inicial",
+            "pacto": "Generar pacto de cuota litis",
+            "poder": "Generar poder",
+        }
+        dialog.setWindowTitle(labels.get(action, "Generar documento"))
+        if not dialog.exec() or not dialog.selected_model or not dialog.title:
+            return
+
+        extra_values: dict[str, str] = {}
+        if action == "poder" and canonical_case_type(values.get(CASE_TYPE_FIELD, "")) == CASE_TYPE_SUCCESSION:
+            heirs = []
+            for raw_line in str(values.get("Herederos", "")).splitlines():
+                row = [part.strip() for part in re.split(r"\s*[|│]\s*", raw_line)]
+                if row and row[0]:
+                    heirs.append((row + [""] * 5)[:5])
+            if not heirs:
+                QMessageBox.information(
+                    parent or self,
+                    "Faltan herederos",
+                    "Cargá al menos un heredero en la ficha antes de generar el poder.",
+                )
+                return
+            heir_dialog = HeirPickerDialog(heirs, parent or self)
+            if not heir_dialog.exec():
+                return
+            selected = heir_dialog.selected_rows
+            names = [row[0] for row in selected]
+            first = selected[0]
+            extra_values.update(
+                {
+                    "PODERDANTES": "; ".join(names),
+                    "HEREDEROS_SELECCIONADOS": "\n".join(" | ".join(row) for row in selected),
+                    "HEREDERO": "; ".join(names),
+                    "NOMBRE_HEREDERO": first[0],
+                    "DNI_HEREDERO": first[1],
+                    "CUIT_HEREDERO": first[2],
+                    "DOMICILIO_HEREDERO": first[3],
+                    "CARACTER_HEREDERO": first[4],
+                }
+            )
+
+        self.create_and_open_writing(dialog.title, dialog.selected_model, extra_values)
 
     def update_more_metadata_count(self):
         if not hasattr(self, "more_metadata_button"):
@@ -4013,13 +4202,19 @@ class MainWindow(QMainWindow):
         if dialog.exec() and dialog.selected_model and dialog.title:
             self.create_and_open_writing(dialog.title, dialog.selected_model)
 
-    def create_and_open_writing(self, title: str, template: Path | None = None):
+    def create_and_open_writing(
+        self,
+        title: str,
+        template: Path | None = None,
+        extra_values: dict[str, str] | None = None,
+    ):
         try:
             path = create_writing(
                 self.case,
                 title,
                 template,
                 self.professional_combo.currentText(),
+                extra_values,
             )
             self.set_current_writing(path)
             self.case_directory = path.parent
@@ -4057,12 +4252,14 @@ class MainWindow(QMainWindow):
             "Documentos Word (*.docx)",
         )[0]
         if not source:
-            return
+            return None
         try:
             target = add_model(self.store.models_dir, Path(source))
             self.statusBar().showMessage(f"Modelo agregado: {target.name}", 4500)
+            return target
         except Exception as error:
             QMessageBox.critical(self, "No pudimos agregar el modelo", str(error))
+            return None
 
     def open_models_folder(self):
         self.store.models_dir.mkdir(parents=True, exist_ok=True)

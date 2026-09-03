@@ -16,6 +16,7 @@ from pypdf import PdfWriter
 from gestor_documental.app import (
     ADD_PROFESSIONAL_LABEL,
     ExtendedMetadataDialog,
+    HeirPickerDialog,
     ImportFileDialog,
     MainWindow,
     ModelPickerDialog,
@@ -455,6 +456,13 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(values["Jurisdicción"], "Santa Fe")
             self.assertEqual(values["Mediador"], "María López")
             self.assertIn("Identificación interna del expediente", values)
+            requested = []
+            metadata_dialog.documentRequested.connect(
+                lambda action, payload: requested.append((action, payload))
+            )
+            metadata_dialog.interview_document_buttons["ficha"].click()
+            self.assertEqual(requested[0][0], "ficha")
+            self.assertEqual(requested[0][1]["Jurisdicción"], "Santa Fe")
             metadata_dialog.close()
 
             process_dialog = ExtendedMetadataDialog(
@@ -520,6 +528,28 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIsNone(picker.selected_model)
             self.assertEqual(picker.title, "")
             picker.close()
+
+            third = root / "Poder sucesorio.docx"
+            catalog = [first, second]
+            dynamic_picker = ModelPickerDialog(
+                catalog,
+                model_provider=lambda: list(catalog),
+            )
+            third.touch()
+            catalog.append(third)
+            dynamic_picker.refresh_models(third)
+            self.assertEqual(dynamic_picker.list.count(), 3)
+            self.assertEqual(dynamic_picker.selected_model, third)
+            dynamic_picker.close()
+
+            heir_picker = HeirPickerDialog(
+                [["Ana Pérez", "1", "20-1", "Calle 1", "Hija"], ["Juan Pérez", "2", "20-2", "Calle 2", "Hijo"]]
+            )
+            heir_picker.list.item(0).setSelected(True)
+            heir_picker.list.item(1).setSelected(True)
+            self.assertEqual(len(heir_picker.selected_rows), 2)
+            self.assertEqual(heir_picker.selected_rows[1][0], "Juan Pérez")
+            heir_picker.close()
 
     def test_new_case_immediately_becomes_the_active_folder(self):
         with tempfile.TemporaryDirectory() as directory:

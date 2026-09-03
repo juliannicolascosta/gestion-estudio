@@ -13,7 +13,16 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
-from .case_data import build_case_caption, computed_values, ensure_system_metadata
+from .case_data import (
+    CASE_TYPE_CIVIL,
+    CASE_TYPE_LABOR,
+    CASE_TYPE_LRT,
+    CASE_TYPE_SUCCESSION,
+    build_case_caption,
+    canonical_case_type,
+    computed_values,
+    ensure_system_metadata,
+)
 from .models import ADVANCED_FIELD_VARIABLES, AppSettings, Case, CompilationResult
 
 
@@ -813,6 +822,33 @@ def list_models(models_dir: Path) -> list[Path]:
         (path for path in models_dir.iterdir() if path.suffix.lower() == ".docx"),
         key=lambda path: path.name.casefold(),
     )
+
+
+def rank_models_for_document(
+    models: list[Path],
+    document_kind: str,
+    case_type: str,
+) -> list[Path]:
+    """Rank the live Word catalog without excluding user-defined models."""
+    action_terms = {
+        "ficha": ("ficha inicial", "ficha", "entrevista"),
+        "pacto": ("pacto", "cuota litis", "cuotalitis"),
+        "poder": ("poder", "carta poder"),
+    }.get(document_kind, (document_kind,))
+    type_terms = {
+        CASE_TYPE_LRT: ("lrt", "riesgos del trabajo", "accidente", "enfermedad profesional"),
+        CASE_TYPE_LABOR: ("laboral", "despido", "cobro de pesos"),
+        CASE_TYPE_CIVIL: ("responsabilidad civil", "transito", "accidente de transito"),
+        CASE_TYPE_SUCCESSION: ("sucesion", "sucesorio", "heredero"),
+    }.get(canonical_case_type(case_type), ("general",))
+
+    def score(path: Path) -> tuple[int, str]:
+        searchable = _search_text(path.stem)
+        points = 100 if any(_search_text(term) in searchable for term in action_terms) else 0
+        points += 30 if any(_search_text(term) in searchable for term in type_terms) else 0
+        return -points, searchable
+
+    return sorted(models, key=score)
 
 
 def add_model(models_dir: Path, source: Path) -> Path:

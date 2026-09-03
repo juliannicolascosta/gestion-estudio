@@ -54,4 +54,8 @@ Si el caso tiene cargados Abogado `Dr. Julián Nicolás Costa`, Actor `Pérez`, 
 4. En la aplicación, elegir **+ Escrito → Agregar modelo…**.
 5. Para usarlo, elegir **+ Escrito → Desde modelo…**, buscarlo en la lista y asignar el nombre breve del escrito en el mismo cuadro.
 
+También pueden generarse **Ficha inicial**, **Pacto de cuota litis** y **Poder** desde **Más datos**. La aplicación consulta la carpeta de modelos en ese momento: se pueden agregar o modificar archivos Word continuamente, pulsar **Actualizar** y utilizarlos sin reiniciar. Los modelos más relacionados con la acción y el tipo de caso aparecen primero, pero nunca se ocultan los demás.
+
+Para poderes sucesorios están disponibles además `{{PODERDANTES}}`, `{{HEREDEROS_SELECCIONADOS}}`, `{{HEREDERO}}`, `{{NOMBRE_HEREDERO}}`, `{{DNI_HEREDERO}}`, `{{CUIT_HEREDERO}}`, `{{DOMICILIO_HEREDERO}}` y `{{CARACTER_HEREDERO}}`. Las variables singulares corresponden al primer heredero elegido; `{{PODERDANTES}}` y `{{HEREDEROS_SELECCIONADOS}}` permiten modelos para varias personas.
+
 Para el escrito genérico, **+ Escrito → Modificar modelo base en Word** abre directamente el archivo externo editable.

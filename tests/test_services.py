@@ -32,6 +32,7 @@ from gestor_documental.services import (
     list_cases,
     normalize_filename,
     read_case_metadata,
+    rank_models_for_document,
     repair_text,
     rename_case,
     rename_case_entry,
@@ -57,6 +58,21 @@ def make_pdf(path: Path, pages: int = 1):
 
 
 class ServiceTests(unittest.TestCase):
+    def test_contextual_model_ranking_keeps_the_live_catalog(self):
+        models = [
+            Path("Modelo general.docx"),
+            Path("Poder sucesorio.docx"),
+            Path("Ficha inicial LRT.docx"),
+            Path("Ficha laboral.docx"),
+        ]
+        ranked = rank_models_for_document(models, "ficha", "Accidente laboral")
+        self.assertEqual(ranked[0], Path("Ficha inicial LRT.docx"))
+        self.assertCountEqual(ranked, models)
+
+        ranked_power = rank_models_for_document(models, "poder", "Sucesiones")
+        self.assertEqual(ranked_power[0], Path("Poder sucesorio.docx"))
+        self.assertCountEqual(ranked_power, models)
+
     def test_case_starts_empty_without_automatic_subfolders(self):
         with tempfile.TemporaryDirectory() as directory:
             study = Path(directory) / "Estudio"
