@@ -43,10 +43,11 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 
 - Compresión automática. Si el resultado todavía excede el límite, pregunta antes de dividirlo.
 - Compilación en segundo plano con una ventana de progreso, cancelación segura y sin mostrar PowerShell.
-- Pestaña **Portal jurídico** de altura completa, con todas las novedades SISFE almacenadas, consultadas desde la sesión manual del navegador integrado, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
+- Pestaña **Portal jurídico** de altura completa, con el estado actual del expediente y desde cuándo rige, además de todas las novedades SISFE almacenadas, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
 - Indicador compacto de estado SISFE preparado para distinguir espera, operación en curso, finalización correcta y error sin ocupar espacio documental.
 - Desde el detalle de una novedad, **Descargar documentos** abre el expediente, ubica la página correcta y acciona los clips oficiales de SISFE. Los PDF se guardan en `Documentos SISFE`, se vinculan con el movimiento de origen, se registran por hash y las copias idénticas se descartan de forma recuperable. Si SISFE no inicia la descarga, la vista oficial queda abierta para reintentar manualmente.
-- Pestaña **Documentación pendiente** con un checklist operativo para agregar lo solicitado al cliente y marcarlo como recibido; reutiliza la misma información de la entrevista.
+- Ficha ampliada a pantalla completa, organizada por tipo de caso (LRT, laboral, responsabilidad civil, sucesiones u otros), con datos generales, procesales y específicos sin perder metadatos históricos. Incluye nombre completo, derivación y variables rápidas de fecha para modelos Word.
+- Pestaña **Documentación pendiente** con un checklist operativo para agregar, ordenar, renombrar, borrar, vaciar y marcar como recibido lo solicitado al cliente.
 - Liberación inmediata de los PDF leídos: al terminar de compilar o dividir, las carpetas del caso pueden renombrarse o eliminarse desde el Explorador de Windows.
 - Conversión de Word aislada del proceso principal, con tiempo máximo y caché local para no reconvertir escritos sin cambios.
 - Optimización de PDF que conserva el texto y evita rasterizar todas las páginas.

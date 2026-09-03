@@ -68,12 +68,16 @@ class SisfeBrowserTests(unittest.TestCase):
                 "cuij": "21123456789",
                 "title": "Caso de prueba",
                 "tribunal": "Juzgado 1",
+                "case_status": "A casillero",
+                "case_status_since": "2026-08-30",
                 "movements": [
                     {"internal_id": "9", "title": "Cédula", "occurred_at": "2026-08-31T12:00:00"}
                 ],
             }
         )
         self.assertEqual(snapshot.title, "Caso de prueba")
+        self.assertEqual(snapshot.case_status, "A casillero")
+        self.assertEqual(snapshot.case_status_since, "2026-08-30")
         self.assertEqual(snapshot.movements[0].internal_id, "9")
         self.assertEqual(snapshot.movements[0].occurred_at.year, 2026)
 

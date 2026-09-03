@@ -22,6 +22,7 @@ CASE_FIELDS = (
     "Actor",
     "Demandado",
     "Causa",
+    "Derivación",
     "CUIJ",
     "Expediente SRT",
     "Radicación",
@@ -36,6 +37,7 @@ VISIBLE_CASE_FIELDS = (
     "Actor",
     "Demandado",
     "Causa",
+    "Derivación",
     "CUIJ",
     "Radicación",
 )

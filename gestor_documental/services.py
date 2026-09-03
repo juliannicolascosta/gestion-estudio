@@ -100,7 +100,7 @@ def short_case_identifier(case: Case, metadata: dict[str, str] | None = None) ->
     configured = metadata.get("Nombre corto para archivos", "").strip()
     if configured:
         return configured
-    actor = metadata.get("Actor", "").strip()
+    actor = metadata.get("Nombre completo", "").strip() or metadata.get("Actor", "").strip()
     if not actor:
         return case.name.split(" c/ ", 1)[0].strip()
     primary = re.split(r"\s+(?:y|e)\s+(?:ot\.?|otros?)\b", actor, 1, flags=re.IGNORECASE)[0]
@@ -638,6 +638,9 @@ def writing_template_values(
         lawyer,
         flags=re.IGNORECASE,
     ).strip().upper()
+    today = date.today()
+    months = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+    weekdays = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
     values = {
         "TITULO": safe_name(title).upper(),
         "CARATULA": caption,
@@ -655,9 +658,15 @@ def writing_template_values(
         "ABOGADO": lawyer,
         "CONTRAPARTE": metadata.get("Contraparte", "").strip(),
         "PROFESIONAL": lawyer,
-        "FECHA": date.today().strftime("%d/%m/%Y"),
-        "FECHA_ISO": date.today().isoformat(),
-        "FECHA_EXTENSA": spanish_long_date(date.today()),
+        "FECHA": today.strftime("%d/%m/%Y"),
+        "FECHA_ISO": today.isoformat(),
+        "FECHA_EXTENSA": spanish_long_date(today),
+        "DIA": str(today.day),
+        "DIA_SEMANA": weekdays[today.weekday()],
+        "MES": months[today.month - 1],
+        "MES_EN_CURSO": months[today.month - 1],
+        "ANIO": str(today.year),
+        "AÑO": str(today.year),
         "DOCUMENTO_ACTOR": (
             metadata.get("DNI del actor", "").strip()
             or metadata.get("DNI/CUIT actor", "").strip()

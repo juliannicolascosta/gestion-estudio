@@ -35,6 +35,7 @@ class CaseDataTests(unittest.TestCase):
         )
 
         self.assertEqual(first["Actor"], "Pérez, Juan Carlos")
+        self.assertEqual(first["Nombre completo"], "Pérez, Juan Carlos")
         self.assertEqual(
             build_case_caption(first),
             "PÉREZ, JUAN CARLOS C/ EMPRESA SA S/ DESPIDO",

@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from gestor_documental.services import create_case, save_case_metadata
+from gestor_documental.services import create_case, read_case_metadata, save_case_metadata
 from gestor_documental.sisfe_import import (
     SisfeCaseSnapshot,
     SisfeDocumentPayload,
@@ -41,6 +41,8 @@ class SisfeImportTests(unittest.TestCase):
                 cuij="21-12345678-9",
                 title="Pérez c/ Provincia",
                 tribunal="Juzgado Laboral 1",
+                case_status="A casillero",
+                case_status_since="2026-08-30",
                 movements=(
                     SisfeMovementPayload(
                         internal_id="mov-100",
@@ -67,7 +69,10 @@ class SisfeImportTests(unittest.TestCase):
             self.assertEqual(second.documents_registered, 0)
             self.assertEqual(second.documents_skipped, 1)
             self.assertEqual((destination / "Cédula de prueba.pdf").read_bytes(), b"PDF SINTETICO")
-            self.assertEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
+            self.assertNotEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
+            saved_metadata = read_case_metadata(case)
+            self.assertEqual(saved_metadata["Estado SISFE"], "A casillero")
+            self.assertEqual(saved_metadata["Estado SISFE desde"], "2026-08-30")
             with StudyDatabase(study_database_path(study)) as database:
                 self.assertEqual(database.connection.execute("SELECT COUNT(*) FROM movimientos").fetchone()[0], 1)
                 self.assertEqual(database.connection.execute("SELECT COUNT(*) FROM documentos").fetchone()[0], 1)

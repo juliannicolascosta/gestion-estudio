@@ -246,6 +246,23 @@ def browser_sync_script(cuij: str) -> str:
             );
             if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
             const details = await getJson('/iol/expedientes/findById?idExpediente=' + encodeURIComponent(selected.id));
+            const scalar = value => (typeof value === 'string' || typeof value === 'number') ? String(value).trim() : '';
+            const deepValue = (root, wanted) => {{
+              const queue = [root];
+              const seen = new Set();
+              while (queue.length) {{
+                const value = queue.shift();
+                if (!value || typeof value !== 'object' || seen.has(value)) continue;
+                seen.add(value);
+                for (const [key, child] of Object.entries(value)) {{
+                  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+                  if (wanted.includes(normalized) && scalar(child)) return scalar(child);
+                  if (child && typeof child === 'object') queue.push(child);
+                }}
+              }}
+              return '';
+            }};
+            const context = {{details, selected}};
             const news = await collectPaged((page, size) => getJson(
               '/iol/expedientes/findNovedadesById?idExpediente=' + encodeURIComponent(selected.id) +
               '&page=' + page + '&size=' + size
@@ -255,6 +272,10 @@ def browser_sync_script(cuij: str) -> str:
               cuij: target,
               title: details.expCaratula || selected.expCaratula || '',
               tribunal: details.radicado || selected.radicacionActual || '',
+              case_status: scalar(details.estadoActual) || scalar(details.estado) || scalar(details.situacionActual) ||
+                scalar(details.ubicacionActual) || deepValue(context, ['estadoactual', 'estadoexpediente', 'situacionactual', 'ubicacionactual', 'estado']),
+              case_status_since: scalar(details.fechaEstado) || scalar(details.fechaEstadoActual) ||
+                scalar(details.fechaSituacion) || deepValue(context, ['fechaestado', 'fechaestadoactual', 'fechasituacion', 'fechadesde']),
               movements: news.map(row => ({{
                 internal_id: String(row.id || ''),
                 title: String(row.novedad || row.tipoActuacion || 'Movimiento SISFE'),
@@ -287,6 +308,8 @@ def snapshot_from_browser_payload(payload: dict) -> SisfeCaseSnapshot:
         cuij=str(payload.get("cuij", "")),
         title=str(payload.get("title", "")),
         tribunal=str(payload.get("tribunal", "")),
+        case_status=str(payload.get("case_status", "")),
+        case_status_since=str(payload.get("case_status_since", "")),
         movements=movements,
         download_warnings=tuple(
             str(warning) for warning in payload.get("warnings", []) if str(warning).strip()

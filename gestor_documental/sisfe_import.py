@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .models import Case
-from .services import normalize_filename, unique_path
+from .services import normalize_filename, read_case_metadata, save_case_metadata, unique_path
 from .study_database import StudyDatabase, study_database_path
 
 
@@ -44,6 +44,8 @@ class SisfeCaseSnapshot:
     cuij: str
     title: str = ""
     tribunal: str = ""
+    case_status: str = ""
+    case_status_since: str = ""
     movements: tuple[SisfeMovementPayload, ...] = ()
     download_warnings: tuple[str, ...] = ()
 
@@ -109,6 +111,13 @@ class SisfeImportService:
             expediente = database.import_case(case)
             self._ensure_matching_case(expediente.case_number, snapshot.cuij)
             expediente = database.fill_sisfe_context(expediente.id, snapshot.cuij, snapshot.tribunal)
+            metadata = read_case_metadata(case)
+            if snapshot.case_status.strip():
+                metadata["Estado SISFE"] = snapshot.case_status.strip()
+            if snapshot.case_status_since.strip():
+                metadata["Estado SISFE desde"] = snapshot.case_status_since.strip()
+            if snapshot.case_status.strip() or snapshot.case_status_since.strip():
+                save_case_metadata(case, metadata)
             self._validate_document_hashes(snapshot)
             movements_registered = 0
             documents_registered = 0

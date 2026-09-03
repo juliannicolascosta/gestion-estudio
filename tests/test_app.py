@@ -56,7 +56,7 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertEqual(
                 tuple(window.metadata_edits),
-                ("Actor", "Demandado", "Causa", "CUIJ", "Radicación"),
+                ("Actor", "Demandado", "Causa", "Derivación", "CUIJ", "Radicación"),
             )
             self.assertEqual(window.professional_combo.itemText(0), ADD_PROFESSIONAL_LABEL)
             self.assertEqual(
@@ -266,6 +266,24 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.pending_documents_list.count(), 3)
             self.assertEqual(window.pending_documents_list.item(0).checkState(), Qt.CheckState.Checked)
             self.assertEqual(window.work_tabs.tabText(window.pending_tab_index), "Pendientes · 2")
+
+            window.pending_documents_list.setCurrentRow(2)
+            window.move_pending_document(-1)
+            self.assertEqual(window.pending_documents_list.item(1).text(), "Partida de nacimiento")
+            window.pending_documents_list.setCurrentRow(1)
+            with patch(
+                "gestor_documental.app.QInputDialog.getText",
+                return_value=("Partida actualizada", True),
+            ):
+                window.rename_pending_document()
+            self.assertIn("Partida actualizada", read_case_metadata(case)["Documentación pendiente"])
+            window.pending_documents_list.setCurrentRow(1)
+            with patch(
+                "gestor_documental.app.QMessageBox.question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                window.delete_pending_documents()
+            self.assertNotIn("Partida actualizada", read_case_metadata(case)["Documentación pendiente"])
             window.close()
 
     def test_manual_sisfe_session_is_confirmed_without_storing_credentials(self):
@@ -427,15 +445,32 @@ class AppSmokeTests(unittest.TestCase):
             second.touch()
 
             metadata_dialog = ExtendedMetadataDialog({"Jurisdicción": "Santa Fe"})
-            self.assertEqual(metadata_dialog.tabs.count(), 3)
+            self.assertEqual(metadata_dialog.tabs.count(), 4)
             self.assertEqual(metadata_dialog.tabs.tabText(0), "Datos generales")
-            self.assertEqual(metadata_dialog.tabs.tabText(1), "Entrevista inicial")
-            self.assertIn("RAEO", metadata_dialog.tabs.tabText(2))
+            self.assertIn("Datos del caso", metadata_dialog.tabs.tabText(1))
+            self.assertEqual(metadata_dialog.tabs.tabText(2), "Datos procesales")
+            self.assertIn("RAEO", metadata_dialog.tabs.tabText(3))
             metadata_dialog.add_custom_row("Mediador", "María López")
             values = metadata_dialog.values()
             self.assertEqual(values["Jurisdicción"], "Santa Fe")
             self.assertEqual(values["Mediador"], "María López")
             self.assertIn("Identificación interna del expediente", values)
+            metadata_dialog.close()
+
+            metadata_dialog = ExtendedMetadataDialog({"Tipo de caso": "Responsabilidad Civil"})
+            self.assertIn("Responsable civil", metadata_dialog.edits)
+            self.assertNotIn("Nombre del causante", metadata_dialog.edits)
+            metadata_dialog.edits["Responsable civil"].setText("Aseguradora SA")
+            type_combo = metadata_dialog.edits["Tipo de caso"]
+            type_combo.setCurrentText("Sucesiones")
+            self.app.processEvents()
+            self.assertIn("Nombre del causante", metadata_dialog.edits)
+            self.assertNotIn("Responsable civil", metadata_dialog.edits)
+            type_combo.setCurrentText("Responsabilidad Civil")
+            self.app.processEvents()
+            self.assertEqual(metadata_dialog.edits["Responsable civil"].text(), "Aseguradora SA")
+            metadata_dialog.edits["Nombre completo"].setText("Pérez, Ana")
+            self.assertEqual(metadata_dialog.values()["Actor"], "Pérez, Ana")
             metadata_dialog.close()
 
             picker = ModelPickerDialog([first, second])

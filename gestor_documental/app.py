@@ -53,6 +53,10 @@ from .models import (
     Case,
 )
 from .case_data import (
+    CASE_TYPE_FIELD,
+    CASE_TYPE_LRT,
+    CASE_TYPES,
+    COMMON_GENERAL_SECTIONS,
     GENERAL_REPEATED,
     GENERAL_SECTIONS,
     INTERVIEW_REPEATED,
@@ -64,12 +68,16 @@ from .case_data import (
     RepeatedSpec,
     all_defined_keys,
     build_case_caption,
+    case_type_from_metadata,
     case_suggestions,
     computed_values,
     ensure_system_metadata,
     field_initial_value,
+    process_sections,
+    repeated_for_case_type,
     raeo_effective_values,
     raeo_missing_fields,
+    sections_for_case_type,
 )
 from .case_registry import recent_case_novedades, register_case_as_expediente
 from .compilation_draft import (
@@ -405,13 +413,18 @@ class ExtendedMetadataDialog(QDialog):
         self.case_name = case_name
         self.professional = professional
         self._base_metadata = ensure_system_metadata(metadata, professional=professional)
+        self._active_case_type = case_type_from_metadata(self._base_metadata)
+        self._base_metadata[CASE_TYPE_FIELD] = self._active_case_type
         self.setWindowTitle("Datos ampliados del caso")
         self.setMinimumSize(820, 720)
         self.resize(940, 790)
+        self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
         self._custom_rows: list[tuple[QWidget, QLineEdit, QLineEdit]] = []
         self.edits: dict[str, QWidget] = {}
         self._field_specs: dict[str, FieldSpec] = {}
         self.repeated: dict[str, RepeatedRowsWidget] = {}
+        self._type_field_keys: set[str] = set()
+        self._type_repeated_keys: set[str] = set()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 18, 22, 18)
@@ -425,7 +438,8 @@ class ExtendedMetadataDialog(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs, 1)
         self._build_general_tab()
-        self._build_interview_tab()
+        self._build_case_type_tab()
+        self._build_process_tab()
         self._build_raeo_tab()
 
         buttons = QDialogButtonBox(
@@ -460,13 +474,13 @@ class ExtendedMetadataDialog(QDialog):
         self.system_summary.setWordWrap(True)
         system_layout.addWidget(self.system_summary)
         content.addWidget(system_card)
-        self._add_sections(content, GENERAL_SECTIONS)
-        self._add_repeated(content, GENERAL_REPEATED)
+        self._add_date_variables(content)
+        self._add_sections(content, COMMON_GENERAL_SECTIONS)
         self._add_custom_fields(content)
         content.addStretch()
         self.tabs.addTab(tab, "Datos generales")
 
-    def _build_interview_tab(self):
+    def _build_case_type_tab(self):
         tab, content = self._scroll_tab()
         calculations, calculations_layout = make_card("softCard")
         calculations_layout.addLayout(
@@ -483,10 +497,89 @@ class ExtendedMetadataDialog(QDialog):
         self.suggestions_summary.setWordWrap(True)
         calculations_layout.addWidget(self.suggestions_summary)
         content.addWidget(calculations)
-        self._add_sections(content, INTERVIEW_SECTIONS)
-        self._add_repeated(content, INTERVIEW_REPEATED)
+        self.case_type_dynamic = QVBoxLayout()
+        self.case_type_dynamic.setSpacing(10)
+        content.addLayout(self.case_type_dynamic)
         content.addStretch()
-        self.tabs.addTab(tab, "Entrevista inicial")
+        self.case_type_tab_index = self.tabs.addTab(tab, "Datos del caso")
+        self._rebuild_case_type_fields()
+
+    def _build_process_tab(self):
+        tab, content = self._scroll_tab()
+        self._add_sections(content, process_sections())
+        content.addStretch()
+        self.tabs.addTab(tab, "Datos procesales")
+
+    def _add_date_variables(self, parent_layout: QVBoxLayout):
+        today = date.today()
+        months = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+        weekdays = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+        values = (
+            ("FECHA", today.strftime("%d/%m/%Y")),
+            ("DIA", str(today.day)),
+            ("DIA_SEMANA", weekdays[today.weekday()]),
+            ("MES", months[today.month - 1]),
+            ("ANIO", str(today.year)),
+        )
+        card, card_layout = make_card("softCard")
+        card_layout.addLayout(section_heading("Fechas para modelos", "Copiá el dato o su variable para usarlo en un escrito."))
+        row = QHBoxLayout()
+        for key, value in values:
+            button = QPushButton(f"{value}\n{{{{{key}}}}}")
+            button.setToolTip(f"Copiar {{{{{key}}}}}")
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.clicked.connect(lambda checked=False, code=f"{{{{{key}}}}}": QApplication.clipboard().setText(code))
+            row.addWidget(button)
+        card_layout.addLayout(row)
+        parent_layout.addWidget(card)
+
+    def _store_case_type_draft(self):
+        for key in self._type_field_keys:
+            editor = self.edits.get(key)
+            if editor is not None:
+                value = self._editor_value(editor)
+                if value:
+                    self._base_metadata[key] = value
+                else:
+                    self._base_metadata.pop(key, None)
+        for key in self._type_repeated_keys:
+            editor = self.repeated.get(key)
+            if editor is not None:
+                value = editor.value()
+                if value:
+                    self._base_metadata[key] = value
+                else:
+                    self._base_metadata.pop(key, None)
+
+    def _rebuild_case_type_fields(self):
+        while self.case_type_dynamic.count():
+            item = self.case_type_dynamic.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for key in self._type_field_keys:
+            self.edits.pop(key, None)
+            self._field_specs.pop(key, None)
+        for key in self._type_repeated_keys:
+            self.repeated.pop(key, None)
+        before_fields = set(self.edits)
+        before_repeated = set(self.repeated)
+        self._add_sections(self.case_type_dynamic, sections_for_case_type(self._active_case_type))
+        self._add_repeated(self.case_type_dynamic, repeated_for_case_type(self._active_case_type))
+        self._type_field_keys = set(self.edits) - before_fields
+        self._type_repeated_keys = set(self.repeated) - before_repeated
+        self.tabs.setTabText(self.case_type_tab_index, f"Datos del caso · {self._active_case_type}")
+        if hasattr(self, "raeo_tab_index"):
+            self.tabs.setTabVisible(self.raeo_tab_index, self._active_case_type == CASE_TYPE_LRT)
+
+    def _case_type_changed(self, text: str):
+        if text not in CASE_TYPES or text == self._active_case_type:
+            return
+        self._store_case_type_draft()
+        self._active_case_type = text
+        self._base_metadata[CASE_TYPE_FIELD] = text
+        self._base_metadata["Tipo de proceso"] = text
+        self._rebuild_case_type_fields()
+        self.refresh_dynamic_information()
 
     def _build_raeo_tab(self):
         tab, content = self._scroll_tab()
@@ -507,7 +600,8 @@ class ExtendedMetadataDialog(QDialog):
         self._add_sections(content, RAEO_SECTIONS)
         self._add_repeated(content, RAEO_REPEATED)
         content.addStretch()
-        self.tabs.addTab(tab, "RAEO")
+        self.raeo_tab_index = self.tabs.addTab(tab, "RAEO")
+        self.tabs.setTabVisible(self.raeo_tab_index, self._active_case_type == CASE_TYPE_LRT)
 
     def _add_sections(self, parent_layout: QVBoxLayout, sections):
         for section in sections:
@@ -529,11 +623,14 @@ class ExtendedMetadataDialog(QDialog):
         self._field_specs[field.key] = field
         if field.kind == "combo":
             editor = QComboBox()
-            editor.setEditable(True)
+            editor.setEditable(field.key != CASE_TYPE_FIELD)
             editor.addItem("")
             editor.addItems(field.choices)
             editor.setCurrentText(value)
-            editor.currentTextChanged.connect(self.refresh_dynamic_information)
+            if field.key == CASE_TYPE_FIELD:
+                editor.currentTextChanged.connect(self._case_type_changed)
+            else:
+                editor.currentTextChanged.connect(self.refresh_dynamic_information)
         elif field.kind == "textarea":
             editor = QPlainTextEdit(value)
             editor.setMaximumHeight(92)
@@ -562,6 +659,7 @@ class ExtendedMetadataDialog(QDialog):
         label.setWordWrap(True)
         code = f"{{{{{variable_name}}}}}"
         copy = icon_button("copy", f"Copiar {code}", lambda: None, color="#60736D")
+        copy.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         copy.clicked.connect(lambda: self.copy_template_code(code, copy))
         layout.addWidget(label)
         layout.addWidget(copy, 0, Qt.AlignmentFlag.AlignTop)
@@ -614,6 +712,7 @@ class ExtendedMetadataDialog(QDialog):
         value_edit = QLineEdit(value)
         value_edit.setPlaceholderText("Valor")
         variable = icon_button("copy", "Copiar código del campo", lambda: None, color="#60736D")
+        variable.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         def refresh_variable(text: str):
             code = f"{{{{{template_variable_name(text)}}}}}" if text.strip() else "{{DATO}}"
@@ -651,9 +750,9 @@ class ExtendedMetadataDialog(QDialog):
 
     def values(self) -> dict[str, str]:
         result = {
-            key: str(self._base_metadata.get(key, "")).strip()
-            for key in (SYSTEM_METADATA_KEYS | set(CASE_FIELDS))
-            if str(self._base_metadata.get(key, "")).strip()
+            key: str(value).strip()
+            for key, value in self._base_metadata.items()
+            if str(value).strip()
         }
         for field, editor in self.edits.items():
             value = self._editor_value(editor)
@@ -670,6 +769,11 @@ class ExtendedMetadataDialog(QDialog):
             value = value_edit.text().strip()
             if name and value:
                 result[name] = value
+        result[CASE_TYPE_FIELD] = self._active_case_type
+        result["Tipo de proceso"] = self._active_case_type
+        full_name = result.get("Nombre completo", "").strip()
+        if full_name:
+            result["Actor"] = full_name
         return ensure_system_metadata(result, professional=self.professional)
 
     def refresh_dynamic_information(self, *args):
@@ -728,11 +832,11 @@ class ExtendedMetadataDialog(QDialog):
             extra = f" y {len(missing) - 7} más" if len(missing) > 7 else ""
             self.raeo_status.setObjectName("warning")
             self.raeo_status.setText(f"Faltan datos para emitir RAEO: {visible}{extra}.")
-            self.tabs.setTabText(2, f"RAEO · {len(missing)} pendientes")
+            self.tabs.setTabText(self.raeo_tab_index, f"RAEO · {len(missing)} pendientes")
         else:
             self.raeo_status.setObjectName("caseBadge")
             self.raeo_status.setText("Datos necesarios para RAEO completos.")
-            self.tabs.setTabText(2, "RAEO · completo")
+            self.tabs.setTabText(self.raeo_tab_index, "RAEO · completo")
         self.raeo_status.style().unpolish(self.raeo_status)
         self.raeo_status.style().polish(self.raeo_status)
 
@@ -1572,6 +1676,10 @@ class MainWindow(QMainWindow):
         self.novedades_count.setObjectName("muted")
         novedades_header.addWidget(self.novedades_count)
         novedades_layout.addLayout(novedades_header)
+        self.portal_case_status = QLabel("Estado del expediente: todavía no sincronizado")
+        self.portal_case_status.setObjectName("caseBadge")
+        self.portal_case_status.setWordWrap(True)
+        novedades_layout.addWidget(self.portal_case_status)
         self.novedades_list = QListWidget()
         self.novedades_list.setObjectName("novedadesList")
         self.novedades_list.setMinimumHeight(220)
@@ -1745,6 +1853,11 @@ class MainWindow(QMainWindow):
         self.pending_documents_list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self.pending_documents_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.pending_documents_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.pending_documents_list.model().rowsMoved.connect(
+            lambda: QTimer.singleShot(0, self.persist_pending_document_order)
+        )
         self.pending_documents_list.itemSelectionChanged.connect(
             self.update_pending_document_actions
         )
@@ -1754,12 +1867,22 @@ class MainWindow(QMainWindow):
         pending_add = QPushButton("Agregar pendiente")
         decorate_button(pending_add, "plus")
         pending_add.clicked.connect(self.add_pending_document)
+        self.pending_rename_button = icon_button("edit", "Renombrar pendiente", self.rename_pending_document)
+        self.pending_delete_button = icon_button("trash", "Borrar pendientes seleccionados", self.delete_pending_documents)
+        self.pending_clear_button = icon_button("clear", "Vaciar la lista de pendientes", self.clear_pending_documents)
+        self.pending_up_button = icon_button("arrow-up", "Subir en el orden", lambda: self.move_pending_document(-1))
+        self.pending_down_button = icon_button("arrow-down", "Bajar en el orden", lambda: self.move_pending_document(1))
         self.pending_received_button = QPushButton("Marcar como recibido")
         self.pending_received_button.setObjectName("green")
         decorate_button(self.pending_received_button, "check", "#FFFFFF")
         self.pending_received_button.clicked.connect(self.complete_pending_documents)
         self.pending_received_button.setEnabled(False)
         pending_actions.addWidget(pending_add)
+        pending_actions.addWidget(self.pending_rename_button)
+        pending_actions.addWidget(self.pending_delete_button)
+        pending_actions.addWidget(self.pending_clear_button)
+        pending_actions.addWidget(self.pending_up_button)
+        pending_actions.addWidget(self.pending_down_button)
         pending_actions.addStretch()
         pending_actions.addWidget(self.pending_received_button)
         pending_layout.addLayout(pending_actions)
@@ -2424,11 +2547,18 @@ class MainWindow(QMainWindow):
         self.update_novedad_actions()
         if not self.case:
             self.novedades_count.setText("Sin novedades")
+            self.portal_case_status.setText("Estado del expediente: seleccioná un caso")
             if hasattr(self, "work_tabs"):
                 self.work_tabs.setTabText(self.portal_tab_index, "Portal · 0")
             return
         try:
             movements = recent_case_novedades(self.case)
+            metadata = read_case_metadata(self.case)
+            status = str(metadata.get("Estado SISFE", "")).strip()
+            since = _format_sisfe_date(metadata.get("Estado SISFE desde", ""))
+            status_text = status or "todavía no informado por SISFE"
+            since_text = f" · desde {since}" if since else ""
+            self.portal_case_status.setText(f"Estado del expediente: {status_text}{since_text}")
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.novedades_count.setText("No disponibles")
             self.novedades_list.addItem(f"No pudimos cargar las novedades: {error}")
@@ -2497,9 +2627,15 @@ class MainWindow(QMainWindow):
 
     def update_pending_document_actions(self):
         if hasattr(self, "pending_received_button"):
-            self.pending_received_button.setEnabled(
-                bool(self.pending_documents_list.selectedItems()) and self.case is not None
-            )
+            selected = self.pending_documents_list.selectedItems()
+            enabled = bool(selected) and self.case is not None
+            self.pending_received_button.setEnabled(enabled)
+            self.pending_rename_button.setEnabled(len(selected) == 1 and self.case is not None)
+            self.pending_delete_button.setEnabled(enabled)
+            self.pending_clear_button.setEnabled(self.pending_documents_list.count() > 0 and self.case is not None)
+            current = self.pending_documents_list.currentRow()
+            self.pending_up_button.setEnabled(enabled and current > 0)
+            self.pending_down_button.setEnabled(enabled and current < self.pending_documents_list.count() - 1)
 
     def add_pending_document(self):
         if not self.require_case():
@@ -2547,9 +2683,7 @@ class MainWindow(QMainWindow):
         label = next(iter(received)) if len(received) == 1 else f"{len(received)} documentos"
         self.statusBar().showMessage(f"Documentación recibida: {label}", 4500)
 
-    def pending_document_changed(self, _item: QListWidgetItem):
-        if self._loading_pending or not self.case:
-            return
+    def _pending_values_and_received(self) -> tuple[list[str], set[str]]:
         values = []
         received = set()
         for index in range(self.pending_documents_list.count()):
@@ -2557,6 +2691,66 @@ class MainWindow(QMainWindow):
             values.append(item.text())
             if item.checkState() == Qt.CheckState.Checked:
                 received.add(item.text())
+        return values, received
+
+    def rename_pending_document(self):
+        selected = self.pending_documents_list.selectedItems()
+        if len(selected) != 1 or not self.case:
+            return
+        item = selected[0]
+        description, accepted = QInputDialog.getText(self, "Renombrar pendiente", "Nuevo nombre:", text=item.text())
+        normalized = " ".join(description.split()).strip()
+        if not accepted or not normalized or normalized == item.text():
+            return
+        values, received = self._pending_values_and_received()
+        if normalized.casefold() in {value.casefold() for value in values if value != item.text()}:
+            QMessageBox.information(self, "Documentación pendiente", "Ese documento ya figura en la lista.")
+            return
+        old = item.text()
+        values[values.index(old)] = normalized
+        if old in received:
+            received.remove(old)
+            received.add(normalized)
+        self.save_pending_documents(values, received)
+
+    def delete_pending_documents(self):
+        selected = self.pending_documents_list.selectedItems()
+        if not selected or not self.case:
+            return
+        if QMessageBox.question(self, "Borrar pendientes", "¿Querés borrar los pendientes seleccionados?") != QMessageBox.StandardButton.Yes:
+            return
+        removed = {item.text() for item in selected}
+        values, received = self._pending_values_and_received()
+        self.save_pending_documents([value for value in values if value not in removed], received - removed)
+
+    def clear_pending_documents(self):
+        if not self.case or not self.pending_documents_list.count():
+            return
+        if QMessageBox.question(self, "Vaciar pendientes", "¿Querés vaciar toda la lista de documentación?") == QMessageBox.StandardButton.Yes:
+            self.save_pending_documents([], set())
+
+    def move_pending_document(self, offset: int):
+        row = self.pending_documents_list.currentRow()
+        target = row + offset
+        if row < 0 or target < 0 or target >= self.pending_documents_list.count():
+            return
+        self._loading_pending = True
+        item = self.pending_documents_list.takeItem(row)
+        self.pending_documents_list.insertItem(target, item)
+        self.pending_documents_list.setCurrentRow(target)
+        self._loading_pending = False
+        self.persist_pending_document_order()
+
+    def persist_pending_document_order(self):
+        if self._loading_pending or not self.case:
+            return
+        values, received = self._pending_values_and_received()
+        self.save_pending_documents(values, received)
+
+    def pending_document_changed(self, _item: QListWidgetItem):
+        if self._loading_pending or not self.case:
+            return
+        values, received = self._pending_values_and_received()
         self.save_pending_documents(values, received)
 
     def save_pending_documents(self, values: list[str], received: set[str] | None = None):

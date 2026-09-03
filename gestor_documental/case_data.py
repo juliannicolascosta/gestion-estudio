@@ -35,6 +35,258 @@ class RepeatedSpec:
 
 DATE_PLACEHOLDER = "DD/MM/AAAA"
 
+CASE_TYPE_FIELD = "Tipo de caso"
+CASE_TYPE_LRT = "Accidentes / enfermedades profesionales"
+CASE_TYPE_LABOR = "Despidos / cobro de rubros laborales"
+CASE_TYPE_CIVIL = "Responsabilidad Civil"
+CASE_TYPE_SUCCESSION = "Sucesiones"
+CASE_TYPE_OTHER = "Otros casos"
+CASE_TYPES = (
+    CASE_TYPE_LRT,
+    CASE_TYPE_LABOR,
+    CASE_TYPE_CIVIL,
+    CASE_TYPE_SUCCESSION,
+    CASE_TYPE_OTHER,
+)
+
+
+def canonical_case_type(value: str | None) -> str:
+    """Normalize historic labels without rewriting existing case files eagerly."""
+
+    text = unicodedata.normalize("NFKD", str(value or "").casefold())
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    if any(marker in text for marker in ("accidente", "enfermedad profesional", "lrt", "riesgos del trabajo")):
+        return CASE_TYPE_LRT
+    if any(marker in text for marker in ("despido", "cobro", "laboral")):
+        return CASE_TYPE_LABOR
+    if any(marker in text for marker in ("responsabilidad civil", "danos", "transito")):
+        return CASE_TYPE_CIVIL
+    if any(marker in text for marker in ("sucesion", "sucesorio")):
+        return CASE_TYPE_SUCCESSION
+    return CASE_TYPE_OTHER
+
+
+def case_type_from_metadata(metadata: dict[str, str]) -> str:
+    explicit = metadata.get(CASE_TYPE_FIELD) or metadata.get("Tipo de proceso")
+    if explicit:
+        return canonical_case_type(explicit)
+    return canonical_case_type(metadata.get("Causa", ""))
+
+
+COMMON_GENERAL_SECTIONS = (
+    SectionSpec(
+        "Persona actora / cliente",
+        "Datos personales reutilizables en escritos y formularios.",
+        (
+            FieldSpec(
+                "Nombre completo",
+                "Nombre completo",
+                aliases=("Actor", "Apellido del actor", "Nombres del actor"),
+            ),
+            FieldSpec("DNI del actor", "DNI", aliases=("DNI/CUIT actor",)),
+            FieldSpec("CUIL del actor", "CUIT / CUIL"),
+            FieldSpec("Fecha de nacimiento", "Fecha de nacimiento", "date", placeholder=DATE_PLACEHOLDER),
+            FieldSpec(
+                "Estado civil",
+                "Estado civil",
+                "combo",
+                ("Soltero/a", "Casado/a", "Divorciado/a", "Viudo/a", "Conviviente"),
+            ),
+            FieldSpec("Domicilio real", "Domicilio", aliases=("Domicilio actor",)),
+            FieldSpec("Localidad del actor", "Localidad"),
+            FieldSpec("Provincia del actor", "Provincia"),
+            FieldSpec("Teléfono del actor", "Teléfono"),
+            FieldSpec("Correo electrónico del actor", "Correo electrónico"),
+            FieldSpec(
+                "Estado de acceso ARCA/AFIP",
+                "Acceso ARCA/AFIP",
+                "combo",
+                ("No informado", "Cliente manifiesta poseerlo", "Verificado"),
+            ),
+            FieldSpec(
+                "Estado de acceso ANSES",
+                "Acceso Seguridad Social ANSES",
+                "combo",
+                ("No informado", "Cliente manifiesta poseerlo", "Verificado"),
+            ),
+            FieldSpec(CASE_TYPE_FIELD, CASE_TYPE_FIELD, "combo", CASE_TYPES, aliases=("Tipo de proceso",)),
+        ),
+    ),
+)
+
+
+def process_sections() -> tuple[SectionSpec, ...]:
+    return (
+        SectionSpec(
+            "Datos procesales",
+            "Información común del expediente judicial; los datos propios de cada tipo se cargan aparte.",
+            tuple(field for field in GENERAL_SECTIONS[2].fields if field.key != "Tipo de proceso"),
+        ),
+    )
+
+
+def lrt_case_sections() -> tuple[SectionSpec, ...]:
+    return (
+        GENERAL_SECTIONS[1],
+        SectionSpec(
+            "Entrevista laboral y previsional",
+            "Información aplicable a accidentes y enfermedades profesionales.",
+            INTERVIEW_SECTIONS[0].fields + INTERVIEW_SECTIONS[1].fields + (
+                FieldSpec("Otros datos de interés LRT", "Otros datos de interés", "textarea"),
+            ),
+        ),
+        INTERVIEW_SECTIONS[2],
+        INTERVIEW_SECTIONS[3],
+    )
+
+def labor_case_sections() -> tuple[SectionSpec, ...]:
+    return (
+        GENERAL_SECTIONS[1],
+        INTERVIEW_SECTIONS[1],
+        SectionSpec(
+            "Relato y documentación laboral",
+            "Hechos, prueba y documentación del reclamo laboral.",
+            (
+                FieldSpec("Breve descripción de los hechos laborales", "Breve descripción de los hechos", "textarea"),
+                FieldSpec("Notas internas del profesional", "Notas internas del profesional", "textarea"),
+            ),
+        ),
+    )
+
+CIVIL_CASE_SECTIONS = (
+    SectionSpec(
+        "Responsable y causa del reclamo",
+        "Datos de la persona o entidad contra la que se dirige el reclamo.",
+        (
+            FieldSpec("Responsable civil", "Responsable"),
+            FieldSpec("DNI del responsable civil", "DNI"),
+            FieldSpec("CUIT del responsable civil", "CUIT"),
+            FieldSpec("Domicilio del responsable civil", "Domicilio"),
+            FieldSpec("Carácter del responsable civil", "Carácter"),
+            FieldSpec("Causa del reclamo civil", "Causa del reclamo"),
+        ),
+    ),
+    SectionSpec(
+        "Vehículo del cliente",
+        "Datos del vehículo involucrado, si corresponde.",
+        (
+            FieldSpec("Tipo de vehículo del cliente", "Tipo"),
+            FieldSpec("Marca del vehículo del cliente", "Marca"),
+            FieldSpec("Modelo del vehículo del cliente", "Modelo"),
+            FieldSpec("Dominio del vehículo del cliente", "Dominio"),
+        ),
+    ),
+    SectionSpec(
+        "Vehículo del responsable",
+        "Datos del vehículo de la contraparte, si corresponde.",
+        (
+            FieldSpec("Tipo de vehículo del responsable", "Tipo"),
+            FieldSpec("Marca del vehículo del responsable", "Marca"),
+            FieldSpec("Modelo del vehículo del responsable", "Modelo"),
+            FieldSpec("Dominio del vehículo del responsable", "Dominio"),
+        ),
+    ),
+    SectionSpec(
+        "Hecho y prueba",
+        "Circunstancias del hecho y documentación aportada.",
+        (
+            FieldSpec("Fecha del hecho civil", "Fecha del hecho", "date", placeholder=DATE_PLACEHOLDER),
+            FieldSpec("Hora del hecho civil", "Hora del hecho", placeholder="HH:MM"),
+            FieldSpec("Relato del hecho civil", "Relato del hecho", "textarea"),
+        ),
+    ),
+)
+
+SUCCESSION_CASE_SECTIONS = (
+    SectionSpec(
+        "Causante",
+        "Datos personales y familiares del causante.",
+        (
+            FieldSpec("Nombre del causante", "Nombre completo"),
+            FieldSpec("DNI del causante", "DNI"),
+            FieldSpec("CUIT del causante", "CUIT"),
+            FieldSpec("Último domicilio del causante", "Último domicilio"),
+            FieldSpec("Fecha de nacimiento del causante", "Fecha de nacimiento", "date", placeholder=DATE_PLACEHOLDER),
+            FieldSpec("Fecha de fallecimiento del causante", "Fecha de fallecimiento", "date", placeholder=DATE_PLACEHOLDER),
+            FieldSpec("Lugar de fallecimiento del causante", "Lugar de fallecimiento"),
+            FieldSpec("Padre del causante", "Padre"),
+            FieldSpec("Madre del causante", "Madre"),
+            FieldSpec("Cónyuge del causante", "Cónyuge"),
+            FieldSpec("Bienes del acervo hereditario", "Bienes del acervo", "textarea"),
+        ),
+    ),
+)
+
+OTHER_CASE_SECTIONS = (
+    SectionSpec(
+        "Reclamado principal",
+        "Datos de la persona o entidad reclamada.",
+        (
+            FieldSpec("Nombre del reclamado", "Nombre completo"),
+            FieldSpec("DNI del reclamado", "DNI"),
+            FieldSpec("CUIT del reclamado", "CUIT"),
+            FieldSpec("Domicilio del reclamado", "Domicilio"),
+            FieldSpec("Carácter del reclamado", "Carácter"),
+            FieldSpec("Descripción de los hechos", "Descripción de los hechos", "textarea"),
+        ),
+    ),
+)
+
+CASE_TYPE_SECTIONS = {
+    CASE_TYPE_LRT: lrt_case_sections,
+    CASE_TYPE_LABOR: labor_case_sections,
+    CASE_TYPE_CIVIL: CIVIL_CASE_SECTIONS,
+    CASE_TYPE_SUCCESSION: SUCCESSION_CASE_SECTIONS,
+    CASE_TYPE_OTHER: OTHER_CASE_SECTIONS,
+}
+
+CASE_TYPE_REPEATED = {
+    CASE_TYPE_LRT: lambda: INTERVIEW_REPEATED,
+    CASE_TYPE_LABOR: (
+        RepeatedSpec("Posibles testigos", "Testigos", ("Nombre", "Datos de contacto")),
+        RepeatedSpec("Documentación aportada", "Documentación aportada", ("Documento",)),
+        RepeatedSpec(
+            "Responsables solidarios laborales",
+            "Responsables solidarios",
+            ("Nombre", "CUIT", "Domicilio", "Carácter"),
+        ),
+    ),
+    CASE_TYPE_CIVIL: (
+        RepeatedSpec("Documentación aportada", "Documental aportada", ("Documento",)),
+        RepeatedSpec(
+            "Responsables adicionales civiles",
+            "Responsables adicionales",
+            ("Nombre", "DNI", "CUIT", "Domicilio", "Carácter"),
+        ),
+    ),
+    CASE_TYPE_SUCCESSION: (
+        RepeatedSpec(
+            "Herederos",
+            "Herederos",
+            ("Nombre", "DNI", "CUIT", "Domicilio", "Carácter"),
+        ),
+        RepeatedSpec("Documentación aportada", "Documentación aportada", ("Documento",)),
+    ),
+    CASE_TYPE_OTHER: (
+        RepeatedSpec(
+            "Reclamados adicionales",
+            "Reclamados adicionales",
+            ("Nombre", "DNI", "CUIT", "Domicilio", "Carácter"),
+        ),
+        RepeatedSpec("Documentación aportada", "Documentación aportada", ("Documento",)),
+    ),
+}
+
+
+def sections_for_case_type(case_type: str | None) -> tuple[SectionSpec, ...]:
+    sections = CASE_TYPE_SECTIONS[canonical_case_type(case_type)]
+    return sections() if callable(sections) else sections
+
+
+def repeated_for_case_type(case_type: str | None) -> tuple[RepeatedSpec, ...]:
+    repeated = CASE_TYPE_REPEATED[canonical_case_type(case_type)]
+    return repeated() if callable(repeated) else repeated
+
 
 GENERAL_SECTIONS = (
     SectionSpec(
@@ -278,13 +530,19 @@ SYSTEM_METADATA_KEYS = {
     "Fecha de creación del registro",
     "Profesional creador",
     "Documentación recibida",
+    "Estado SISFE",
+    "Estado SISFE desde",
 }
 
 
 def all_defined_keys() -> set[str]:
-    sections = GENERAL_SECTIONS + INTERVIEW_SECTIONS + RAEO_SECTIONS
+    sections = GENERAL_SECTIONS + INTERVIEW_SECTIONS + COMMON_GENERAL_SECTIONS + process_sections() + RAEO_SECTIONS
+    for case_type in CASE_TYPES:
+        sections += sections_for_case_type(case_type)
     keys = {field.key for section in sections for field in section.fields}
     keys.update(spec.key for spec in GENERAL_REPEATED + INTERVIEW_REPEATED + RAEO_REPEATED)
+    for case_type in CASE_TYPES:
+        keys.update(spec.key for spec in repeated_for_case_type(case_type))
     keys.update(SYSTEM_METADATA_KEYS)
     return keys
 
@@ -377,7 +635,7 @@ def event_date(metadata: dict[str, str]) -> date | None:
 
 
 def build_case_caption(metadata: dict[str, str], fallback: str = "") -> str:
-    actor = str(metadata.get("Actor", "")).strip()
+    actor = str(metadata.get("Nombre completo", "")).strip() or str(metadata.get("Actor", "")).strip()
     if not actor:
         surname = str(metadata.get("Apellido del actor", "")).strip()
         names = str(metadata.get("Nombres del actor", "")).strip()
@@ -400,6 +658,14 @@ def ensure_system_metadata(
 ) -> dict[str, str]:
     result = dict(metadata)
     current = today or date.today()
+    full_name = str(result.get("Nombre completo", "")).strip() or str(result.get("Actor", "")).strip()
+    if not full_name:
+        surname = str(result.get("Apellido del actor", "")).strip()
+        names = str(result.get("Nombres del actor", "")).strip()
+        full_name = ", ".join(value for value in (surname, names) if value)
+    if full_name:
+        result["Nombre completo"] = full_name
+        result["Actor"] = full_name
     if not str(result.get("Identificación interna del expediente", "")).strip():
         result["Identificación interna del expediente"] = (
             f"GD-{current.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
