@@ -39,6 +39,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Apertura por doble clic o `Enter`, renombrado directo y envío a Papelera con `Supr`.
 - Escritos base o desde modelos Word; el selector de modelos usa una lista buscable y permite definir el título en el mismo cuadro.
 - Acciones contextuales de Ficha inicial, Pacto de cuota litis y Poder desde la entrevista, con catálogo Word dinámico, ranking por tipo de caso y selección múltiple de herederos para poderes sucesorios.
+- Semáforo configurable en el directorio según la última actividad verificable del caso (archivos, metadatos o movimientos), con archivado reversible y filtros para recientes y archivados.
 - Modelo base editable externamente en `%APPDATA%\GestorDocumental\Modelos\Modelo base - Escrito nuevo.docx`.
 - Modelo base oficio derivado de `Escrito.dotx`, con la geometría, los márgenes y el formato del original preservados.
 - Campos automáticos en modelos Word para profesional, carátula, CUIJ, actor, demandado, causa, radicación, abogado, contraparte, título y fecha.

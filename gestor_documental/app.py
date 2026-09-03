@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -82,6 +83,12 @@ from .case_data import (
     sections_for_case_type,
 )
 from .case_registry import recent_case_novedades, register_case_as_expediente
+from .case_activity import (
+    DEFAULT_ACTIVITY_SETTINGS,
+    case_activities,
+    normalized_activity_settings,
+    set_case_archived,
+)
 from .compilation_draft import (
     CompilationDraft,
     DraftItem,
@@ -1080,6 +1087,66 @@ class HeirPickerDialog(QDialog):
         return [self.rows[index] for index in indexes]
 
 
+class ActivitySettingsDialog(QDialog):
+    def __init__(self, settings: dict[str, object], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Semáforo de casos")
+        self.setMinimumWidth(480)
+        policy = normalized_activity_settings(settings)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.addLayout(section_heading(
+            "Semáforo del directorio",
+            "La actividad considera archivos, datos del caso y novedades del portal.",
+        ))
+        form = QFormLayout()
+        self.yellow_days = QSpinBox()
+        self.yellow_days.setRange(1, 3650)
+        self.yellow_days.setValue(int(policy["yellow_days"]))
+        self.red_days = QSpinBox()
+        self.red_days.setRange(2, 3650)
+        self.red_days.setValue(int(policy["red_days"]))
+        form.addRow("Amarillo desde (días)", self.yellow_days)
+        form.addRow("Rojo desde (días)", self.red_days)
+        self.color_edits: dict[str, QLineEdit] = {}
+        for key, label in (
+            ("green_color", "Color reciente"),
+            ("yellow_color", "Color atención"),
+            ("red_color", "Color inactivo"),
+            ("archived_color", "Color archivado"),
+        ):
+            edit = QLineEdit(str(policy[key]))
+            edit.setPlaceholderText("#RRGGBB")
+            self.color_edits[key] = edit
+            form.addRow(label, edit)
+        layout.addLayout(form)
+        self.show_recent = QCheckBox("Mostrar casos recientes (verdes)")
+        self.show_recent.setChecked(bool(policy["show_recent"]))
+        self.show_archived = QCheckBox("Mostrar casos archivados")
+        self.show_archived.setChecked(bool(policy["show_archived"]))
+        layout.addWidget(self.show_recent)
+        layout.addWidget(self.show_archived)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("Guardar")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self) -> dict[str, object]:
+        values = {
+            "yellow_days": self.yellow_days.value(),
+            "red_days": max(self.red_days.value(), self.yellow_days.value() + 1),
+            "show_recent": self.show_recent.isChecked(),
+            "show_archived": self.show_archived.isChecked(),
+        }
+        for key, edit in self.color_edits.items():
+            color = QColor(edit.text().strip())
+            values[key] = color.name() if color.isValid() else DEFAULT_ACTIVITY_SETTINGS[key]
+        return values
+
+
 class CompileNameDialog(QDialog):
     def __init__(self, case: Case, suggestion: str, identifier_missing: bool, parent=None):
         super().__init__(parent)
@@ -1580,6 +1647,7 @@ class MainWindow(QMainWindow):
         professional_menu.addSeparator()
         professional_menu.addAction("Configurar firmador externo…", self.configure_signer)
         professional_menu.addAction("Abrir modelos de escritos", self.open_models_folder)
+        professional_menu.addAction("Configurar semáforo de casos…", self.configure_case_activity)
         professional_menu.addSeparator()
         professional_menu.addAction("Restablecer distribución", self.reset_layout)
         self.professional_settings_button.setMenu(professional_menu)
@@ -2354,13 +2422,38 @@ class MainWindow(QMainWindow):
                 active_item = root_item
 
             if root_path.is_dir():
-                for case in list_cases(root_path):
+                cases = list_cases(root_path)
+                policy = normalized_activity_settings(self.store.settings.activity_settings)
+                activities = case_activities(cases, policy)
+                for case in cases:
                     if not case_matches(case, query):
                         continue
+                    activity = activities[case.path]
+                    if activity.archived and not policy["show_archived"]:
+                        continue
+                    if activity.status == "green" and not policy["show_recent"]:
+                        continue
                     item = QTreeWidgetItem([case.name])
-                    item.setIcon(0, ui_icon("folder", "#D0952D"))
+                    color_key = {
+                        "green": "green_color",
+                        "yellow": "yellow_color",
+                        "red": "red_color",
+                        "archived": "archived_color",
+                    }[activity.status]
+                    item.setIcon(0, ui_icon("folder", str(policy[color_key])))
                     item.setData(0, PATH_ROLE, str(case.path))
-                    item.setToolTip(0, str(case.path))
+                    state_label = {
+                        "green": "Actividad normal",
+                        "yellow": "Requiere atención",
+                        "red": "Inactivo",
+                        "archived": "Archivado",
+                    }[activity.status]
+                    item.setToolTip(
+                        0,
+                        f"{state_label} · última actividad: "
+                        f"{activity.latest_at.astimezone().strftime('%d/%m/%Y')} "
+                        f"({activity.inactive_days} días)\n{case.path}",
+                    )
                     root_item.addChild(item)
                     if select_path and case.path == select_path:
                         selected_item = item
@@ -2426,6 +2519,14 @@ class MainWindow(QMainWindow):
         if path:
             menu.addAction("Abrir carpeta", lambda: open_file(Path(path)))
             menu.addAction("Renombrar caso…", lambda: self.rename_case_folder(Case(Path(path))))
+            target_case = Case(Path(path))
+            archived = read_case_metadata(target_case).get("Archivado", "").casefold() in {
+                "1", "si", "sí", "true", "yes",
+            }
+            menu.addAction(
+                "Reactivar caso" if archived else "Archivar caso",
+                lambda: self.toggle_case_archived(target_case, not archived),
+            )
         else:
             root_path = Path(root)
             open_action = menu.addAction("Abrir ubicación", lambda: open_file(root_path))
@@ -2438,6 +2539,28 @@ class MainWindow(QMainWindow):
                 lambda: self.remove_study_root(root_path),
             )
         menu.exec(self.case_tree.mapToGlobal(point))
+
+    def toggle_case_archived(self, case: Case, archived: bool):
+        try:
+            set_case_archived(case, archived)
+            policy = normalized_activity_settings(self.store.settings.activity_settings)
+            if archived and not policy["show_archived"] and self.case == case:
+                self.set_case(None)
+            self.reload_cases(case.path if not archived else None)
+            self.statusBar().showMessage(
+                "Caso archivado" if archived else "Caso reactivado",
+                3500,
+            )
+        except Exception as error:
+            QMessageBox.warning(self, "No pudimos actualizar el caso", str(error))
+
+    def configure_case_activity(self):
+        dialog = ActivitySettingsDialog(self.store.settings.activity_settings, self)
+        if dialog.exec():
+            self.store.set_activity_settings(dialog.values())
+            selected = self.case.path if self.case else None
+            self.reload_cases(selected)
+            self.statusBar().showMessage("Semáforo de casos actualizado", 3500)
 
     def update_study_summary(self):
         roots = self.store.settings.study_roots

@@ -213,12 +213,17 @@ class ServiceTests(unittest.TestCase):
                     "compilation_visible": False,
                 }
             )
+            store.set_activity_settings(
+                {"yellow_days": 30, "red_days": 75, "show_archived": False}
+            )
             reloaded = SettingsStore(app_dir)
             self.assertEqual(reloaded.settings.study_root, study)
             self.assertIn("Dra. Ana Pérez", reloaded.settings.professionals)
             self.assertEqual(reloaded.settings.current_professional, "Dra. Ana Pérez")
             self.assertEqual(reloaded.settings.layout_state["body"], [220, 1180])
             self.assertFalse(reloaded.settings.layout_state["compilation_visible"])
+            self.assertEqual(reloaded.settings.activity_settings["yellow_days"], 30)
+            self.assertFalse(reloaded.settings.activity_settings["show_archived"])
 
     def test_settings_support_multiple_study_locations_and_safe_removal(self):
         with tempfile.TemporaryDirectory() as directory:

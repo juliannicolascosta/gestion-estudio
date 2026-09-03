@@ -239,6 +239,11 @@ class SettingsStore:
                 if isinstance(data, dict)
             },
             layout_state=layout_state,
+            activity_settings=(
+                dict(payload.get("activity_settings", {}))
+                if isinstance(payload.get("activity_settings", {}), dict)
+                else {}
+            ),
         )
 
     def save(self):
@@ -253,6 +258,7 @@ class SettingsStore:
             "signer_path": str(self.settings.signer_path) if self.settings.signer_path else None,
             "mev_profiles": self.settings.mev_profiles,
             "layout_state": self.settings.layout_state,
+            "activity_settings": self.settings.activity_settings,
         }
         self.config.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -313,6 +319,10 @@ class SettingsStore:
     def set_layout_state(self, state: dict[str, object]):
         """Persist machine-local splitter proportions and panel visibility."""
         self.settings.layout_state = dict(state)
+        self.save()
+
+    def set_activity_settings(self, settings: dict[str, object]):
+        self.settings.activity_settings = dict(settings)
         self.save()
 
 
