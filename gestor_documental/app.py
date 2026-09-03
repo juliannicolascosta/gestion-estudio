@@ -612,6 +612,12 @@ class ExtendedMetadataDialog(QDialog):
             form.setVerticalSpacing(8)
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
             for field in section.fields:
+                # Algunos datos (por ejemplo ARCA/ANSES) son comunes y también
+                # forman parte de fichas históricas LRT. Se muestran una sola vez:
+                # sobrescribir el editor dejaría una referencia Qt ya eliminada
+                # al cambiar de tipo de caso.
+                if field.key in self.edits:
+                    continue
                 label = self.template_field_label(field.label, template_variable_name(field.key))
                 editor = self._make_field_editor(field)
                 form.addRow(label, editor)

@@ -473,6 +473,14 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(metadata_dialog.values()["Actor"], "Pérez, Ana")
             metadata_dialog.close()
 
+            lrt_dialog = ExtendedMetadataDialog({"Tipo de caso": "Accidente laboral"})
+            lrt_type_combo = lrt_dialog.edits["Tipo de caso"]
+            lrt_type_combo.setCurrentText("Sucesiones")
+            self.app.processEvents()
+            self.assertEqual(lrt_dialog.values()["Tipo de caso"], "Sucesiones")
+            self.assertIn("Estado de acceso ARCA/AFIP", lrt_dialog.edits)
+            lrt_dialog.close()
+
             picker = ModelPickerDialog([first, second])
             self.assertEqual(picker.list.count(), 2)
             picker.search.setText("cédula")
