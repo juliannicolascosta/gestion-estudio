@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Event
 
 from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QAction, QColor, QDrag, QIcon, QKeySequence, QPainter, QPalette, QShortcut
+from PyQt6.QtGui import QAction, QColor, QDrag, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -103,9 +103,11 @@ from .signing import (
     SigningCertificate,
     SigningError,
     SigningUnavailable,
+    VisibleSignature,
     discover_signing_certificates,
     select_current_certificates,
     signed_output_path,
+    visible_signature_box,
 )
 from .services import (
     SettingsStore,
@@ -1581,7 +1583,7 @@ class SignPdfDialog(QDialog):
         super().__init__(parent)
         self.source = source
         self.setWindowTitle("Firmar PDF")
-        self.setMinimumWidth(590)
+        self.setMinimumSize(650, 720)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(10)
@@ -1600,6 +1602,44 @@ class SignPdfDialog(QDialog):
         layout.addWidget(QLabel("Motivo de la firma"))
         self.reason_edit = QLineEdit("Presentación judicial")
         layout.addWidget(self.reason_edit)
+        self.visible_check = QCheckBox("Mostrar la firma en el documento")
+        self.visible_check.setChecked(False)
+        layout.addWidget(self.visible_check)
+        options = QHBoxLayout()
+        options.addWidget(QLabel("Página"))
+        self.page_combo = QComboBox()
+        self.page_combo.addItem("Última página", -1)
+        try:
+            import pymupdf
+
+            with pymupdf.open(source) as document:
+                self.page_count = len(document)
+        except Exception:
+            self.page_count = 1
+        for index in range(self.page_count):
+            self.page_combo.addItem(f"Página {index + 1}", index)
+        options.addWidget(self.page_combo, 1)
+        options.addWidget(QLabel("Posición"))
+        self.position_combo = QComboBox()
+        for label, value in (
+            ("Abajo a la derecha", "bottom_right"),
+            ("Abajo a la izquierda", "bottom_left"),
+            ("Centro a la derecha", "middle_right"),
+            ("Centro a la izquierda", "middle_left"),
+            ("Arriba a la derecha", "top_right"),
+            ("Arriba a la izquierda", "top_left"),
+        ):
+            self.position_combo.addItem(label, value)
+        options.addWidget(self.position_combo, 2)
+        layout.addLayout(options)
+        self.preview = QLabel("Vista previa no disponible")
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setMinimumHeight(330)
+        self.preview.setStyleSheet("background: #E8ECEA; border: 1px solid #CBD5D1; border-radius: 8px;")
+        layout.addWidget(self.preview, 1)
+        self.visible_check.toggled.connect(self.refresh_signature_preview)
+        self.page_combo.currentIndexChanged.connect(self.refresh_signature_preview)
+        self.position_combo.currentIndexChanged.connect(self.refresh_signature_preview)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
         )
@@ -1607,6 +1647,7 @@ class SignPdfDialog(QDialog):
         buttons.accepted.connect(self.accept_if_valid)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.refresh_signature_preview()
 
     def accept_if_valid(self):
         if self.name_edit.text().strip():
@@ -1619,6 +1660,58 @@ class SignPdfDialog(QDialog):
     @property
     def reason(self) -> str:
         return self.reason_edit.text().strip()
+
+    @property
+    def visible_signature(self) -> VisibleSignature:
+        return VisibleSignature(
+            enabled=self.visible_check.isChecked(),
+            page=int(self.page_combo.currentData()),
+            position=str(self.position_combo.currentData()),
+        )
+
+    def refresh_signature_preview(self, *args):
+        try:
+            import pymupdf
+
+            page_index = int(self.page_combo.currentData())
+            if page_index < 0:
+                page_index = self.page_count - 1
+            with pymupdf.open(self.source) as document:
+                page = document[page_index]
+                pix = page.get_pixmap(matrix=pymupdf.Matrix(0.72, 0.72), alpha=False)
+                preview = QPixmap()
+                preview.loadFromData(pix.tobytes("png"))
+                if self.visible_check.isChecked():
+                    x1, y1, x2, y2 = visible_signature_box(
+                        page.rect.width,
+                        page.rect.height,
+                        str(self.position_combo.currentData()),
+                    )
+                    scale_x = preview.width() / page.rect.width
+                    scale_y = preview.height() / page.rect.height
+                    painter = QPainter(preview)
+                    pen = painter.pen()
+                    pen.setColor(QColor("#2B7564"))
+                    pen.setWidth(3)
+                    painter.setPen(pen)
+                    painter.setBrush(QColor(43, 117, 100, 35))
+                    painter.drawRect(
+                        int(x1 * scale_x),
+                        int((page.rect.height - y2) * scale_y),
+                        int((x2 - x1) * scale_x),
+                        int((y2 - y1) * scale_y),
+                    )
+                    painter.end()
+                self.preview.setPixmap(
+                    preview.scaled(
+                        540,
+                        330,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+        except Exception:
+            self.preview.setText("No pudimos generar la vista previa de esta página.")
 
 
 class MainWindow(QMainWindow):
@@ -4862,6 +4955,7 @@ class MainWindow(QMainWindow):
                     target,
                     reason=reason,
                     location="Argentina",
+                    visible_signature=confirmation.visible_signature,
                 )
             finally:
                 QApplication.restoreOverrideCursor()

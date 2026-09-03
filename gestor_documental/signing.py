@@ -41,6 +41,33 @@ class SigningCertificate:
         return f"{self.subject} · vence {self.valid_until.strftime('%d/%m/%Y')}"
 
 
+@dataclass(frozen=True)
+class VisibleSignature:
+    enabled: bool = False
+    page: int = -1
+    position: str = "bottom_right"
+
+
+def visible_signature_box(
+    page_width: float,
+    page_height: float,
+    position: str = "bottom_right",
+) -> tuple[int, int, int, int]:
+    width = min(190, max(120, int(page_width * 0.34)))
+    height = min(72, max(48, int(page_height * 0.09)))
+    margin = 24
+    horizontal = "left" if position.endswith("left") else "right"
+    vertical = position.removesuffix("_left").removesuffix("_right")
+    x1 = margin if horizontal == "left" else int(page_width) - margin - width
+    if vertical == "top":
+        y1 = int(page_height) - margin - height
+    elif vertical == "middle":
+        y1 = (int(page_height) - height) // 2
+    else:
+        y1 = margin
+    return x1, y1, x1 + width, y1 + height
+
+
 DEFAULT_PKCS11_MODULES = (
     Path(r"C:\Windows\System32\eTPKCS11.dll"),
     Path(r"C:\Windows\SysWOW64\eTPKCS11.dll"),
@@ -227,6 +254,7 @@ class DigitalSignatureSession:
         *,
         reason: str = "Presentación judicial",
         location: str = "Argentina",
+        visible_signature: VisibleSignature | None = None,
     ) -> Path:
         if not self.active:
             raise SigningError("La sesión de firma no está iniciada.")
@@ -243,20 +271,51 @@ class DigitalSignatureSession:
             from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
             from pyhanko.pdf_utils.reader import PdfFileReader
             from pyhanko.sign import signers
-            from pyhanko.sign.fields import SigSeedSubFilter
+            from pyhanko.sign.fields import SigFieldSpec, SigSeedSubFilter
             from pyhanko.sign.validation import validate_pdf_signature
             from pyhanko_certvalidator import ValidationContext
+            from pyhanko.stamp import TextStampStyle
 
             with source.open("rb") as input_stream, temporary.open("wb") as output_stream:
                 writer = IncrementalPdfFileWriter(input_stream)
+                field_name = f"Firma_Gestor_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
                 metadata = signers.PdfSignatureMetadata(
-                    field_name=f"Firma_Gestor_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
+                    field_name=field_name,
                     md_algorithm="sha256",
                     subfilter=SigSeedSubFilter.PADES,
                     reason=reason.strip() or None,
                     location=location.strip() or None,
                 )
-                signers.sign_pdf(writer, metadata, signer=self._signer, output=output_stream)
+                field_spec = None
+                stamp_style = None
+                if visible_signature and visible_signature.enabled:
+                    page_count = int(writer.root["/Pages"]["/Count"])
+                    page_index = visible_signature.page if visible_signature.page >= 0 else page_count - 1
+                    page_index = max(0, min(page_index, page_count - 1))
+                    page_ref, _ = writer.find_page_for_modification(page_index)
+                    page_object = page_ref.get_object()
+                    while "/MediaBox" not in page_object:
+                        page_object = page_object["/Parent"].get_object()
+                    media_box = page_object["/MediaBox"]
+                    page_width = float(media_box[2]) - float(media_box[0])
+                    page_height = float(media_box[3]) - float(media_box[1])
+                    field_spec = SigFieldSpec(
+                        field_name,
+                        on_page=page_index,
+                        box=visible_signature_box(page_width, page_height, visible_signature.position),
+                    )
+                    stamp_style = TextStampStyle(
+                        border_width=1,
+                        stamp_text="Firmado digitalmente por\n%(signer)s\n%(ts)s",
+                        timestamp_format="%d/%m/%Y %H:%M:%S",
+                    )
+                pdf_signer = signers.PdfSigner(
+                    metadata,
+                    signer=self._signer,
+                    stamp_style=stamp_style,
+                    new_field_spec=field_spec,
+                )
+                pdf_signer.sign_pdf(writer, output=output_stream)
                 output_stream.flush()
                 os.fsync(output_stream.fileno())
 

@@ -55,6 +55,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Conversión de Word aislada del proceso principal, con tiempo máximo y caché local para no reconvertir escritos sin cambios.
 - Optimización de PDF que conserva el texto y evita rasterizar todas las páginas.
 - Firma digital PAdES dentro del Gestor mediante token SafeNet/PKCS#11. El PIN se solicita una vez, no se guarda y la sesión se reutiliza hasta cerrarla manualmente o salir de la aplicación.
+- Firma visible opcional dentro de la misma operación PAdES: permite elegir página y seis posiciones, muestra una vista previa y usa como opción estándar la última página abajo a la derecha. El PDF original nunca se modifica.
 - Cada firma se valida inmediatamente y crea un archivo `_FIRMADO.pdf` sin modificar el PDF original. Si el tamaño firmado supera el límite elegido, se advierte sin alterar el documento ya firmado.
 - Xólido continúa disponible como alternativa: reutiliza su sesión abierta y muestra el PDF listo para arrastrar a su cuadro de documentos.
 - Selector de profesionales con **Añadir nuevo profesional…** como primera opción y un menú de configuración para MEV, firmador y modelos.

@@ -46,6 +46,7 @@
 - [x] Campos repetibles y cálculos determinísticos de edad, antigüedad, días y remuneraciones.
 - [x] Validación de datos faltantes y sugerencias contextuales para casos LRT/RAEO.
 - [x] Firma PAdES con token SafeNet/PKCS#11 y sesión autenticada reutilizable sin persistir el PIN.
+- [x] Firma PAdES visible opcional con selección de página, posición y vista previa.
 - [x] Validación inmediata de integridad y control de tamaño posterior a la firma.
 - [x] Portal jurídico como contexto propio dentro del caso.
 - [x] Checklist operativo de documentación pendiente compartido con la entrevista.

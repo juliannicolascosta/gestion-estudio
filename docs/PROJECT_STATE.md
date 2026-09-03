@@ -69,6 +69,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Límites de 1, 3, 6 y 20 MB.
 - Selección ampliable de profesionales.
 - Firma PAdES interna mediante token SafeNet y PKCS#11, con SHA-256, validación inmediata y conservación del PDF original.
+- Apariencia visible opcional integrada al campo PAdES, con página y posición configurables y vista previa antes de firmar; el estándar propuesto es última página, abajo a la derecha.
 - Inicio de sesión del token una sola vez por ejecución: el PIN no se persiste y la sesión puede cerrarse manualmente desde el menú Firmar.
 - Portal jurídico separado del área cotidiana de archivos, con contador propio, lista de altura completa y acceso a los movimientos integrados.
 - Indicador visual reutilizable para estados del Portal: espera, proceso, resultado correcto y error; será alimentado por el gestor de descargas en segundo plano.

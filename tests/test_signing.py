@@ -17,8 +17,10 @@ from pypdf import PdfWriter
 from gestor_documental.signing import (
     DigitalSignatureSession,
     SigningCertificate,
+    VisibleSignature,
     select_current_certificates,
     signed_output_path,
+    visible_signature_box,
 )
 
 
@@ -122,12 +124,18 @@ class SigningTests(unittest.TestCase):
             session = DigitalSignatureSession()
             session._session = token_session
             session._signer = signer
-            first = session.sign_pdf(source)
+            first = session.sign_pdf(
+                source,
+                visible_signature=VisibleSignature(True, -1, "bottom_right"),
+            )
             second = session.sign_pdf(first)
 
             with second.open("rb") as stream:
                 reader = PdfFileReader(stream)
                 self.assertEqual(len(reader.embedded_signatures), 2)
+                rectangle = reader.embedded_signatures[0].sig_field.get("/Rect")
+                self.assertEqual(len(rectangle), 4)
+                self.assertGreater(float(rectangle[2]) - float(rectangle[0]), 0)
                 self.assertEqual(
                     str(reader.embedded_signatures[-1].sig_object.get("/SubFilter")),
                     "/ETSI.CAdES.detached",
@@ -151,6 +159,17 @@ class SigningTests(unittest.TestCase):
             session.close()
             self.assertTrue(token_session.closed)
             self.assertFalse(session.active)
+
+    def test_visible_signature_positions_stay_inside_the_page(self):
+        for position in (
+            "bottom_right", "bottom_left", "middle_right",
+            "middle_left", "top_right", "top_left",
+        ):
+            x1, y1, x2, y2 = visible_signature_box(595, 842, position)
+            self.assertGreaterEqual(x1, 0)
+            self.assertGreaterEqual(y1, 0)
+            self.assertLessEqual(x2, 595)
+            self.assertLessEqual(y2, 842)
 
 
 if __name__ == "__main__":
