@@ -148,7 +148,10 @@ class AppSmokeTests(unittest.TestCase):
             with StudyDatabase(study_database_path(study)) as database:
                 expediente = database.import_case(case)
                 database.add_movement(
-                    expediente.id, "Cédula electrónica", source="sisfe", external_id="mov-1"
+                    expediente.id,
+                    "Se fija audiencia para el 15/09/2026 a las 09:30",
+                    source="sisfe",
+                    external_id="mov-1",
                 )
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
@@ -156,7 +159,8 @@ class AppSmokeTests(unittest.TestCase):
             window.reload_cases(case.path)
 
             self.assertEqual(window.novedades_list.count(), 1)
-            self.assertIn("Cédula electrónica", window.novedades_list.item(0).text())
+            self.assertIn("Se fija audiencia", window.novedades_list.item(0).text())
+            self.assertIn("DETECCIÓN · Audiencia: 15/09/2026 09:30", window.novedades_list.item(0).text())
             self.assertEqual(window.novedades_count.text(), "1 novedad")
             self.assertGreaterEqual(window.novedades_list.minimumHeight(), 220)
             self.assertEqual(

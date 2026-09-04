@@ -41,6 +41,7 @@
 - [x] Selector buscable de modelos con título en el mismo paso.
 - [x] Generación contextual de ficha inicial, pacto y poder con catálogo dinámico y ranking por tipo de caso.
 - [x] Semáforo configurable del directorio con actividad real, archivado reversible y filtros de visibilidad.
+- [x] Estado de trámite interno SISFE e interpretación auditable inicial de audiencias, traslados y vencimientos explícitos.
 - [x] Estados visuales para Word editable, PDF para firmar y archivo firmado.
 - [x] Ficha ampliada en pestañas para datos generales, entrevista inicial y RAEO.
 - [x] Campos repetibles y cálculos determinísticos de edad, antigüedad, días y remuneraciones.

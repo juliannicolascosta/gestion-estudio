@@ -76,6 +76,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - La bandeja del Portal muestra todos los movimientos guardados; ya no recorta silenciosamente la vista a los últimos veinte.
 - El flujo operativo de SISFE entra por un único servicio de aplicación y usa el navegador autenticado; el antiguo transporte HTTP queda fuera de la selección normal.
 - El detalle de una novedad ofrece descarga automática mediante los controles renderizados por SISFE: selecciona la página oficial, acciona el documento principal y recorre los adjuntos adicionales sin copiar credenciales ni reproducir los endpoints de descarga.
+- El encabezado operativo del expediente usa la ubicación actual o trámite interno informado por SISFE y su vigencia. Los movimientos tienen una primera interpretación determinística para audiencias, traslados y vencimientos explícitos, mostrando fecha extraída, texto de origen y advertencias sin crear eventos automáticamente.
 - Cada PDF descargado se registra por hash y queda relacionado en SQLite con el movimiento SISFE exacto y su rol (principal o adicional); la relación y la deduplicación son idempotentes.
 - Los diálogos SISFE, la lista ordenable de compilación y los roles de interfaz ya viven en módulos propios, primer corte efectivo para reducir `app.py` sin modificar el flujo visible.
 - Selector de profesionales con acción de alta incorporada y menú de configuración rápida en el engranaje.

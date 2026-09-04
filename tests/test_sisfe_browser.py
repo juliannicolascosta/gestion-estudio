@@ -21,6 +21,8 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("findNovedadesById", script)
         self.assertIn("findPaged", script)
         self.assertIn("collectPaged", script)
+        self.assertIn("details.ubicacionActual", script)
+        self.assertIn("fechaUbicacionActual", script)
         self.assertIn("page += 1", script)
         self.assertIn("al consultar", script)
         self.assertNotIn("document.cookie", script)
@@ -80,6 +82,17 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertEqual(snapshot.case_status_since, "2026-08-30")
         self.assertEqual(snapshot.movements[0].internal_id, "9")
         self.assertEqual(snapshot.movements[0].occurred_at.year, 2026)
+
+    def test_combined_internal_status_is_split_from_its_since_date(self):
+        snapshot = snapshot_from_browser_payload(
+            {
+                "ok": True,
+                "cuij": "21123456789",
+                "case_status": "EN TRAMITE INTERNO desde el 03/09/2026 11:49",
+            }
+        )
+        self.assertEqual(snapshot.case_status, "EN TRAMITE INTERNO")
+        self.assertEqual(snapshot.case_status_since, "03/09/2026 11:49")
 
     def test_browser_payload_decodes_downloaded_pdf(self):
         content = b"%PDF-1.7\nexample"

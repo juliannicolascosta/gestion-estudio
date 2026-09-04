@@ -83,6 +83,7 @@ from .case_data import (
     sections_for_case_type,
 )
 from .case_registry import recent_case_novedades, register_case_as_expediente
+from .movement_interpretation import interpret_movement
 from .case_activity import (
     DEFAULT_ACTIVITY_SETTINGS,
     case_activities,
@@ -187,6 +188,19 @@ def _format_sisfe_date(value: object) -> str:
         except ValueError:
             pass
     return text
+
+
+def _interpretation_summary(text: str) -> str:
+    rows = []
+    for result in interpret_movement(text):
+        extracted = (
+            result.extracted_at.strftime("%d/%m/%Y %H:%M").removesuffix(" 00:00")
+            if result.extracted_at
+            else "fecha sin confirmar"
+        )
+        warning = f" · {result.warning}" if result.warning else ""
+        rows.append(f"{result.kind}: {extracted}{warning}")
+    return "\n".join(rows)
 
 APP_STYLE = """
 QMainWindow, QWidget#appRoot { background: #F4F5F3; color: #17211F; }
@@ -2039,7 +2053,7 @@ class MainWindow(QMainWindow):
         self.novedades_count.setObjectName("muted")
         novedades_header.addWidget(self.novedades_count)
         novedades_layout.addLayout(novedades_header)
-        self.portal_case_status = QLabel("Estado del expediente: todavía no sincronizado")
+        self.portal_case_status = QLabel("Trámite interno / ubicación actual: todavía no sincronizado")
         self.portal_case_status.setObjectName("caseBadge")
         self.portal_case_status.setWordWrap(True)
         novedades_layout.addWidget(self.portal_case_status)
@@ -2988,7 +3002,7 @@ class MainWindow(QMainWindow):
         self.update_novedad_actions()
         if not self.case:
             self.novedades_count.setText("Sin novedades")
-            self.portal_case_status.setText("Estado del expediente: seleccioná un caso")
+            self.portal_case_status.setText("Trámite interno / ubicación actual: seleccioná un caso")
             if hasattr(self, "work_tabs"):
                 self.work_tabs.setTabText(self.portal_tab_index, "Portal · 0")
             return
@@ -2996,10 +3010,13 @@ class MainWindow(QMainWindow):
             movements = recent_case_novedades(self.case)
             metadata = read_case_metadata(self.case)
             status = str(metadata.get("Estado SISFE", "")).strip()
-            since = _format_sisfe_date(metadata.get("Estado SISFE desde", ""))
+            raw_since = str(metadata.get("Estado SISFE desde", "")).strip()
+            since = _format_sisfe_date(raw_since) if raw_since else ""
             status_text = status or "todavía no informado por SISFE"
             since_text = f" · desde {since}" if since else ""
-            self.portal_case_status.setText(f"Estado del expediente: {status_text}{since_text}")
+            self.portal_case_status.setText(
+                f"Trámite interno / ubicación actual: {status_text}{since_text}"
+            )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.novedades_count.setText("No disponibles")
             self.novedades_list.addItem(f"No pudimos cargar las novedades: {error}")
@@ -3008,8 +3025,16 @@ class MainWindow(QMainWindow):
             return
         for movement in movements:
             stamp = movement.occurred_at.strftime("%d/%m/%Y %H:%M") if movement.occurred_at else "Sin fecha"
-            item = QListWidgetItem(ui_icon("bell", "#2B7564"), f"{movement.title}\n{stamp} · {movement.source.upper()}")
-            item.setToolTip(movement.external_id or movement.source)
+            interpretation = _interpretation_summary(movement.title)
+            detail_line = f"\nDETECCIÓN · {interpretation}" if interpretation else ""
+            item = QListWidgetItem(
+                ui_icon("bell", "#B36A24" if interpretation else "#2B7564"),
+                f"{movement.title}\n{stamp} · {movement.source.upper()}{detail_line}",
+            )
+            tooltip = f"Texto de origen: {movement.title}"
+            if interpretation:
+                tooltip += f"\n\n{interpretation}"
+            item.setToolTip(tooltip)
             item.setData(
                 MOVEMENT_ROLE,
                 {
@@ -3017,6 +3042,7 @@ class MainWindow(QMainWindow):
                     "title": movement.title,
                     "source": movement.source,
                     "occurred_at": movement.occurred_at.isoformat() if movement.occurred_at else "",
+                    "interpretation": interpretation,
                 },
             )
             self.novedades_list.addItem(item)
@@ -3236,10 +3262,12 @@ class MainWindow(QMainWindow):
         if not movement:
             return
         if movement.get("source") != "sisfe" or not movement.get("external_id"):
+            interpretation = movement.get("interpretation") or "Sin detecciones automáticas."
             QMessageBox.information(
                 self,
                 "Detalle de la novedad",
-                f"{movement.get('title', 'Movimiento')}\n\nEsta novedad no proviene de SISFE.",
+                f"{movement.get('title', 'Movimiento')}\n\nInterpretación:\n{interpretation}\n\n"
+                "Esta novedad no proviene de SISFE.",
             )
             return
         if not self._sisfe_login_dialog or not self.sisfe_session.active:
@@ -3268,6 +3296,9 @@ class MainWindow(QMainWindow):
             )
             stamp = _format_sisfe_date(detail.get("occurred_at"))
             observation = detail.get("observation") or "Sin observaciones adicionales."
+            interpretation = _interpretation_summary(
+                f"{detail.get('title') or movement.get('title') or ''} {observation}"
+            ) or "Sin detecciones automáticas."
             attachments = []
             if detail.get("has_primary_document"):
                 attachments.append("documento principal")
@@ -3282,6 +3313,7 @@ class MainWindow(QMainWindow):
             box.setInformativeText(
                 f"Fecha: {stamp}\n"
                 f"Contenido: {observation}\n"
+                f"Interpretación: {interpretation}\n"
                 f"Disponible: {', '.join(attachments) if attachments else 'sin adjuntos'}"
             )
             open_button = box.addButton(

@@ -7,6 +7,7 @@ portal's actual browser session without exporting cookies to disk or Python.
 from __future__ import annotations
 
 import json
+import re
 from base64 import b64decode
 from binascii import Error as Base64Error
 from datetime import datetime
@@ -272,10 +273,14 @@ def browser_sync_script(cuij: str) -> str:
               cuij: target,
               title: details.expCaratula || selected.expCaratula || '',
               tribunal: details.radicado || selected.radicacionActual || '',
-              case_status: scalar(details.estadoActual) || scalar(details.estado) || scalar(details.situacionActual) ||
-                scalar(details.ubicacionActual) || deepValue(context, ['estadoactual', 'estadoexpediente', 'situacionactual', 'ubicacionactual', 'estado']),
+              case_status: scalar(details.ubicacionActual) || scalar(details.expUbicacionActual) ||
+                scalar(details.tramiteInterno) || scalar(details.estadoActual) || scalar(details.estado) ||
+                scalar(details.situacionActual) || deepValue(context, ['ubicacionactual', 'expubicacionactual',
+                  'tramiteinterno', 'estadoactual', 'estadoexpediente', 'situacionactual', 'ubicacion', 'estado']),
               case_status_since: scalar(details.fechaEstado) || scalar(details.fechaEstadoActual) ||
-                scalar(details.fechaSituacion) || deepValue(context, ['fechaestado', 'fechaestadoactual', 'fechasituacion', 'fechadesde']),
+                scalar(details.fechaUbicacionActual) || scalar(details.expFechaUbicacion) ||
+                scalar(details.fechaSituacion) || deepValue(context, ['fechaubicacionactual', 'expfechaubicacion',
+                  'fechaestado', 'fechaestadoactual', 'fechasituacion', 'fechadesde']),
               movements: news.map(row => ({{
                 internal_id: String(row.id || ''),
                 title: String(row.novedad || row.tipoActuacion || 'Movimiento SISFE'),
@@ -304,17 +309,32 @@ def snapshot_from_browser_payload(payload: dict) -> SisfeCaseSnapshot:
         for row in payload.get("movements", [])
         if isinstance(row, dict)
     )
+    case_status, case_status_since = _split_case_status(
+        str(payload.get("case_status", "")),
+        str(payload.get("case_status_since", "")),
+    )
     return SisfeCaseSnapshot(
         cuij=str(payload.get("cuij", "")),
         title=str(payload.get("title", "")),
         tribunal=str(payload.get("tribunal", "")),
-        case_status=str(payload.get("case_status", "")),
-        case_status_since=str(payload.get("case_status_since", "")),
+        case_status=case_status,
+        case_status_since=case_status_since,
         movements=movements,
         download_warnings=tuple(
             str(warning) for warning in payload.get("warnings", []) if str(warning).strip()
         ),
     )
+
+
+def _split_case_status(status: str, since: str) -> tuple[str, str]:
+    status = " ".join(status.split()).strip()
+    since = " ".join(since.split()).strip()
+    if since:
+        return status, since
+    match = re.match(r"^(.*?)\s+desde(?:\s+el)?\s+(.+)$", status, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return status, since
 
 
 def _documents_from_browser_row(row: dict) -> tuple[SisfeDocumentPayload, ...]:
