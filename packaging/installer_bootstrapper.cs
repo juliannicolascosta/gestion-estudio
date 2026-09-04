@@ -10,8 +10,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Instalador de Gestor de documental para Windows")]
 [assembly: AssemblyCompany("Gestor de documental")]
 [assembly: AssemblyProduct("Gestor de documental")]
-[assembly: AssemblyVersion("0.11.0.0")]
-[assembly: AssemblyFileVersion("0.11.0.0")]
+[assembly: AssemblyVersion("@@ASSEMBLY_VERSION@@")]
+[assembly: AssemblyFileVersion("@@ASSEMBLY_VERSION@@")]
 
 internal static class GestorInstaller
 {
@@ -34,7 +34,8 @@ internal static class GestorInstaller
         if (!silent)
         {
             var answer = MessageBox.Show(
-                "Se instalará Gestor de documental 0.11.0 para este usuario.\n\n" +
+                "Se instalará Gestor de documental @@VERSION@@ para este usuario.\n\n" +
+                "La actualización conserva casos, configuración y modelos personalizados. " +
                 "No requiere permisos de administrador y aparecerá en Aplicaciones instaladas.",
                 ProductName,
                 MessageBoxButtons.YesNo,

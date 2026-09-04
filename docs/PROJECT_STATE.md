@@ -109,4 +109,4 @@ La prioridad inmediata sigue siendo consolidar el flujo documental y SISFE. Agen
 
 ## Publicación
 
-El desarrollo está versionado en GitHub. Todavía no se generó una versión estable, actualización automática ni instalador firmado para distribución general.
+La versión `0.13.0` es la referencia estable de trabajo y cuenta con instalador actualizable para Windows. El instalador reemplaza sólo el programa; conserva las Ubicaciones del Estudio, `%APPDATA%\GestorDocumental`, los modelos personalizados y las bases locales. El instalador todavía no está firmado con un certificado de publicación ni incorpora actualización automática.

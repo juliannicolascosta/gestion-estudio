@@ -10,7 +10,12 @@ $Payload = Join-Path $Build "payload"
 $Runtime = Join-Path $Payload "runtime"
 $App = Join-Path $Payload "app"
 $SfxSource = Join-Path $Build "sfx-source"
-$Version = "0.12.0"
+$InstallScript = Join-Path $SfxSource "install.ps1"
+$VersionSource = Get-Content -LiteralPath (Join-Path $Project "gestor_documental\__init__.py") -Raw
+if ($VersionSource -notmatch '__version__\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"') {
+    throw "No se pudo determinar la version del programa."
+}
+$Version = $Matches[1]
 
 function Assert-ProjectPath([string]$Path) {
     $FullPath = [IO.Path]::GetFullPath($Path)
@@ -91,12 +96,13 @@ if (Test-Path -LiteralPath $PayloadZip) { Remove-Item -LiteralPath $PayloadZip -
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $PayloadZip)) {
     throw "No se pudo comprimir el contenido del instalador."
 }
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot "install.ps1") -Destination $SfxSource -Force
+$InstallSource = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "install.ps1") -Raw).Replace("@@VERSION@@", $Version)
+Set-Content -LiteralPath $InstallScript -Value $InstallSource -Encoding UTF8
 
 # Verify the real install script in an isolated location without changing the
 # user's Start menu, registry or application data.
 $TestInstall = Join-Path $Build "test-install"
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $SfxSource "install.ps1") `
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallScript `
     -InstallDir $TestInstall -NoShortcuts -NoRegistry -NoLaunch
 if ($LASTEXITCODE -ne 0) { throw "La prueba de instalacion fallo." }
 $env:PYTHONPATH = Join-Path $TestInstall "app"
@@ -131,17 +137,20 @@ if (-not $Csc) {
     throw "No se encontro el compilador nativo de Windows para crear el instalador."
 }
 $Bootstrapper = Join-Path $Build "GestorDocumentalInstallerBootstrapper.exe"
+$BootstrapSource = Join-Path $Build "installer_bootstrapper.generated.cs"
+$AssemblyVersion = "$Version.0"
+$BootstrapContent = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "installer_bootstrapper.cs") -Raw).Replace("@@VERSION@@", $Version).Replace("@@ASSEMBLY_VERSION@@", $AssemblyVersion)
+Set-Content -LiteralPath $BootstrapSource -Value $BootstrapContent -Encoding UTF8
 & $Csc /nologo /target:winexe /platform:x64 /optimize+ `
     "/out:$Bootstrapper" `
     "/win32icon:$(Join-Path $Project 'gestor_documental\gestor-documental.ico')" `
     /reference:System.Windows.Forms.dll `
-    (Join-Path $PSScriptRoot "installer_bootstrapper.cs")
+    $BootstrapSource
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Bootstrapper)) {
     throw "No se pudo compilar el iniciador del instalador."
 }
 
 $PayloadZip = Join-Path $SfxSource "payload.zip"
-$InstallScript = Join-Path $SfxSource "install.ps1"
 Copy-Item -LiteralPath $Bootstrapper -Destination $Installer -Force
 $PayloadLength = (Get-Item -LiteralPath $PayloadZip).Length
 $ScriptLength = (Get-Item -LiteralPath $InstallScript).Length
