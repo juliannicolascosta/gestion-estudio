@@ -77,6 +77,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - El flujo operativo de SISFE entra por un único servicio de aplicación y usa el navegador autenticado; el antiguo transporte HTTP queda fuera de la selección normal.
 - El detalle de una novedad ofrece descarga automática mediante los controles renderizados por SISFE: selecciona la página oficial, acciona el documento principal y recorre los adjuntos adicionales sin copiar credenciales ni reproducir los endpoints de descarga.
 - El encabezado operativo del expediente usa la ubicación actual o trámite interno informado por SISFE y su vigencia. Los movimientos tienen una primera interpretación determinística para audiencias, traslados y vencimientos explícitos, mostrando fecha extraída, texto de origen y advertencias sin crear eventos automáticamente.
+- El núcleo fuente estable de Extractor SISFE (`90e3de3`) fue integrado como módulo interno `gestor_documental.extractor_core`, junto con su catálogo público. La generación de cédulas importa este módulo directamente; no modifica `sys.path`, no ejecuta otro programa y se verifica dentro del instalador autocontenido.
 - Cada PDF descargado se registra por hash y queda relacionado en SQLite con el movimiento SISFE exacto y su rol (principal o adicional); la relación y la deduplicación son idempotentes.
 - Los diálogos SISFE, la lista ordenable de compilación y los roles de interfaz ya viven en módulos propios, primer corte efectivo para reducir `app.py` sin modificar el flujo visible.
 - Selector de profesionales con acción de alta incorporada y menú de configuración rápida en el engranaje.
@@ -109,4 +110,4 @@ La prioridad inmediata sigue siendo consolidar el flujo documental y SISFE. Agen
 
 ## Publicación
 
-La versión `0.13.0` es la referencia estable de trabajo y cuenta con instalador actualizable para Windows. El instalador reemplaza sólo el programa; conserva las Ubicaciones del Estudio, `%APPDATA%\GestorDocumental`, los modelos personalizados y las bases locales. El instalador todavía no está firmado con un certificado de publicación ni incorpora actualización automática.
+La versión `0.13.1` es la referencia estable de trabajo y cuenta con instalador transaccional para Windows. Primero prepara y valida el programa nuevo, cierra todos los procesos de la instalación anterior y conserva una copia de respaldo durante el intercambio. Reemplaza sólo el programa y mantiene las Ubicaciones del Estudio, `%APPDATA%\GestorDocumental`, los modelos personalizados y las bases locales. El instalador todavía no está firmado con un certificado de publicación ni incorpora actualización automática.

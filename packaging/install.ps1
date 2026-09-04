@@ -2,7 +2,8 @@ param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\Gestor de documental"),
     [switch]$NoShortcuts,
     [switch]$NoRegistry,
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [switch]$Quiet
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,14 +12,65 @@ $Version = "@@VERSION@@"
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Payload = Join-Path $SourceDir "payload.zip"
 $LogFile = Join-Path $env:TEMP "gestor-documental-instalacion.log"
+$InstallParent = Split-Path -Parent ([IO.Path]::GetFullPath($InstallDir))
+$StagingDir = Join-Path $InstallParent (".gestor-documental-nuevo-" + [Guid]::NewGuid().ToString("N"))
+$BackupDir = Join-Path $InstallParent (".gestor-documental-anterior-" + [Guid]::NewGuid().ToString("N"))
+$PreviousMoved = $false
+$NewInstalled = $false
 
 function Stop-GestorProcess {
-    $executable = [IO.Path]::GetFullPath((Join-Path $InstallDir "runtime\pythonw.exe"))
-    Get-Process pythonw -ErrorAction SilentlyContinue | Where-Object {
-        try { $_.Path -and [IO.Path]::GetFullPath($_.Path) -eq $executable } catch { $false }
-    } | ForEach-Object {
-        & taskkill.exe /PID $_.Id /T /F | Out-Null
+    $root = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\') + '\'
+    $processes = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and [IO.Path]::GetFullPath($_.Path).StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
+        }
+        catch { $false }
     }
+    foreach ($process in $processes) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline) {
+        $stillRunning = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            try {
+                $_.Path -and [IO.Path]::GetFullPath($_.Path).StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
+            }
+            catch { $false }
+        }
+        if (-not $stillRunning) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "El Gestor todavía está en uso. Cerralo y volvé a intentar la actualización."
+}
+
+function Move-WithRetry([string]$Source, [string]$Destination) {
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 12; $attempt++) {
+        try {
+            Move-Item -LiteralPath $Source -Destination $Destination -Force
+            return
+        }
+        catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    throw $lastError
+}
+
+function Remove-Eventually([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force
+            return
+        }
+        catch { Start-Sleep -Milliseconds 500 }
+    }
+    $escaped = $Path.Replace("'", "''")
+    $cleanup = "Start-Sleep -Seconds 5; Remove-Item -LiteralPath '$escaped' -Recurse -Force"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cleanup))
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile", "-EncodedCommand", $encoded
 }
 
 function New-GestorShortcut([string]$ShortcutPath) {
@@ -38,25 +90,31 @@ try {
         throw "No se encontro el contenido del instalador."
     }
 
-    Stop-GestorProcess
-    if (Test-Path -LiteralPath $InstallDir) {
-        Remove-Item -LiteralPath $InstallDir -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $InstallParent, $StagingDir -Force | Out-Null
     $Tar = Get-Command tar.exe -ErrorAction SilentlyContinue
     if ($Tar) {
-        & $Tar.Source -xf $Payload -C $InstallDir
+        & $Tar.Source -xf $Payload -C $StagingDir
         if ($LASTEXITCODE -ne 0) { throw "No se pudo extraer el contenido del programa." }
     }
     else {
-        Expand-Archive -LiteralPath $Payload -DestinationPath $InstallDir -Force
+        Expand-Archive -LiteralPath $Payload -DestinationPath $StagingDir -Force
     }
 
-    $Pythonw = Join-Path $InstallDir "runtime\pythonw.exe"
-    $RunScript = Join-Path $InstallDir "app\run.py"
-    if (-not (Test-Path -LiteralPath $Pythonw) -or -not (Test-Path -LiteralPath $RunScript)) {
+    $StagedPythonw = Join-Path $StagingDir "runtime\pythonw.exe"
+    $StagedRunScript = Join-Path $StagingDir "app\run.py"
+    if (-not (Test-Path -LiteralPath $StagedPythonw) -or -not (Test-Path -LiteralPath $StagedRunScript)) {
         throw "La instalacion no contiene todos los archivos necesarios."
     }
+
+    Stop-GestorProcess
+    if (Test-Path -LiteralPath $InstallDir) {
+        Move-WithRetry $InstallDir $BackupDir
+        $PreviousMoved = $true
+    }
+    Move-WithRetry $StagingDir $InstallDir
+    $NewInstalled = $true
+    $Pythonw = Join-Path $InstallDir "runtime\pythonw.exe"
+    $RunScript = Join-Path $InstallDir "app\run.py"
 
     if (-not $NoShortcuts) {
         $StartMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
@@ -91,16 +149,33 @@ try {
     if (-not $NoLaunch) {
         Start-Process -FilePath $Pythonw -ArgumentList ('"' + $RunScript + '"') -WorkingDirectory (Join-Path $InstallDir "app")
     }
+    if ($PreviousMoved) { Remove-Eventually $BackupDir }
     exit 0
 }
 catch {
+    if (-not $NewInstalled -and (Test-Path -LiteralPath $StagingDir)) {
+        Remove-Eventually $StagingDir
+    }
+    if ($PreviousMoved -and (Test-Path -LiteralPath $BackupDir)) {
+        try {
+            if ($NewInstalled -and (Test-Path -LiteralPath $InstallDir)) {
+                Remove-Eventually $InstallDir
+            }
+            if (-not (Test-Path -LiteralPath $InstallDir)) {
+                Move-WithRetry $BackupDir $InstallDir
+            }
+        }
+        catch { }
+    }
     "[$(Get-Date -Format s)] ERROR: $($_.Exception.Message)" | Add-Content -LiteralPath $LogFile -Encoding UTF8
-    Add-Type -AssemblyName PresentationFramework
-    [System.Windows.MessageBox]::Show(
-        "No pudimos completar la instalacion.`n`n$($_.Exception.Message)`n`nRegistro: $LogFile",
-        $ProductName,
-        "OK",
-        "Error"
-    ) | Out-Null
+    if (-not $Quiet) {
+        Add-Type -AssemblyName PresentationFramework
+        [System.Windows.MessageBox]::Show(
+            "No pudimos completar la instalacion.`n`n$($_.Exception.Message)`n`nRegistro: $LogFile",
+            $ProductName,
+            "OK",
+            "Error"
+        ) | Out-Null
+    }
     exit 1
 }

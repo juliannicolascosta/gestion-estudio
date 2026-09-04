@@ -1,8 +1,7 @@
-"""Small adapter around the proven Extractor-SISFE core library."""
+"""Stable adapter to the Extractor SISFE engine bundled with the Gestor."""
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,16 +18,14 @@ def extract_cedula_text(pdf_path: Path) -> ExtractedCedulaText:
     source = Path(pdf_path)
     if source.suffix.lower() != ".pdf" or not source.is_file():
         raise ValueError("Elegí un PDF descargado para generar la cédula.")
-    extractor_source = Path(__file__).resolve().parent.parent / "vendor" / "Extractor-SISFE" / "src"
-    if not extractor_source.is_dir():
-        raise RuntimeError("No encontramos el motor Extractor-SISFE en esta instalación.")
-    if str(extractor_source) not in sys.path:
-        sys.path.insert(0, str(extractor_source))
     try:
-        from extractor_core import SisfeExtractorService
+        from .extractor_core import ExtractorOptions, SisfeExtractorService
     except ImportError as error:
         raise RuntimeError("No pudimos iniciar el motor Extractor-SISFE.") from error
-    result = SisfeExtractorService().extract(str(source))
+    catalog = Path(__file__).resolve().parent / "extractor_core" / "data" / "courts_catalog.json"
+    result = SisfeExtractorService(
+        options=ExtractorOptions(catalog_path=catalog),
+    ).extract(str(source))
     return ExtractedCedulaText(
         text=result.text,
         pages=result.pages,

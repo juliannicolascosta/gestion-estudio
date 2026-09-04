@@ -30,6 +30,8 @@ internal static class GestorInstaller
             else
                 forwarded.Add(arg);
         }
+        if (silent)
+            forwarded.Add("-Quiet");
 
         if (!silent)
         {

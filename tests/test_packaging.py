@@ -27,6 +27,13 @@ class PackagingTests(unittest.TestCase):
             self.assertNotIn('GestorDocumental" -Recurse', script)
             self.assertNotRegex(script, re.compile(r"APPDATA.*Remove-Item", re.IGNORECASE))
 
+    def test_update_is_staged_and_keeps_a_rollback_copy(self):
+        install = (ROOT / "packaging" / "install.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("$StagingDir", install)
+        self.assertIn("$BackupDir", install)
+        self.assertIn("Move-WithRetry $InstallDir $BackupDir", install)
+        self.assertIn("Move-WithRetry $StagingDir $InstallDir", install)
+
 
 if __name__ == "__main__":
     unittest.main()

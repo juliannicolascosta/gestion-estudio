@@ -103,13 +103,46 @@ Set-Content -LiteralPath $InstallScript -Value $InstallSource -Encoding UTF8
 # user's Start menu, registry or application data.
 $TestInstall = Join-Path $Build "test-install"
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallScript `
-    -InstallDir $TestInstall -NoShortcuts -NoRegistry -NoLaunch
+    -InstallDir $TestInstall -NoShortcuts -NoRegistry -NoLaunch -Quiet
 if ($LASTEXITCODE -ne 0) { throw "La prueba de instalacion fallo." }
 $env:PYTHONPATH = Join-Path $TestInstall "app"
 $env:QT_QPA_PLATFORM = "offscreen"
 try {
     & (Join-Path $TestInstall "runtime\python.exe") (Join-Path $PSScriptRoot "smoke_portable.py")
     if ($LASTEXITCODE -ne 0) { throw "La aplicacion instalada no pudo iniciar." }
+}
+finally {
+    $env:PYTHONPATH = $PreviousPythonPath
+    $env:QT_QPA_PLATFORM = $PreviousQtPlatform
+}
+
+# Exercise the update path while the installed runtime has cryptography loaded.
+# The marker represents configuration and models outside the program directory.
+$PreservedData = Join-Path $Build "test-user-data"
+New-Item -ItemType Directory -Path $PreservedData -Force | Out-Null
+$PreservedMarker = Join-Path $PreservedData "configuracion-y-modelos.txt"
+Set-Content -LiteralPath $PreservedMarker -Value "conservar" -Encoding UTF8
+$LockScript = Join-Path $Build "hold-installed-runtime.py"
+Set-Content -LiteralPath $LockScript -Value "import time, cryptography; time.sleep(120)" -Encoding UTF8
+$LockProcess = Start-Process -FilePath (Join-Path $TestInstall "runtime\python.exe") `
+    -ArgumentList ('"' + $LockScript + '"') -WindowStyle Hidden -PassThru
+Start-Sleep -Seconds 2
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallScript `
+    -InstallDir $TestInstall -NoShortcuts -NoRegistry -NoLaunch -Quiet
+if ($LASTEXITCODE -ne 0) { throw "La prueba de actualizacion sobre una version en uso fallo." }
+$LockProcess.Refresh()
+if (-not $LockProcess.HasExited) {
+    Stop-Process -Id $LockProcess.Id -Force -ErrorAction SilentlyContinue
+    throw "La actualizacion no cerro el proceso anterior."
+}
+if (-not (Test-Path -LiteralPath $PreservedMarker)) {
+    throw "La actualizacion modifico datos externos del usuario."
+}
+$env:PYTHONPATH = Join-Path $TestInstall "app"
+$env:QT_QPA_PLATFORM = "offscreen"
+try {
+    & (Join-Path $TestInstall "runtime\python.exe") (Join-Path $PSScriptRoot "smoke_portable.py")
+    if ($LASTEXITCODE -ne 0) { throw "La aplicacion actualizada no pudo iniciar." }
 }
 finally {
     $env:PYTHONPATH = $PreviousPythonPath

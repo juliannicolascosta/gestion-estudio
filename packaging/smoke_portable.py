@@ -22,6 +22,8 @@ from PyQt6.QtWidgets import QApplication
 
 from gestor_documental.app import MainWindow
 from gestor_documental.services import SettingsStore
+from gestor_documental.extractor_core import SisfeExtractorService
+from gestor_documental.sisfe_extractor import extract_cedula_text
 
 
 app = QApplication.instance() or QApplication([])
@@ -30,6 +32,19 @@ with tempfile.TemporaryDirectory(prefix="gestor-instalador-") as directory:
     app.processEvents()
     assert window.windowTitle() == "Gestor de documental"
     assert window.limit_combo.count() == 4
+    assert SisfeExtractorService.__module__.startswith("gestor_documental.extractor_core")
+    catalog = PROJECT_ROOT / "gestor_documental" / "extractor_core" / "data" / "courts_catalog.json"
+    assert catalog.is_file()
+    sample = Path(directory) / "decreto-prueba.pdf"
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "ROSARIO, 4 de septiembre de 2026")
+    page.insert_text((72, 100), "Tengase presente. Notifiquese.")
+    document.save(sample)
+    document.close()
+    extracted = extract_cedula_text(sample)
+    assert "Notifiquese" in extracted.text
+    assert extracted.pages == 1
     window.close()
 
 print("PORTABLE_OK")
