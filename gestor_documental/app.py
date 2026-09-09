@@ -1849,6 +1849,7 @@ class MainWindow(QMainWindow):
         self._sisfe_login_dialog: SisfeLoginDialog | None = None
         self._sisfe_case_dialog: SisfeCaseBrowserDialog | None = None
         self._sisfe_download_request: tuple[str, dict] | None = None
+        self._pending_cedula_movement_id = ""
         self._cut_paths: list[Path] = []
         self._directory_expanded = False
         self._quick_access_collapsed = False
@@ -3482,10 +3483,54 @@ class MainWindow(QMainWindow):
                 action.setEnabled(False)
                 action.setToolTip("Ya está disponible localmente; no se crea una copia.")
             else:
-                menu.addAction("Descargar documento", self.show_selected_novedad)
+                menu.addAction("Descargar documento", self.download_selected_novedad_document)
+                menu.addAction("Generar cédula", self.generate_cedula_from_selected_novedad)
         menu.addSeparator()
         menu.addAction("Ver detalle", self.show_selected_novedad)
         menu.exec(self.novedades_list.mapToGlobal(point))
+
+    def download_selected_novedad_document(self):
+        self._request_selected_movement_detail(
+            lambda remote_case_id, detail, _movement: self.start_sisfe_download(remote_case_id, detail)
+        )
+
+    def generate_cedula_from_selected_novedad(self):
+        """Descarga el PDF conocido por SISFE y continúa con la cédula."""
+        def continue_after_detail(remote_case_id, detail, movement):
+            if not (detail.get("has_primary_document") or detail.get("has_additional_documents")):
+                QMessageBox.information(
+                    self, "Sin documento", "Este movimiento no tiene documentos descargables en SISFE."
+                )
+                return
+            self._pending_cedula_movement_id = str(
+                detail.get("movement_id") or movement.get("external_id") or ""
+            )
+            self.start_sisfe_download(remote_case_id, detail)
+
+        self._request_selected_movement_detail(continue_after_detail)
+
+    def _request_selected_movement_detail(self, completed):
+        movement = self.selected_novedad_data()
+        if not movement or movement.get("source") != "sisfe" or not movement.get("external_id"):
+            return
+        if not self._sisfe_login_dialog or not self.sisfe_session.active or not self.case:
+            QMessageBox.information(self, "Sesión SISFE", "Iniciá la sesión SISFE para consultar el documento.")
+            return
+        cuij = read_case_metadata(self.case).get("CUIJ", "")
+        if not cuij.strip():
+            QMessageBox.information(self, "Sin número de expediente", "El caso necesita número de expediente para consultar SISFE.")
+            return
+        self.sisfe_status.set_state(OperationState.RUNNING, "Consultando documento SISFE…")
+
+        def detail_ready(detail, error):
+            if error:
+                self.sisfe_status.set_state(OperationState.ERROR, "No se pudo consultar el documento")
+                QMessageBox.warning(self, "No pudimos consultar SISFE", str(error))
+                return
+            self.sisfe_status.set_state(OperationState.SUCCESS, "Documento SISFE encontrado")
+            completed(str(detail.get("remote_case_id") or ""), detail, movement)
+
+        self._sisfe_login_dialog.request_movement_detail(cuij, str(movement["external_id"]), detail_ready)
 
     def show_selected_novedad(self):
         movement = self.selected_novedad_data()
@@ -3630,6 +3675,7 @@ class MainWindow(QMainWindow):
             self.sisfe_show_download_button.setVisible(False)
             return
         self.sisfe_status.set_state(OperationState.ERROR, "No se pudo descargar desde SISFE")
+        self._pending_cedula_movement_id = ""
         self.sisfe_status.setToolTip(message)
         self.sisfe_retry_button.setVisible(True)
         self.sisfe_show_download_button.setVisible(True)
@@ -3654,6 +3700,13 @@ class MainWindow(QMainWindow):
         else:
             message = f"SISFE: archivo guardado en {Path(path).parent.name}"
         self.statusBar().showMessage(message, 6000)
+        pending_movement = self._pending_cedula_movement_id
+        request = self._sisfe_download_request
+        downloaded_movement = str(request[1].get("movement_id") or "") if request else ""
+        saved_path = Path(path)
+        if pending_movement and pending_movement == downloaded_movement and saved_path.suffix.lower() == ".pdf":
+            self._pending_cedula_movement_id = ""
+            QTimer.singleShot(0, lambda value=saved_path: self.generate_cedula_from_pdf(value))
 
     def require_study(self) -> bool:
         if self.store.settings.study_root:

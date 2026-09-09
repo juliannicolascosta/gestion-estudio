@@ -357,6 +357,29 @@ class AppSmokeTests(unittest.TestCase):
             dialog.show.assert_called_once()
             window.close()
 
+    def test_downloaded_sisfe_pdf_continues_directly_to_cedula_when_requested(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            pdf = case.path / "Documentos SISFE" / "cedula.pdf"
+            pdf.parent.mkdir()
+            pdf.write_bytes(b"%PDF-1.4 test")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+            window._pending_cedula_movement_id = "mov-10"
+            window._sisfe_download_request = ("remote-1", {"movement_id": "mov-10"})
+
+            with patch.object(window, "generate_cedula_from_pdf") as generate:
+                window.sisfe_document_saved(str(pdf), False)
+                self.app.processEvents()
+
+            generate.assert_called_once_with(pdf)
+            self.assertEqual(window._pending_cedula_movement_id, "")
+            window.close()
+
     def test_professional_selector_starts_with_add_action_and_keeps_selection(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
