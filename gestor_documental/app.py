@@ -2110,6 +2110,13 @@ class MainWindow(QMainWindow):
         self.case_badge.setObjectName("caseBadge")
         self.case_badge.hide()
         case_header.addWidget(self.case_badge)
+        self.client_cases_button = QPushButton()
+        self.client_cases_button.setObjectName("quiet")
+        decorate_button(self.client_cases_button, "person")
+        self.client_cases_button.setToolTip("Ver otros casos de este cliente")
+        self.client_cases_button.clicked.connect(self.show_client_cases)
+        self.client_cases_button.hide()
+        case_header.addWidget(self.client_cases_button)
         case_header.addStretch()
         self.open_case_button = QPushButton("Abrir carpeta")
         decorate_button(self.open_case_button, "folder-open")
@@ -3067,6 +3074,7 @@ class MainWindow(QMainWindow):
             self.case_title.setText("Elegí un caso")
             self.load_metadata({})
             self.case_badge.hide()
+            self.client_cases_button.hide()
             self.reload_case_files()
             self.update_writing_label()
             self.update_compilation_count()
@@ -3078,6 +3086,7 @@ class MainWindow(QMainWindow):
         self.restore_compilation_draft(load_compilation_draft(case))
         self.sync_case_projection()
         self.case_title.setText(case.name)
+        self.refresh_client_cases_button()
         self.load_metadata(read_case_metadata(case))
         self.reload_novedades()
         self.reload_pending_documents()
@@ -3087,6 +3096,80 @@ class MainWindow(QMainWindow):
         self.update_case_badge()
         self.update_output_preview()
         self._loading_compilation = False
+
+    def client_cases_for_current_case(self) -> list[object]:
+        if not self.case:
+            return []
+        try:
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                expediente = database.find_expediente_by_folder(self.case.path)
+                if not expediente:
+                    return []
+                row = database.connection.execute(
+                    "SELECT client_id FROM expedientes WHERE id = ?", (expediente.id,)
+                ).fetchone()
+                indexed = database.list_client_cases(row["client_id"]) if row and row["client_id"] else []
+        except (OSError, RuntimeError, sqlite3.Error):
+            indexed = []
+        if len(indexed) > 1:
+            return indexed
+        # Casos aún no abiertos no están necesariamente indexados. Se leen
+        # para mostrar el vínculo, sin crear ni modificar carpeta alguna.
+        _label, identity = self.case_client_identity(read_case_metadata(self.case))
+        if not identity:
+            return indexed
+        return [
+            candidate for candidate in list_cases(self.case.path.parent)
+            if self.case_client_identity(read_case_metadata(candidate))[1] == identity
+        ]
+
+    def refresh_client_cases_button(self):
+        cases = self.client_cases_for_current_case()
+        if len(cases) > 1:
+            self.client_cases_button.setText(f"{len(cases)} casos del cliente")
+            self.client_cases_button.show()
+        else:
+            self.client_cases_button.hide()
+
+    def show_client_cases(self):
+        cases = self.client_cases_for_current_case()
+        if len(cases) < 2:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Casos del cliente")
+        dialog.setMinimumWidth(520)
+        layout = QVBoxLayout(dialog)
+        layout.addLayout(section_heading(
+            "Casos del cliente", "Cada expediente conserva su propia carpeta, documental y estado.",
+        ))
+        listing = QListWidget()
+        for case in cases:
+            title = case.title if hasattr(case, "title") else case.name
+            folder_path = case.folder_path if hasattr(case, "folder_path") else case.path
+            detail = " · ".join(
+                part for part in (
+                    getattr(case, "case_number", ""), getattr(case, "tribunal", ""),
+                ) if part
+            )
+            item = QListWidgetItem(ui_icon("folder", "#2774A6"), title)
+            item.setData(PATH_ROLE, str(folder_path))
+            item.setToolTip(detail or str(folder_path))
+            listing.addItem(item)
+        layout.addWidget(listing)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        def open_case(item):
+            path = Path(item.data(PATH_ROLE))
+            if path.is_dir():
+                dialog.accept()
+                self.reload_cases(path)
+
+        listing.itemDoubleClicked.connect(open_case)
+        listing.setCurrentRow(0)
+        listing.setFocus()
+        dialog.exec()
 
     def restore_compilation_draft(self, draft: CompilationDraft):
         self.current_writing = draft.current_writing

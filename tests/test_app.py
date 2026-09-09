@@ -804,6 +804,9 @@ class AppSmokeTests(unittest.TestCase):
                 {Path(client_item.child(index).data(0, PATH_ROLE)) for index in range(2)},
                 paths_before,
             )
+            self.assertFalse(window.client_cases_button.isHidden())
+            self.assertEqual(window.client_cases_button.text(), "2 casos del cliente")
+            self.assertEqual(len(window.client_cases_for_current_case()), 2)
             self.assertEqual({first.path, second.path}, paths_before)
             window.close()
 
