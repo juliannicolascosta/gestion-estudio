@@ -1325,6 +1325,43 @@ class ProfessionalProfileDialog(QDialog):
         }
 
 
+class SisfeAccessDialog(QDialog):
+    """Small local-preferences dialog; CAPTCHA remains in the SISFE page."""
+
+    def __init__(self, profile: dict[str, str] | None = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Acceso SISFE")
+        self.setMinimumWidth(460)
+        profile = profile or {}
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.addLayout(section_heading(
+            "Acceso SISFE", "Se precarga en Matriculados; el CAPTCHA siempre se completa manualmente.",
+        ))
+        form = QFormLayout()
+        self.user = QLineEdit(profile.get("user", ""))
+        self.user.setPlaceholderText("Usuario SISFE")
+        self.password = QLineEdit(profile.get("password", ""))
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password.setPlaceholderText("Contraseña SISFE")
+        form.addRow("Usuario", self.user)
+        form.addRow("Contraseña", self.password)
+        layout.addLayout(form)
+        note = QLabel("Por tu autorización, estos datos se guardan localmente en texto plano para agilizar el acceso.")
+        note.setObjectName("muted")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("Guardar")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.user.setFocus()
+
+    def values(self) -> dict[str, str]:
+        return {"user": self.user.text().strip(), "password": self.password.text()}
+
+
 class CompileNameDialog(QDialog):
     def __init__(self, case: Case, suggestion: str, identifier_missing: bool, parent=None):
         super().__init__(parent)
@@ -1923,6 +1960,7 @@ class MainWindow(QMainWindow):
         professional_menu.addAction("Añadir profesional…", self.add_professional)
         professional_menu.addAction("Editar perfil actual…", self.edit_current_professional)
         professional_menu.addAction("Configurar acceso MEV…", self.configure_mev_profile)
+        professional_menu.addAction("Configurar acceso SISFE…", self.configure_sisfe_profile)
         professional_menu.addSeparator()
         professional_menu.addAction("Configurar firmador externo…", self.configure_signer)
         professional_menu.addAction("Abrir modelos de escritos", self.open_models_folder)
@@ -2698,6 +2736,16 @@ class MainWindow(QMainWindow):
             self.store.set_mev_profile(professional, user, department)
             self.statusBar().showMessage("Preferencias MEV guardadas. La contraseña no se almacena.", 5000)
 
+    def configure_sisfe_profile(self):
+        professional = self.professional_combo.currentText().strip()
+        if not professional:
+            return
+        dialog = SisfeAccessDialog(self.store.settings.sisfe_profiles.get(professional, {}), self)
+        if dialog.exec():
+            values = dialog.values()
+            self.store.set_sisfe_profile(professional, values["user"], values["password"])
+            self.statusBar().showMessage("Acceso SISFE guardado para este profesional", 4500)
+
     def choose_study_root(self):
         initial = str(self.store.settings.study_root or Path.home())
         folder = QFileDialog.getExistingDirectory(
@@ -3097,7 +3145,9 @@ class MainWindow(QMainWindow):
             )
 
     def open_sisfe_session(self):
-        dialog = SisfeLoginDialog(self.sisfe_session, self)
+        professional = self.professional_combo.currentText().strip()
+        credentials = self.store.settings.sisfe_profiles.get(professional, {})
+        dialog = SisfeLoginDialog(self.sisfe_session, self, credentials=credentials)
         if dialog.exec() and self.sisfe_session.active:
             self._sisfe_login_dialog = dialog
             self.sisfe_status.set_state(

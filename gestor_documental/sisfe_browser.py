@@ -91,6 +91,36 @@ def browser_validation_script() -> str:
     """
 
 
+def browser_prefill_login_script(user: str, password: str) -> str:
+    """Fill visible login fields only; it never submits or handles CAPTCHA."""
+    target_user = json.dumps(user)
+    target_password = json.dumps(password)
+    return f"""
+        (() => {{
+          const user = {target_user};
+          const password = {target_password};
+          const fields = [...document.querySelectorAll('input')];
+          const passwordField = fields.find(field => field.type === 'password');
+          const userField = fields.find(field => field !== passwordField &&
+            /user|usuario|mail|email|documento|dni/i.test(
+              [field.name, field.id, field.placeholder, field.autocomplete].filter(Boolean).join(' ')
+            ))
+            || fields.find(field => field !== passwordField &&
+              ['text', 'email', 'tel'].includes((field.type || 'text').toLowerCase()));
+          const setValue = (field, value) => {{
+            if (!field || !value) return;
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            setter.call(field, value);
+            field.dispatchEvent(new Event('input', {{bubbles: true}}));
+            field.dispatchEvent(new Event('change', {{bubbles: true}}));
+          }};
+          setValue(userField, user);
+          setValue(passwordField, password);
+          return Boolean(userField || passwordField);
+        }})()
+    """
+
+
 def browser_movement_detail_script(cuij: str, movement_id: str) -> str:
     target = json.dumps("".join(char for char in cuij if char.isdigit()))
     remote_movement = json.dumps(str(movement_id))

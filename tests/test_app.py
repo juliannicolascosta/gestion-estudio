@@ -300,6 +300,7 @@ class AppSmokeTests(unittest.TestCase):
             case = create_case(study, "Caso")
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
+            store.set_sisfe_profile("Profesional", "usuario", "clave")
             window = MainWindow(store)
             window.reload_cases(case.path)
             with patch("gestor_documental.app.SisfeLoginDialog") as dialog_class:
@@ -317,6 +318,11 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIn("preparando", window.sisfe_status.text().lower())
             self.assertEqual(window.sisfe_status.state, OperationState.RUNNING)
             self.assertNotIn("password", vars(window.sisfe_session))
+            dialog_class.assert_called_once_with(
+                window.sisfe_session,
+                window,
+                credentials={"user": "usuario", "password": "clave"},
+            )
             window.close()
 
     def test_official_sisfe_download_receives_the_selected_movement_context(self):

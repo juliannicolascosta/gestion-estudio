@@ -5,6 +5,7 @@ from gestor_documental.sisfe_browser import (
     browser_click_official_additional_attachment_script,
     browser_click_official_movement_attachment_script,
     browser_movement_detail_script,
+    browser_prefill_login_script,
     browser_prepare_official_movement_page_script,
     browser_sync_script,
     browser_validation_script,
@@ -35,6 +36,14 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("window.__gestorSisfeValidation = {ok: response.ok", script)
         self.assertNotIn("document.cookie", script)
         self.assertNotIn("window.__gestorSisfeValidation = currentUser", script)
+
+    def test_login_prefill_only_fills_visible_fields_and_never_submits(self):
+        script = browser_prefill_login_script("usuario", "contraseña")
+        self.assertIn("usuario", script)
+        self.assertIn("contraseña", script)
+        self.assertIn("type === 'password'", script)
+        self.assertNotIn(".submit(", script)
+        self.assertNotIn("click()", script)
 
     def test_movement_detail_exposes_actions_without_exposing_token(self):
         script = browser_movement_detail_script("21-12345678-9", "44")

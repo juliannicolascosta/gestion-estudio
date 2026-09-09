@@ -237,6 +237,7 @@ class ServiceTests(unittest.TestCase):
             store.set_activity_settings(
                 {"yellow_days": 30, "red_days": 75, "show_archived": False}
             )
+            store.set_sisfe_profile("Dra. Ana Pérez", "ana.perez", "clave de prueba")
             reloaded = SettingsStore(app_dir)
             self.assertEqual(reloaded.settings.study_root, study)
             self.assertIn("Dra. Ana Pérez", reloaded.settings.professionals)
@@ -249,6 +250,10 @@ class ServiceTests(unittest.TestCase):
             self.assertFalse(reloaded.settings.layout_state["compilation_visible"])
             self.assertEqual(reloaded.settings.activity_settings["yellow_days"], 30)
             self.assertFalse(reloaded.settings.activity_settings["show_archived"])
+            self.assertEqual(
+                reloaded.settings.sisfe_profiles["Dra. Ana Pérez"],
+                {"user": "ana.perez", "password": "clave de prueba"},
+            )
 
     def test_settings_support_multiple_study_locations_and_safe_removal(self):
         with tempfile.TemporaryDirectory() as directory:

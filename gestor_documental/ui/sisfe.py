@@ -32,6 +32,7 @@ from ..sisfe_browser import (
     browser_click_official_additional_attachment_script,
     browser_click_official_movement_attachment_script,
     browser_movement_detail_script,
+    browser_prefill_login_script,
     browser_prepare_official_movement_page_script,
     browser_sync_script,
     browser_validation_script,
@@ -47,9 +48,10 @@ SISFE_ORIGIN = "https://sisfe.justiciasantafe.gov.ar"
 class SisfeLoginDialog(QDialog):
     """Embedded manual login whose cookies live only for this process."""
 
-    def __init__(self, session: ManualSisfeSession, parent=None):
+    def __init__(self, session: ManualSisfeSession, parent=None, *, credentials: dict[str, str] | None = None):
         super().__init__(parent)
         self.session = session
+        self.credentials = dict(credentials or {})
         self.setWindowTitle("Iniciar sesión SISFE")
         self.setMinimumSize(980, 720)
         layout = QVBoxLayout(self)
@@ -88,6 +90,12 @@ class SisfeLoginDialog(QDialog):
 
     def portal_loaded(self, ok: bool):
         path = self.browser.url().path().rstrip("/")
+        if ok and path != "/buscar-expediente" and (self.credentials.get("user") or self.credentials.get("password")):
+            self.browser.page().runJavaScript(
+                browser_prefill_login_script(
+                    self.credentials.get("user", ""), self.credentials.get("password", "")
+                )
+            )
         self.ready_for_sync = bool(ok and path == "/buscar-expediente")
         if self._validate_after_load:
             self._validate_after_load = False

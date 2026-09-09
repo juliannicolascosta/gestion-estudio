@@ -251,6 +251,14 @@ class SettingsStore:
                 for name, data in (payload.get("mev_profiles", {}) or {}).items()
                 if isinstance(data, dict)
             },
+            sisfe_profiles={
+                str(name): {
+                    "user": str(data.get("user", "")),
+                    "password": str(data.get("password", "")),
+                }
+                for name, data in (payload.get("sisfe_profiles", {}) or {}).items()
+                if isinstance(data, dict)
+            },
             layout_state=layout_state,
             activity_settings=(
                 dict(payload.get("activity_settings", {}))
@@ -271,6 +279,7 @@ class SettingsStore:
             "current_professional": self.settings.current_professional,
             "signer_path": str(self.settings.signer_path) if self.settings.signer_path else None,
             "mev_profiles": self.settings.mev_profiles,
+            "sisfe_profiles": self.settings.sisfe_profiles,
             "layout_state": self.settings.layout_state,
             "activity_settings": self.settings.activity_settings,
         }
@@ -337,6 +346,8 @@ class SettingsStore:
             self.settings.professional_profiles.pop(original, None)
             if original in self.settings.mev_profiles:
                 self.settings.mev_profiles[name] = self.settings.mev_profiles.pop(original)
+            if original in self.settings.sisfe_profiles:
+                self.settings.sisfe_profiles[name] = self.settings.sisfe_profiles.pop(original)
         elif name not in self.settings.professionals:
             self.settings.professionals.append(name)
         self.settings.professional_profiles[name] = cleaned
@@ -363,6 +374,14 @@ class SettingsStore:
     def set_layout_state(self, state: dict[str, object]):
         """Persist machine-local splitter proportions and panel visibility."""
         self.settings.layout_state = dict(state)
+        self.save()
+
+    def set_sisfe_profile(self, professional: str, user: str, password: str):
+        """Store the explicitly authorised local SISFE prefill values."""
+        self.settings.sisfe_profiles[professional] = {
+            "user": " ".join(user.split()).strip(),
+            "password": password,
+        }
         self.save()
 
     def set_activity_settings(self, settings: dict[str, object]):
