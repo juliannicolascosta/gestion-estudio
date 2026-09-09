@@ -57,7 +57,7 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertEqual(
                 tuple(window.metadata_edits),
-                ("Actor", "Demandado", "Causa", "Derivación", "CUIJ", "Radicación"),
+                ("Actor", "Demandado", "Causa", "CUIJ", "Radicación"),
             )
             self.assertEqual(window.professional_combo.itemText(0), ADD_PROFESSIONAL_LABEL)
             self.assertEqual(

@@ -26,6 +26,7 @@ from gestor_documental.services import (
     create_case,
     create_writing,
     ensure_default_writing_template,
+    find_unresolved_placeholders,
     ensure_bundled_writing_models,
     import_file,
     import_directory,
@@ -197,6 +198,22 @@ class ServiceTests(unittest.TestCase):
                 values["{{POSIBLES_TESTIGOS}}"],
                 "María | 341 111\nLuis | 341 222",
             )
+
+    def test_counterpart_lawyer_uses_current_and_legacy_placeholders(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            save_case_metadata(case, {"Abogado de la contraparte": "Dra. Lucía Sosa"})
+            values = writing_template_values(case, "Contesta")
+            self.assertEqual(values["{{ABOGADO_DE_LA_CONTRAPARTE}}"], "Dra. Lucía Sosa")
+            self.assertEqual(values["{{ABOGADO_CONTRAPARTE}}"], "Dra. Lucía Sosa")
+
+    def test_find_unresolved_placeholders_reports_only_remaining_codes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            case = create_case(root, "Caso")
+            template = ensure_default_writing_template(root / "Modelo.docx")
+            writing = create_writing(case, "Escrito", template)
+            self.assertEqual(find_unresolved_placeholders(writing), [])
 
     def test_settings_roundtrip(self):
         with tempfile.TemporaryDirectory() as directory:

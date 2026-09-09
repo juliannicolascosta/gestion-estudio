@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Event
 
 from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QAction, QColor, QDrag, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
+from PyQt6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -45,7 +45,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from . import __version__
 from .models import (
+    ADVANCED_FIELD_VARIABLES,
     CASE_FIELDS,
     CASE_FIELD_LABELS,
     DEFAULT_PROFILE,
@@ -122,6 +124,7 @@ from .services import (
     create_case,
     create_writing,
     ensure_default_writing_template,
+    find_unresolved_placeholders,
     focus_or_launch_signer,
     human_size,
     import_file,
@@ -207,6 +210,7 @@ QMainWindow, QWidget#appRoot { background: #F4F5F3; color: #17211F; }
 QWidget { font-family: "Segoe UI Variable Text", "Segoe UI"; font-size: 13px; }
 QFrame#topBar { background: #163C35; border: 0; }
 QLabel#brand { color: #FFFFFF; font-size: 20px; font-weight: 700; }
+QLabel#brandVersion { color: #BDD0CA; font-size: 11px; font-weight: 600; padding-bottom: 1px; }
 QLabel#brandSub { color: #BDD0CA; font-size: 11px; }
 QLabel#professionalLabel { color: #BDD0CA; font-size: 10px; font-weight: 700; }
 QFrame#sidebar { background: #E9EDE9; border-right: 1px solid #D4DCD7; }
@@ -493,6 +497,14 @@ class ExtendedMetadataDialog(QDialog):
         generated_label = QLabel("GENERAR DESDE LA ENTREVISTA")
         generated_label.setObjectName("eyebrow")
         generated_actions.addWidget(generated_label)
+        generated_actions.addWidget(
+            icon_button(
+                "template",
+                "Ver metadatos disponibles para modelos Word",
+                self.open_template_variables,
+                bordered=True,
+            )
+        )
         generated_actions.addStretch()
         self.interview_document_buttons: dict[str, QPushButton] = {}
         for action, label in (
@@ -609,6 +621,26 @@ class ExtendedMetadataDialog(QDialog):
             row.addWidget(button)
         card_layout.addLayout(row)
         parent_layout.addWidget(card)
+
+    def open_template_variables(self):
+        entries = {
+            "TITULO": "Título breve del escrito",
+            "CARATULA": "Carátula generada del expediente",
+            "ACTOR": "Parte actora",
+            "DEMANDADO": "Demandado principal",
+            "CAUSA": "Objeto o causa",
+            "CUIJ": "Número de expediente",
+            "ABOGADO": "Profesional interviniente",
+            "FECHA": "Fecha de generación",
+            "FECHA_EXTENSA": "Fecha de generación en letras",
+            "ABOGADO_DE_LA_CONTRAPARTE": "Abogado informado para la contraparte",
+            "ABOGADO_CONTRAPARTE": "Abogado informado para la contraparte",
+        }
+        for key in set(CASE_FIELDS) | all_defined_keys():
+            variable = ADVANCED_FIELD_VARIABLES.get(key, template_variable_name(key))
+            entries.setdefault(variable, key)
+            entries.setdefault(template_variable_name(key), key)
+        MetadataPlaceholderDialog(entries, self).exec()
 
     def _store_case_type_draft(self):
         for key in self._type_field_keys:
@@ -971,19 +1003,24 @@ class ModelPickerDialog(QDialog):
         *,
         model_provider=None,
         add_model_callback=None,
+        selection_only: bool = False,
+        window_title: str | None = None,
+        heading: str | None = None,
+        subtitle: str | None = None,
     ):
         super().__init__(parent)
         self.models = models
         self.model_provider = model_provider
         self.add_model_callback = add_model_callback
-        self.setWindowTitle("Crear escrito desde modelo")
+        self.selection_only = selection_only
+        self.setWindowTitle(window_title or "Crear escrito desde modelo")
         self.setMinimumSize(560, 520)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(11)
         layout.addLayout(section_heading(
-            "Elegí un modelo",
-            "Buscá por nombre y definí el título del escrito en el mismo paso.",
+            heading or "Elegí un modelo",
+            subtitle or "Buscá por nombre y definí el título del escrito en el mismo paso.",
         ))
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar modelo…")
@@ -1006,14 +1043,18 @@ class ModelPickerDialog(QDialog):
         self.list.currentItemChanged.connect(self.model_changed)
         self.list.itemDoubleClicked.connect(lambda _: self.accept_if_valid())
         layout.addWidget(self.list, 1)
-        layout.addWidget(QLabel("Nombre breve del escrito"))
-        self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("Ej.: APELACIÓN")
-        layout.addWidget(self.title_edit)
+        self.title_edit: QLineEdit | None = None
+        if not self.selection_only:
+            layout.addWidget(QLabel("Nombre breve del escrito"))
+            self.title_edit = QLineEdit()
+            self.title_edit.setPlaceholderText("Ej.: APELACIÓN")
+            layout.addWidget(self.title_edit)
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
         )
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Crear escrito")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Elegir modelo" if self.selection_only else "Crear escrito"
+        )
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
         clear_button = self.buttons.addButton("Limpiar", QDialogButtonBox.ButtonRole.ResetRole)
         clear_button.clicked.connect(self.clear_selection)
@@ -1043,7 +1084,8 @@ class ModelPickerDialog(QDialog):
         self.search.clear()
         self.list.clearSelection()
         self.list.setCurrentItem(None)
-        self.title_edit.clear()
+        if self.title_edit:
+            self.title_edit.clear()
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
 
     def filter_models(self, query: str):
@@ -1063,13 +1105,13 @@ class ModelPickerDialog(QDialog):
             self.list.setCurrentRow(0)
 
     def model_changed(self, current: QListWidgetItem | None, previous=None):
-        if current:
+        if current and self.title_edit:
             self.title_edit.setText(Path(current.data(PATH_ROLE)).stem)
             self.title_edit.selectAll()
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(current is not None)
 
     def accept_if_valid(self):
-        if self.selected_model and self.title.strip():
+        if self.selected_model and (self.selection_only or self.title.strip()):
             self.accept()
 
     @property
@@ -1079,7 +1121,54 @@ class ModelPickerDialog(QDialog):
 
     @property
     def title(self) -> str:
-        return self.title_edit.text().strip()
+        return self.title_edit.text().strip() if self.title_edit else ""
+
+
+class MetadataPlaceholderDialog(QDialog):
+    """Compact, searchable catalogue of placeholders recognised by Word models."""
+
+    def __init__(self, entries: dict[str, str], parent=None):
+        super().__init__(parent)
+        self.entries = dict(sorted(entries.items()))
+        self.setWindowTitle("Metadatos disponibles para Word")
+        self.setMinimumSize(560, 500)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(10)
+        layout.addLayout(section_heading(
+            "Variables para modelos Word",
+            "Doble clic para copiar. Los datos se completan desde el caso y “Más datos”.",
+        ))
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Buscar variable o descripción…")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self.filter_entries)
+        layout.addWidget(self.search)
+        self.list = QListWidget()
+        self.list.setObjectName("modelList")
+        self.list.itemDoubleClicked.connect(self.copy_current)
+        layout.addWidget(self.list, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.filter_entries("")
+
+    def filter_entries(self, query: str):
+        self.list.clear()
+        needle = query.casefold().strip()
+        for code, description in self.entries.items():
+            text = f"{{{{{code}}}}} — {description}"
+            if needle and needle not in text.casefold():
+                continue
+            item = QListWidgetItem(ui_icon("template", "#2563A7"), text)
+            item.setData(Qt.ItemDataRole.UserRole, f"{{{{{code}}}}}")
+            item.setToolTip("Doble clic para copiar")
+            self.list.addItem(item)
+
+    def copy_current(self):
+        item = self.list.currentItem()
+        if item:
+            QApplication.clipboard().setText(str(item.data(Qt.ItemDataRole.UserRole)))
 
 
 class HeirPickerDialog(QDialog):
@@ -1796,11 +1885,19 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(24, 12, 24, 12)
         brand_stack = QVBoxLayout()
         brand_stack.setSpacing(0)
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(8)
         brand = QLabel("Gestor de documental")
         brand.setObjectName("brand")
+        version = QLabel(f"v{__version__}")
+        version.setObjectName("brandVersion")
+        version.setToolTip("Versión ejecutada del Gestor")
+        brand_row.addWidget(brand)
+        brand_row.addWidget(version, 0, Qt.AlignmentFlag.AlignBottom)
+        brand_row.addStretch()
         sub = QLabel("Casos, archivos y presentaciones en un mismo flujo")
         sub.setObjectName("brandSub")
-        brand_stack.addWidget(brand)
+        brand_stack.addLayout(brand_row)
         brand_stack.addWidget(sub)
         top_layout.addLayout(brand_stack)
         top_layout.addStretch()
@@ -3031,6 +3128,11 @@ class MainWindow(QMainWindow):
                 ui_icon("bell", "#B36A24" if interpretation else "#2B7564"),
                 f"{movement.title}\n{stamp} · {movement.source.upper()}{detail_line}",
             )
+            if "CARGO A VERIFICAR" in f"{movement.title} {interpretation}".upper():
+                item.setForeground(QColor("#B42318"))
+                font = QFont(item.font())
+                font.setBold(True)
+                item.setFont(font)
             tooltip = f"Texto de origen: {movement.title}"
             if interpretation:
                 tooltip += f"\n\n{interpretation}"
@@ -4294,7 +4396,7 @@ class MainWindow(QMainWindow):
             return
         models = [
             path for path in list_models(self.store.models_dir)
-            if "cedula" in path.stem.casefold() or "cédula" in path.stem.casefold()
+            if "CEDULA" in template_variable_name(path.stem)
         ]
         if not models:
             QMessageBox.information(
@@ -4303,13 +4405,17 @@ class MainWindow(QMainWindow):
                 "Agregá primero un modelo Word cuyo nombre incluya “Cédula”.",
             )
             return
-        names = [model.name for model in models]
-        selected, accepted = QInputDialog.getItem(
-            self, "Generar cédula", "Modelo Word de cédula:", names, 0, False
+        picker = ModelPickerDialog(
+            models,
+            self,
+            selection_only=True,
+            window_title="Elegir modelo de cédula",
+            heading="Elegí un modelo de cédula",
+            subtitle="Buscá por nombre y elegí el modelo que se completará con el movimiento.",
         )
-        if not accepted:
+        if picker.exec() != QDialog.DialogCode.Accepted or not picker.selected_model:
             return
-        template = models[names.index(selected)]
+        template = picker.selected_model
         case = self.case
         self.statusBar().showMessage("Extrayendo el texto del decreto…")
         thread = QThread(self)
@@ -4340,6 +4446,7 @@ class MainWindow(QMainWindow):
                 self.reload_case_files(writing)
                 self.set_current_writing(writing)
                 open_file(writing)
+                self.warn_unresolved_placeholders(writing)
                 review = " Revisá los firmantes." if not extracted.signers_detected else ""
                 self.statusBar().showMessage(f"Cédula creada desde {pdf.name}.{review}", 7000)
             thread.quit()
@@ -4561,9 +4668,21 @@ class MainWindow(QMainWindow):
             self.case_directory = path.parent
             self.reload_case_files(path)
             open_file(path)
+            self.warn_unresolved_placeholders(path)
             self.statusBar().showMessage(f"Escrito creado: {path.name}", 5000)
         except Exception as error:
             QMessageBox.critical(self, "No pudimos crear el escrito", str(error))
+
+    def warn_unresolved_placeholders(self, path: Path):
+        unresolved = find_unresolved_placeholders(path)
+        if unresolved:
+            preview = ", ".join(unresolved[:3])
+            remaining = len(unresolved) - 3
+            suffix = f" y {remaining} más" if remaining > 0 else ""
+            self.statusBar().showMessage(
+                f"Atención: quedaron variables sin completar ({preview}{suffix}).",
+                10000,
+            )
 
     def professional_template_values(self) -> dict[str, str]:
         name = self.professional_combo.currentText().strip()

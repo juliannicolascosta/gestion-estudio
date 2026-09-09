@@ -724,6 +724,9 @@ def writing_template_values(
         "RADICACION": metadata.get("Radicación", "").strip(),
         "RADICACIÓN": metadata.get("Radicación", "").strip(),
         "ABOGADO": lawyer,
+        "ABOGADO_DE_LA_CONTRAPARTE": metadata.get("Abogado de la contraparte", "").strip(),
+        # Alias mantenido para modelos ya creados durante la versión previa.
+        "ABOGADO_CONTRAPARTE": metadata.get("Abogado de la contraparte", "").strip(),
         "CONTRAPARTE": metadata.get("Contraparte", "").strip(),
         "PROFESIONAL": lawyer,
         "FECHA": today.strftime("%d/%m/%Y"),
@@ -867,6 +870,34 @@ def create_writing(
     fill_writing_template(document, writing_template_values(case, title, professional, extra_values))
     document.save(path)
     return path
+
+
+def find_unresolved_placeholders(path: Path) -> list[str]:
+    """Read remaining {{VARIABLES}} without modifying the Word document."""
+    from docx import Document
+
+    document = Document(path)
+    fragments: list[str] = []
+
+    def collect(container):
+        fragments.extend(paragraph.text for paragraph in container.paragraphs)
+        for table in container.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    collect(cell)
+
+    collect(document)
+    for section in document.sections:
+        for container in (
+            section.header,
+            section.footer,
+            section.first_page_header,
+            section.first_page_footer,
+            section.even_page_header,
+            section.even_page_footer,
+        ):
+            collect(container)
+    return sorted(set(re.findall(r"\{\{[A-Za-zÁÉÍÓÚÜÑ0-9_]+\}\}", "\n".join(fragments))))
 
 
 def list_models(models_dir: Path) -> list[Path]:

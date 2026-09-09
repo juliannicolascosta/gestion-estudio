@@ -131,6 +131,7 @@ COMMON_GENERAL_SECTIONS = (
             FieldSpec("Correo electrónico del actor", "Correo electrónico"),
             FieldSpec("Clave fiscal (ARCA)", "Clave fiscal (ARCA)"),
             FieldSpec("Clave de Seguridad Social (ANSES)", "Clave de Seguridad Social (ANSES)"),
+            FieldSpec("Derivación", "Derivación"),
             FieldSpec(CASE_TYPE_FIELD, CASE_TYPE_FIELD, "combo", CASE_TYPES, aliases=("Tipo de proceso",)),
         ),
     ),
