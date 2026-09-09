@@ -528,6 +528,12 @@ class ExtendedMetadataDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.refresh_dynamic_information()
+        first_edit = next(
+            (edit for edit in self.edits.values() if isinstance(edit, QLineEdit)),
+            None,
+        )
+        if first_edit:
+            QTimer.singleShot(0, first_edit.setFocus)
 
     def _scroll_tab(self) -> tuple[QWidget, QVBoxLayout]:
         scroll = QScrollArea()
@@ -1062,6 +1068,7 @@ class ModelPickerDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
         self.filter_models("")
+        self.search.setFocus()
 
     def refresh_models(self, selected: Path | None = None):
         if self.model_provider:
@@ -1302,7 +1309,7 @@ class ProfessionalProfileDialog(QDialog):
                 form.addRow(label, edit)
             tabs.addTab(tab, title)
         layout.addWidget(tabs, 1)
-        note = QLabel("No se almacenan PIN del token ni contraseñas de portales.")
+        note = QLabel("El PIN del token no se almacena. El acceso SISFE se configura por separado.")
         note.setObjectName("muted")
         layout.addWidget(note)
         buttons = QDialogButtonBox(
@@ -1312,6 +1319,7 @@ class ProfessionalProfileDialog(QDialog):
         buttons.accepted.connect(self.accept_if_valid)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.edits["name"].setFocus()
 
     def accept_if_valid(self):
         if self.edits["name"].text().strip():
