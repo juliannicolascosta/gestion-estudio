@@ -22,6 +22,7 @@ from gestor_documental.app import (
     ModelPickerDialog,
     PATH_ROLE,
 )
+from gestor_documental.ui.roles import MOVEMENT_ROLE
 from gestor_documental.services import (
     CompilationCancelled,
     SettingsStore,
@@ -31,6 +32,7 @@ from gestor_documental.services import (
     study_library_path,
 )
 from gestor_documental.study_database import StudyDatabase, study_database_path
+from gestor_documental.sisfe_downloads import SisfeDownloadRegistry
 from gestor_documental.ui.operation_status import OperationState
 
 
@@ -628,6 +630,61 @@ class AppSmokeTests(unittest.TestCase):
                 for index in range(window.case_files.count())
             }
             self.assertIn(external_change.name, names)
+            window.close()
+
+    def test_sisfe_movement_shows_its_existing_local_document_without_copying_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            local_pdf = case.path / "Documento SISFE.pdf"
+            local_pdf.write_bytes(b"%PDF-1.4 local")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                database.add_movement(
+                    expediente.id, "Cédula electrónica", source="sisfe", external_id="mov-local"
+                )
+            SisfeDownloadRegistry().register(case, local_pdf, movement_external_id="mov-local")
+            before = local_pdf.read_bytes()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            data = window.novedades_list.item(0).data(MOVEMENT_ROLE)
+            self.assertIn("PDF disponible localmente", window.novedades_list.item(0).text())
+            self.assertEqual(data["local_documents"], [str(local_pdf.resolve())])
+            self.assertEqual(local_pdf.read_bytes(), before)
+            window.close()
+
+    def test_case_files_can_be_ordered_visually_without_changing_the_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            older = case.path / "zeta.txt"
+            newer = case.path / "alfa.txt"
+            older.write_text("conservar", encoding="utf-8")
+            newer.write_text("conservar", encoding="utf-8")
+            os.utime(older, (100, 100))
+            os.utime(newer, (200, 200))
+            before = {path.name: path.read_bytes() for path in (older, newer)}
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            window.files_sort_combo.setCurrentIndex(
+                window.files_sort_combo.findData("modified_desc")
+            )
+            displayed = [
+                Path(window.case_files.item(index).data(PATH_ROLE)).name
+                for index in range(window.case_files.count())
+            ]
+
+            self.assertEqual(displayed, ["alfa.txt", "zeta.txt"])
+            self.assertEqual({path.name: path.read_bytes() for path in (older, newer)}, before)
+            self.assertEqual(store.settings.layout_state["files_sort"], "modified_desc")
             window.close()
 
     def test_extended_metadata_keeps_repeated_rows_and_reuses_case_data_for_raeo(self):

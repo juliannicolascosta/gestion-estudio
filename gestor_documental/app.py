@@ -2157,8 +2157,10 @@ class MainWindow(QMainWindow):
         self.novedades_list = QListWidget()
         self.novedades_list.setObjectName("novedadesList")
         self.novedades_list.setMinimumHeight(220)
+        self.novedades_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.novedades_list.itemSelectionChanged.connect(self.update_novedad_actions)
         self.novedades_list.itemDoubleClicked.connect(lambda _: self.show_selected_novedad())
+        self.novedades_list.customContextMenuRequested.connect(self.show_novedad_menu)
         novedades_layout.addWidget(self.novedades_list, 1)
         novedades_actions = QHBoxLayout()
         self.sisfe_status = OperationStatusIndicator("SISFE sin iniciar")
@@ -2198,6 +2200,14 @@ class MainWindow(QMainWindow):
         files_header = QHBoxLayout()
         files_header.addLayout(section_heading("Archivos del caso", "Archivos y carpetas · arrastrá hacia adentro o afuera"))
         files_header.addStretch()
+        self.files_sort_combo = QComboBox()
+        self.files_sort_combo.setToolTip("Cambia solamente el orden visual de esta lista")
+        self.files_sort_combo.addItem("Nombre · A → Z", "name_asc")
+        self.files_sort_combo.addItem("Nombre · Z → A", "name_desc")
+        self.files_sort_combo.addItem("Fecha · reciente", "modified_desc")
+        self.files_sort_combo.addItem("Fecha · antigua", "modified_asc")
+        self.files_sort_combo.currentIndexChanged.connect(self.change_files_sort)
+        files_header.addWidget(self.files_sort_combo)
         self.files_location = QLabel("Inicio")
         self.files_location.setObjectName("muted")
         files_header.addWidget(self.files_location)
@@ -2517,6 +2527,7 @@ class MainWindow(QMainWindow):
         self.presentation_column.setSizes(presentation_sizes)
         visible = state.get("compilation_visible", True)
         self.set_compilation_panel_visible(visible if isinstance(visible, bool) else True)
+        self.restore_files_sort()
 
     def schedule_layout_save(self, *_args):
         if not self._restoring_layout:
@@ -2535,8 +2546,23 @@ class MainWindow(QMainWindow):
                 "information": self.information_column.sizes(),
                 "presentation": self.presentation_column.sizes(),
                 "compilation_visible": not self.presentation_column.isHidden(),
+                "files_sort": self.files_sort_combo.currentData(),
             }
         )
+
+    def change_files_sort(self, _index: int):
+        """Actualiza sólo la vista: nunca mueve, renombra ni toca archivos."""
+        if not self._restoring_layout:
+            self.save_layout_state()
+        if hasattr(self, "case_files"):
+            self.reload_case_files()
+
+    def restore_files_sort(self):
+        sort_key = self.store.settings.layout_state.get("files_sort", "name_asc")
+        index = self.files_sort_combo.findData(sort_key)
+        self.files_sort_combo.blockSignals(True)
+        self.files_sort_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.files_sort_combo.blockSignals(False)
 
     def set_compilation_panel_visible(self, visible: bool):
         if not visible and not self.presentation_column.isHidden():
@@ -3124,9 +3150,11 @@ class MainWindow(QMainWindow):
             stamp = movement.occurred_at.strftime("%d/%m/%Y %H:%M") if movement.occurred_at else "Sin fecha"
             interpretation = _interpretation_summary(movement.title)
             detail_line = f"\nDETECCIÓN · {interpretation}" if interpretation else ""
+            local_documents = self.movement_local_documents(movement.external_id, movement.source)
+            document_line = "\nPDF disponible localmente" if local_documents else ""
             item = QListWidgetItem(
                 ui_icon("bell", "#B36A24" if interpretation else "#2B7564"),
-                f"{movement.title}\n{stamp} · {movement.source.upper()}{detail_line}",
+                f"{movement.title}\n{stamp} · {movement.source.upper()}{detail_line}{document_line}",
             )
             if "CARGO A VERIFICAR" in f"{movement.title} {interpretation}".upper():
                 item.setForeground(QColor("#B42318"))
@@ -3145,6 +3173,7 @@ class MainWindow(QMainWindow):
                     "source": movement.source,
                     "occurred_at": movement.occurred_at.isoformat() if movement.occurred_at else "",
                     "interpretation": interpretation,
+                    "local_documents": [str(path) for path in local_documents],
                 },
             )
             self.novedades_list.addItem(item)
@@ -3358,6 +3387,60 @@ class MainWindow(QMainWindow):
         item = self.novedades_list.currentItem()
         data = item.data(MOVEMENT_ROLE) if item else None
         return data if isinstance(data, dict) else None
+
+    def movement_local_documents(self, external_id: str, source: str) -> list[Path]:
+        """Obtiene asociaciones existentes, sin crear ni modificar archivos."""
+        if not self.case or not external_id:
+            return []
+        try:
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                expediente = database.find_expediente_by_folder(self.case.path)
+                movement = (
+                    database.find_movement_by_external_id(
+                        expediente.id, external_id, source=source
+                    )
+                    if expediente else None
+                )
+                documents = database.list_movement_documents(movement.id) if movement else []
+        except (OSError, RuntimeError, sqlite3.Error):
+            return []
+        case_root = self.case.path.resolve()
+        paths: list[Path] = []
+        for document in documents:
+            path = (case_root / document.relative_path).resolve()
+            if path.is_file() and case_root in path.parents:
+                paths.append(path)
+        return paths
+
+    def show_novedad_menu(self, point):
+        item = self.novedades_list.itemAt(point)
+        if not item:
+            return
+        self.novedades_list.setCurrentItem(item)
+        movement = self.selected_novedad_data()
+        if not movement:
+            return
+        menu = QMenu(self)
+        local_documents = [Path(path) for path in movement.get("local_documents", [])]
+        if local_documents:
+            if len(local_documents) == 1:
+                menu.addAction("Abrir documento", lambda: open_file(local_documents[0]))
+            else:
+                open_menu = menu.addMenu("Abrir documento")
+                for path in local_documents:
+                    open_menu.addAction(path.name, lambda checked=False, value=path: open_file(value))
+            if local_documents[0].suffix.lower() == ".pdf":
+                menu.addAction("Generar cédula", lambda: self.generate_cedula_from_pdf(local_documents[0]))
+        if movement.get("source") == "sisfe" and movement.get("external_id"):
+            if local_documents:
+                action = menu.addAction("Descargar documento")
+                action.setEnabled(False)
+                action.setToolTip("Ya está disponible localmente; no se crea una copia.")
+            else:
+                menu.addAction("Descargar documento", self.show_selected_novedad)
+        menu.addSeparator()
+        menu.addAction("Ver detalle", self.show_selected_novedad)
+        menu.exec(self.novedades_list.mapToGlobal(point))
 
     def show_selected_novedad(self):
         movement = self.selected_novedad_data()
@@ -4018,13 +4101,22 @@ class MainWindow(QMainWindow):
                 current = self.case.path
                 self.case_directory = current
             try:
-                entries = sorted(
-                    (
-                        path for path in current.iterdir()
-                        if not path.name.startswith(".")
-                    ),
-                    key=lambda path: (0 if path.is_dir() else 1, path.name.casefold()),
-                )
+                entries = [
+                    path for path in current.iterdir()
+                    if not path.name.startswith(".")
+                ]
+                sort_key = self.files_sort_combo.currentData() or "name_asc"
+                reverse = sort_key in {"name_desc", "modified_desc"}
+                if sort_key.startswith("modified"):
+                    entries.sort(
+                        key=lambda path: (path.stat().st_mtime, path.name.casefold()),
+                        reverse=reverse,
+                    )
+                else:
+                    entries.sort(key=lambda path: path.name.casefold(), reverse=reverse)
+                # Las carpetas quedan primero: es navegación visual, no una
+                # operación sobre la estructura física del caso.
+                entries.sort(key=lambda path: 0 if path.is_dir() else 1)
             except OSError:
                 entries = []
             for path in entries:
