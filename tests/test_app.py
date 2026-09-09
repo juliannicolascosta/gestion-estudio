@@ -753,6 +753,31 @@ class AppSmokeTests(unittest.TestCase):
             )
             window.close()
 
+    def test_same_client_with_multiple_cases_is_grouped_visually_without_moving_folders(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            first = create_case(study, "Pérez c/ ART")
+            second = create_case(study, "Pérez c/ Empleador")
+            save_case_metadata(first, {"Actor": "PÉREZ, JUAN", "DNI del actor": "30123456"})
+            save_case_metadata(second, {"Actor": "Pérez, Juan", "DNI del actor": "30.123.456"})
+            paths_before = {first.path, second.path}
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(first.path)
+
+            root_item = window.case_tree.topLevelItem(0)
+            client_item = root_item.child(0)
+            self.assertIn("2 casos", client_item.text(0))
+            self.assertEqual(client_item.childCount(), 2)
+            self.assertEqual(
+                {Path(client_item.child(index).data(0, PATH_ROLE)) for index in range(2)},
+                paths_before,
+            )
+            self.assertEqual({first.path, second.path}, paths_before)
+            window.close()
+
     def test_import_dialog_leaves_pdf_conversion_unselected_by_default(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "documento.docx"

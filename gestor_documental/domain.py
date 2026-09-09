@@ -28,6 +28,20 @@ class Expediente:
 
 
 @dataclass(frozen=True)
+class Cliente:
+    """Ficha compartida; los documentos siguen perteneciendo a cada caso."""
+
+    id: str
+    identity_key: str
+    name: str = ""
+    dni: str = ""
+    cuil: str = ""
+    phone: str = ""
+    email: str = ""
+    address: str = ""
+
+
+@dataclass(frozen=True)
 class Movimiento:
     """Hecho procesal u operativo asociado a un expediente."""
 

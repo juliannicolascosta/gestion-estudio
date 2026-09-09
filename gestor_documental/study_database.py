@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .domain import Documento, Expediente, Movimiento, Tarea
+from .domain import Cliente, Documento, Expediente, Movimiento, Tarea
 from .models import Case
 from .services import read_case_metadata
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DATABASE_NAME = ".gestor-estudio.sqlite3"
 
 
@@ -78,6 +80,10 @@ class StudyDatabase:
         if current < 5:
             self._migrate_to_5()
             self.connection.execute("PRAGMA user_version = 5")
+            current = 5
+        if current < 6:
+            self._migrate_to_6()
+            self.connection.execute("PRAGMA user_version = 6")
         self.connection.commit()
 
     def _migrate_to_1(self):
@@ -183,6 +189,95 @@ class StudyDatabase:
             """
         )
 
+    def _migrate_to_6(self):
+        """Add a shared client record without changing case folders or JSON."""
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(expedientes)")}
+        if "client_id" not in columns:
+            self.connection.execute("ALTER TABLE expedientes ADD COLUMN client_id TEXT NOT NULL DEFAULT ''")
+        self.connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS clientes (
+                id TEXT PRIMARY KEY,
+                identity_key TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL DEFAULT '',
+                dni TEXT NOT NULL DEFAULT '',
+                cuil TEXT NOT NULL DEFAULT '',
+                phone TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                address TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS expedientes_client_id ON expedientes(client_id);
+            """
+        )
+
+    @staticmethod
+    def _client_values(metadata: dict[str, str]) -> dict[str, str]:
+        name = (metadata.get("Nombre completo") or metadata.get("Actor") or "").strip()
+        if not name:
+            surname = metadata.get("Apellido del actor", "").strip()
+            names = metadata.get("Nombres del actor", "").strip()
+            name = ", ".join(part for part in (surname, names) if part)
+        return {
+            "name": name,
+            "dni": (metadata.get("DNI del actor") or metadata.get("DNI/CUIT actor") or "").strip(),
+            "cuil": metadata.get("CUIL del actor", "").strip(),
+            "phone": metadata.get("Teléfono del actor", "").strip(),
+            "email": metadata.get("Correo electrónico del actor", "").strip(),
+            "address": (metadata.get("Domicilio real") or metadata.get("Domicilio actor") or "").strip(),
+        }
+
+    @staticmethod
+    def _client_identity(values: dict[str, str]) -> str:
+        for field in ("cuil", "dni"):
+            digits = re.sub(r"\D", "", values[field])
+            if digits:
+                return f"{field}:{digits}"
+        normalized = unicodedata.normalize("NFKD", values["name"].casefold())
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        normalized = " ".join(normalized.split())
+        return f"name:{normalized}" if normalized else ""
+
+    def sync_client_from_metadata(self, metadata: dict[str, str]) -> Cliente | None:
+        """Create a minimal central profile, preserving already known details."""
+        values = self._client_values(metadata)
+        identity_key = self._client_identity(values)
+        if not identity_key:
+            return None
+        row = self.connection.execute(
+            "SELECT * FROM clientes WHERE identity_key = ?", (identity_key,)
+        ).fetchone()
+        now = utc_now().isoformat()
+        if not row:
+            record = Cliente(id=str(uuid.uuid4()), identity_key=identity_key, **values)
+            self.connection.execute(
+                """INSERT INTO clientes
+                (id, identity_key, name, dni, cuil, phone, email, address, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (record.id, record.identity_key, record.name, record.dni, record.cuil,
+                 record.phone, record.email, record.address, now, now),
+            )
+            self.connection.commit()
+            return record
+        merged = {field: row[field] or values[field] for field in values}
+        if any(merged[field] != row[field] for field in values):
+            self.connection.execute(
+                """UPDATE clientes SET name = ?, dni = ?, cuil = ?, phone = ?, email = ?,
+                address = ?, updated_at = ? WHERE id = ?""",
+                (merged["name"], merged["dni"], merged["cuil"], merged["phone"],
+                 merged["email"], merged["address"], now, row["id"]),
+            )
+            self.connection.commit()
+            row = self.connection.execute("SELECT * FROM clientes WHERE id = ?", (row["id"],)).fetchone()
+        return self._cliente_from_row(row)
+
+    def list_client_cases(self, client_id: str) -> list[Expediente]:
+        rows = self.connection.execute(
+            "SELECT * FROM expedientes WHERE client_id = ? ORDER BY title COLLATE NOCASE", (client_id,)
+        ).fetchall()
+        return [self._expediente_from_row(row) for row in rows]
+
     def import_case(self, case: Case) -> Expediente:
         """Register or refresh a case folder, preserving its JSON unchanged.
 
@@ -193,6 +288,8 @@ class StudyDatabase:
         """
         folder_path = str(case.path.resolve())
         metadata = read_case_metadata(case)
+        client = self.sync_client_from_metadata(metadata)
+        client_id = client.id if client else ""
         row = self.connection.execute(
             "SELECT * FROM expedientes WHERE folder_path = ?", (folder_path,)
         ).fetchone()
@@ -207,6 +304,7 @@ class StudyDatabase:
                     client_name != row["client_name"],
                     case_number != row["case_number"],
                     tribunal != row["tribunal"],
+                    client_id != row["client_id"],
                 )
             )
             if changed:
@@ -214,10 +312,10 @@ class StudyDatabase:
                 self.connection.execute(
                     """
                     UPDATE expedientes
-                    SET title = ?, client_name = ?, case_number = ?, tribunal = ?, updated_at = ?
+                    SET title = ?, client_name = ?, case_number = ?, tribunal = ?, client_id = ?, updated_at = ?
                     WHERE id = ?
                     """,
-                    (title, client_name, case_number, tribunal, now, row["id"]),
+                    (title, client_name, case_number, tribunal, client_id, now, row["id"]),
                 )
                 self._audit("expediente", row["id"], "synced_from_case_metadata", now)
                 self.connection.commit()
@@ -240,8 +338,8 @@ class StudyDatabase:
         self.connection.execute(
             """
             INSERT INTO expedientes
-                (id, folder_path, title, client_name, case_number, tribunal, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, folder_path, title, client_name, case_number, tribunal, client_id, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -250,6 +348,7 @@ class StudyDatabase:
                 record.client_name,
                 record.case_number,
                 record.tribunal,
+                client_id,
                 record.status,
                 now,
                 now,
@@ -274,12 +373,13 @@ class StudyDatabase:
         if not row:
             return self.import_case(case)
         metadata = read_case_metadata(case)
+        client = self.sync_client_from_metadata(metadata)
         now = utc_now().isoformat()
         self.connection.execute(
             """
             UPDATE expedientes
             SET folder_path = ?, title = ?, client_name = ?,
-                case_number = ?, tribunal = ?, updated_at = ?
+                case_number = ?, tribunal = ?, client_id = ?, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -288,6 +388,7 @@ class StudyDatabase:
                 metadata.get("Actor", "").strip(),
                 metadata.get("CUIJ", "").strip() or row["case_number"],
                 metadata.get("Juzgado o tribunal", "").strip() or row["tribunal"],
+                client.id if client else "",
                 now,
                 row["id"],
             ),
@@ -618,6 +719,13 @@ class StudyDatabase:
             status=row["status"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _cliente_from_row(row: sqlite3.Row) -> Cliente:
+        return Cliente(
+            id=row["id"], identity_key=row["identity_key"], name=row["name"], dni=row["dni"],
+            cuil=row["cuil"], phone=row["phone"], email=row["email"], address=row["address"],
         )
 
     @staticmethod

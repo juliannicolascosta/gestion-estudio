@@ -2744,6 +2744,7 @@ class MainWindow(QMainWindow):
                 cases = list_cases(root_path)
                 policy = normalized_activity_settings(self.store.settings.activity_settings)
                 activities = case_activities(cases, policy)
+                visible_cases = []
                 for case in cases:
                     if not case_matches(case, query):
                         continue
@@ -2752,6 +2753,29 @@ class MainWindow(QMainWindow):
                         continue
                     if activity.status == "green" and not policy["show_recent"]:
                         continue
+                    metadata = read_case_metadata(case)
+                    client_label, client_key = self.case_client_identity(metadata)
+                    visible_cases.append((case, activity, client_label, client_key))
+
+                grouped: dict[str, list[tuple[Case, object, str, str]]] = {}
+                for entry in visible_cases:
+                    if entry[3]:
+                        grouped.setdefault(entry[3], []).append(entry)
+                client_parents: dict[str, QTreeWidgetItem] = {}
+                for client_key, entries in grouped.items():
+                    if len(entries) < 2:
+                        continue
+                    label = entries[0][2]
+                    parent = QTreeWidgetItem([f"{label} — {len(entries)} casos"])
+                    parent.setIcon(0, ui_icon("person", "#2774A6"))
+                    parent.setToolTip(0, "Cliente con varios casos. Las carpetas y documentos siguen separados.")
+                    font = parent.font(0)
+                    font.setBold(True)
+                    parent.setFont(0, font)
+                    root_item.addChild(parent)
+                    parent.setExpanded(True)
+                    client_parents[client_key] = parent
+                for case, activity, _client_label, client_key in visible_cases:
                     item = QTreeWidgetItem([case.name])
                     color_key = {
                         "green": "green_color",
@@ -2773,7 +2797,7 @@ class MainWindow(QMainWindow):
                         f"{activity.latest_at.astimezone().strftime('%d/%m/%Y')} "
                         f"({activity.inactive_days} días)\n{case.path}",
                     )
-                    root_item.addChild(item)
+                    client_parents.get(client_key, root_item).addChild(item)
                     if select_path and case.path == select_path:
                         selected_item = item
                     elif self.case and case.path == self.case.path:
@@ -2798,6 +2822,24 @@ class MainWindow(QMainWindow):
             self.set_case(Case(Path(selected_item.data(0, PATH_ROLE))))
         elif not self.case or not self.case.path.is_dir():
             self.set_case(None)
+
+    @staticmethod
+    def case_client_identity(metadata: dict[str, str]) -> tuple[str, str]:
+        """Return a conservative visual grouping key; it never changes a case."""
+        label = (metadata.get("Nombre completo") or metadata.get("Actor") or "").strip()
+        if not label:
+            label = ", ".join(
+                part for part in (
+                    metadata.get("Apellido del actor", "").strip(),
+                    metadata.get("Nombres del actor", "").strip(),
+                ) if part
+            )
+        for field in ("CUIL del actor", "DNI del actor", "DNI/CUIT actor"):
+            digits = re.sub(r"\D", "", metadata.get(field, ""))
+            if digits:
+                return label or "Cliente sin nombre", f"id:{digits}"
+        normalized = re.sub(r"\s+", " ", label.casefold()).strip()
+        return label or "", f"name:{normalized}" if normalized else ""
 
     def case_tree_changed(self):
         item = self.case_tree.currentItem()

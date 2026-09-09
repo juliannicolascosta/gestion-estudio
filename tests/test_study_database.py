@@ -9,6 +9,35 @@ from gestor_documental.study_database import SCHEMA_VERSION, StudyDatabase, stud
 
 
 class StudyDatabaseTests(unittest.TestCase):
+
+    def test_cases_with_the_same_person_share_a_client_record_without_touching_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            first = create_case(study, "Pérez c/ ART")
+            second = create_case(study, "Pérez c/ Empleador")
+            metadata = {
+                "Actor": "PÉREZ, JUAN",
+                "DNI del actor": "30.123.456",
+                "Teléfono del actor": "341 555 000",
+            }
+            save_case_metadata(first, metadata)
+            save_case_metadata(second, {**metadata, "CUIJ": "21-123"})
+            first_before = (first.path / ".gestor-caso.json").read_bytes()
+            second_before = (second.path / ".gestor-caso.json").read_bytes()
+
+            with StudyDatabase(study_database_path(study)) as database:
+                first_record = database.import_case(first)
+                second_record = database.import_case(second)
+                client_rows = database.connection.execute("SELECT * FROM clientes").fetchall()
+                client_id = database.connection.execute(
+                    "SELECT client_id FROM expedientes WHERE id = ?", (first_record.id,)
+                ).fetchone()["client_id"]
+                linked_cases = database.list_client_cases(client_id)
+
+            self.assertEqual(len(client_rows), 1)
+            self.assertEqual({case.id for case in linked_cases}, {first_record.id, second_record.id})
+            self.assertEqual((first.path / ".gestor-caso.json").read_bytes(), first_before)
+            self.assertEqual((second.path / ".gestor-caso.json").read_bytes(), second_before)
     def test_creates_versioned_relational_schema(self):
         with tempfile.TemporaryDirectory() as directory:
             database_path = study_database_path(Path(directory) / "Estudio")
