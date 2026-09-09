@@ -3135,10 +3135,13 @@ class MainWindow(QMainWindow):
             status = str(metadata.get("Estado SISFE", "")).strip()
             raw_since = str(metadata.get("Estado SISFE desde", "")).strip()
             since = _format_sisfe_date(raw_since) if raw_since else ""
+            raw_synced_at = str(metadata.get("Última sincronización SISFE", "")).strip()
+            synced_at = _format_sisfe_date(raw_synced_at) if raw_synced_at else ""
             status_text = status or "todavía no informado por SISFE"
             since_text = f" · desde {since}" if since else ""
+            synced_text = f"\nÚltima sincronización: {synced_at}" if synced_at else ""
             self.portal_case_status.setText(
-                f"Trámite interno / ubicación actual: {status_text}{since_text}"
+                f"Trámite interno / ubicación actual: {status_text}{since_text}{synced_text}"
             )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.novedades_count.setText("No disponibles")

@@ -73,6 +73,7 @@ class SisfeImportTests(unittest.TestCase):
             saved_metadata = read_case_metadata(case)
             self.assertEqual(saved_metadata["Estado SISFE"], "A casillero")
             self.assertEqual(saved_metadata["Estado SISFE desde"], "2026-08-30")
+            self.assertTrue(saved_metadata["Última sincronización SISFE"])
             with StudyDatabase(study_database_path(study)) as database:
                 self.assertEqual(database.connection.execute("SELECT COUNT(*) FROM movimientos").fetchone()[0], 1)
                 self.assertEqual(database.connection.execute("SELECT COUNT(*) FROM documentos").fetchone()[0], 1)

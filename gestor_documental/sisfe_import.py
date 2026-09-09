@@ -116,8 +116,10 @@ class SisfeImportService:
                 metadata["Estado SISFE"] = snapshot.case_status.strip()
             if snapshot.case_status_since.strip():
                 metadata["Estado SISFE desde"] = snapshot.case_status_since.strip()
-            if snapshot.case_status.strip() or snapshot.case_status_since.strip():
-                save_case_metadata(case, metadata)
+            # Se registra sólo al importar un resultado válido. Si la consulta
+            # falla antes, el último estado y hora exitosos se conservan.
+            metadata["Última sincronización SISFE"] = datetime.now().astimezone().isoformat(timespec="seconds")
+            save_case_metadata(case, metadata)
             self._validate_document_hashes(snapshot)
             movements_registered = 0
             documents_registered = 0
