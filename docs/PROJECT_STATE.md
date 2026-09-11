@@ -2,7 +2,9 @@
 
 ## Identidad portable del expediente
 
-Cada caso recibe al registrarse una identificación interna estable en `.gestor-caso.json`. SQLite la conserva separada de la ruta absoluta. Si toda la Ubicación del Estudio —incluida su base— se mueve a otra unidad o computadora, abrir el caso actualiza la ruta y reutiliza el expediente, movimientos, documentos y tareas existentes. Si la ruta anterior todavía existe, una segunda carpeta con la misma identidad se rechaza como copia ambigua y no toma el historial. La migración a esquema 7 es incremental. Esta base habilita el próximo bloque de backup y verificación de restauración.
+Cada caso recibe al registrarse una identificación interna estable en `.gestor-caso.json`. SQLite la conserva separada de la ruta absoluta. Si toda la Ubicación del Estudio —incluida su base— se mueve a otra unidad o computadora, abrir el caso actualiza la ruta y reutiliza el expediente, movimientos, documentos y tareas existentes. Si la ruta anterior todavía existe, una segunda carpeta con la misma identidad se rechaza como copia ambigua y no toma el historial. La migración a esquema 7 es incremental.
+
+El engranaje permite crear un respaldo ZIP autocontenido de la Ubicación activa. La base SQLite se incorpora mediante una instantánea coherente y el manifiesto registra ruta, tamaño y SHA-256 de cada archivo. La restauración verifica íntegramente el contenido antes de escribir, rechaza rutas inseguras o archivos alterados, sólo admite una carpeta nueva o vacía y agrega la ubicación recuperada al Gestor.
 
 ## Recuperación de vínculos tras cambios externos
 

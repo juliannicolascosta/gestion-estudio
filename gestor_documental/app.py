@@ -149,6 +149,7 @@ from .services import (
     unique_path,
 )
 from .sisfe_extractor import extract_cedula_text
+from .study_backup import BackupResult, RestoreResult, create_study_backup, restore_study_backup
 from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationList
 from .ui.operation_status import OperationState, OperationStatusIndicator
@@ -1606,6 +1607,29 @@ class CedulaExtractionWorker(QObject):
             self.failed.emit(str(error))
 
 
+class StudyBackupWorker(QObject):
+    progress = pyqtSignal(int, int, str)
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, operation: str, source: Path, destination: Path):
+        super().__init__()
+        self.operation = operation
+        self.source = source
+        self.destination = destination
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            if self.operation == "backup":
+                result = create_study_backup(self.source, self.destination, self.progress.emit)
+            else:
+                result = restore_study_backup(self.source, self.destination, self.progress.emit)
+            self.completed.emit(result)
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
 class SignerDropDialog(QDialog):
     def __init__(self, pdf: Path, parent=None):
         super().__init__(parent)
@@ -1889,6 +1913,9 @@ class MainWindow(QMainWindow):
         self._compile_thread: QThread | None = None
         self._cedula_thread: QThread | None = None
         self._recovery_thread = None
+        self._study_backup_thread: QThread | None = None
+        self._study_backup_worker: StudyBackupWorker | None = None
+        self._study_backup_progress: QProgressDialog | None = None
         self._compile_worker: CompileWorker | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._compile_cancelling = False
@@ -1977,6 +2004,9 @@ class MainWindow(QMainWindow):
         professional_menu.addAction("Configurar firmador externo…", self.configure_signer)
         professional_menu.addAction("Abrir modelos de escritos", self.open_models_folder)
         professional_menu.addAction("Configurar semáforo de casos…", self.configure_case_activity)
+        professional_menu.addSeparator()
+        professional_menu.addAction("Crear respaldo del Estudio…", self.create_active_study_backup)
+        professional_menu.addAction("Restaurar respaldo del Estudio…", self.restore_study_from_backup)
         professional_menu.addSeparator()
         professional_menu.addAction("Restablecer distribución", self.reset_layout)
         self.professional_settings_button.setMenu(professional_menu)
@@ -2776,6 +2806,127 @@ class MainWindow(QMainWindow):
             self.store.add_study_root(Path(folder))
             self.case = None
             self.reload_cases()
+
+    def create_active_study_backup(self):
+        root = self.store.settings.study_root
+        if root is None or not root.is_dir():
+            QMessageBox.information(
+                self,
+                "Falta la ubicación",
+                "Seleccioná una Ubicación del Estudio disponible antes de crear el respaldo.",
+            )
+            return
+        if self._study_backup_thread is not None:
+            self.statusBar().showMessage("Ya hay una operación de respaldo en curso.", 5000)
+            return
+        default_name = f"Respaldo {root.name} {date.today().isoformat()}.zip"
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar respaldo verificable",
+            str(root.parent / default_name),
+            "Respaldo del Gestor (*.zip)",
+        )
+        if filename:
+            target = Path(filename)
+            if target.suffix.casefold() != ".zip":
+                target = target.with_suffix(".zip")
+            self._start_study_backup_operation("backup", root, target)
+
+    def restore_study_from_backup(self):
+        if self._study_backup_thread is not None:
+            self.statusBar().showMessage("Ya hay una operación de respaldo en curso.", 5000)
+            return
+        initial = self.store.settings.study_root
+        backup_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Elegir respaldo del Estudio",
+            str(initial.parent if initial else Path.home()),
+            "Respaldo del Gestor (*.zip)",
+        )
+        if not backup_name:
+            return
+        destination = QFileDialog.getExistingDirectory(
+            self,
+            "Elegí o creá una carpeta vacía para restaurar",
+            str(initial.parent if initial else Path.home()),
+        )
+        if not destination:
+            return
+        target = Path(destination)
+        if any(target.iterdir()):
+            QMessageBox.warning(
+                self,
+                "La carpeta no está vacía",
+                "Para proteger tus archivos, el respaldo sólo se restaura en una carpeta nueva o vacía.",
+            )
+            return
+        self._start_study_backup_operation("restore", Path(backup_name), target)
+
+    def _start_study_backup_operation(self, operation: str, source: Path, destination: Path):
+        thread = QThread(self)
+        worker = StudyBackupWorker(operation, source, destination)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._update_study_backup_progress)
+        worker.completed.connect(self._study_backup_completed)
+        worker.failed.connect(self._study_backup_failed)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._study_backup_cleanup)
+        self._study_backup_thread = thread
+        self._study_backup_worker = worker
+        title = "Creando respaldo" if operation == "backup" else "Restaurando respaldo"
+        progress = QProgressDialog(title + "…", "", 0, 0, self)
+        progress.setWindowTitle(title)
+        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.show()
+        self._study_backup_progress = progress
+        thread.start()
+
+    def _update_study_backup_progress(self, current: int, total: int, relative: str):
+        progress = self._study_backup_progress
+        if progress is None:
+            return
+        progress.setMaximum(max(1, total))
+        progress.setValue(current)
+        progress.setLabelText(f"Procesando {relative}")
+
+    def _study_backup_completed(self, result: object):
+        if isinstance(result, BackupResult):
+            QMessageBox.information(
+                self,
+                "Respaldo verificado",
+                f"Se respaldaron {result.file_count} archivos ({human_size(result.total_bytes)}).\n\n"
+                f"Archivo: {result.path}\n\n"
+                f"Huella del respaldo: {result.archive_sha256}",
+            )
+        elif isinstance(result, RestoreResult):
+            self.store.add_study_root(result.root)
+            self.case = None
+            self.reload_cases()
+            QMessageBox.information(
+                self,
+                "Restauración terminada",
+                f"Se verificaron y restauraron {result.file_count} archivos "
+                f"({human_size(result.total_bytes)}).\n\n"
+                "La ubicación restaurada ya quedó agregada al Gestor.",
+            )
+
+    def _study_backup_failed(self, message: str):
+        QMessageBox.warning(self, "No pudimos completar la operación", message)
+
+    def _study_backup_cleanup(self):
+        if self._study_backup_progress is not None:
+            self._study_backup_progress.close()
+            self._study_backup_progress.deleteLater()
+        self._study_backup_progress = None
+        self._study_backup_thread = None
+        self._study_backup_worker = None
 
     def reload_cases(self, select_path: Path | None = None):
         roots = self.store.settings.study_roots
@@ -5385,6 +5536,12 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event):
+        if self._study_backup_thread is not None:
+            self.statusBar().showMessage(
+                "Esperá a que termine el respaldo o la restauración antes de cerrar.", 7000
+            )
+            event.ignore()
+            return
         if self._recovery_thread is not None:
             self.statusBar().showMessage("Esperá a que termine la recuperación de vínculos antes de cerrar.", 5000)
             event.ignore()

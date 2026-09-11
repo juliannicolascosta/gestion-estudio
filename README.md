@@ -12,6 +12,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Árbol con una carpeta raíz azul por ubicación, todos sus casos e iconos de tipo; permite renombrar los casos desde el menú contextual.
 - Iconografía vectorial moderna para ubicaciones, casos, tipos de archivo y acciones; los comandos secundarios repetitivos usan iconos con ayuda emergente y las acciones principales conservan su nombre.
 - Ubicación activa seleccionable: determina dónde se crea el próximo caso y qué biblioteca de Acceso rápido se muestra.
+- Respaldo verificable de una Ubicación completa desde el engranaje: incluye expedientes, documentos, metadatos y una instantánea coherente de la base operativa. Cada archivo se controla por tamaño y SHA-256; la restauración sólo admite una carpeta nueva o vacía y agrega automáticamente la ubicación recuperada al Gestor.
 - Las ubicaciones temporalmente desconectadas permanecen visibles como **Ubicación no disponible** y pueden quitarse del Gestor sin borrar sus archivos.
 - **Acceso rápido** disponible para DNI, matrícula, CBU, constancias y documental reutilizable, con controles para contraer la biblioteca o ampliar temporalmente el Directorio.
 - Cada ubicación tiene su propia biblioteca en `00 - ACCESO RÁPIDO`, pero esa carpeta no aparece como si fuera un caso.
