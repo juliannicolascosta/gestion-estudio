@@ -1895,6 +1895,7 @@ class MainWindow(QMainWindow):
         self._sisfe_case_dialog: SisfeCaseBrowserDialog | None = None
         self._sisfe_download_request: tuple[str, dict] | None = None
         self._pending_cedula_movement_id = ""
+        self._sisfe_download_active = False
         self._cut_paths: list[Path] = []
         self._directory_expanded = False
         self._quick_access_collapsed = False
@@ -3251,6 +3252,7 @@ class MainWindow(QMainWindow):
     def sync_sisfe(self):
         if not self.require_case():
             return
+        case = self.case
         configured_portal = read_case_metadata(self.case).get("Portal jurídico asociado", "").strip()
         if configured_portal and configured_portal != "SISFE":
             QMessageBox.information(
@@ -3286,14 +3288,15 @@ class MainWindow(QMainWindow):
                 return
             try:
                 result = self.sisfe_portal.import_snapshot(
-                    self.case, snapshot, self.case.path / "Documentos SISFE"
+                    case, snapshot, case.path / "Documentos SISFE"
                 )
             except Exception as import_error:
                 self.sisfe_status.set_state(OperationState.ERROR, "No se pudo importar")
                 QMessageBox.warning(self, "No pudimos importar SISFE", str(import_error))
                 return
-            self.reload_novedades()
-            self.reload_case_files()
+            if self.case == case:
+                self.reload_novedades()
+                self.reload_case_files()
             self.sisfe_status.set_state(
                 OperationState.SUCCESS,
                 "Sesión manual lista para sincronizar",
@@ -3638,6 +3641,9 @@ class MainWindow(QMainWindow):
     def generate_cedula_from_selected_novedad(self):
         """Descarga el PDF conocido por SISFE y continúa con la cédula."""
         def continue_after_detail(remote_case_id, detail, movement):
+            if self._sisfe_download_active:
+                self.statusBar().showMessage("Esperá a que termine la descarga SISFE en curso.", 5000)
+                return
             if not (detail.get("has_primary_document") or detail.get("has_additional_documents")):
                 QMessageBox.information(
                     self, "Sin documento", "Este movimiento no tiene documentos descargables en SISFE."
@@ -3651,6 +3657,10 @@ class MainWindow(QMainWindow):
         self._request_selected_movement_detail(continue_after_detail)
 
     def _request_selected_movement_detail(self, completed):
+        if self._sisfe_download_active:
+            self.statusBar().showMessage("Esperá a que termine la descarga SISFE en curso.", 5000)
+            return
+        context = self.capture_sisfe_context()
         movement = self.selected_novedad_data()
         if not movement or movement.get("source") != "sisfe" or not movement.get("external_id"):
             return
@@ -3669,11 +3679,13 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "No pudimos consultar SISFE", str(error))
                 return
             self.sisfe_status.set_state(OperationState.SUCCESS, "Documento SISFE encontrado")
+            detail = dict(detail, _gestor_context=context)
             completed(str(detail.get("remote_case_id") or ""), detail, movement)
 
         self._sisfe_login_dialog.request_movement_detail(cuij, str(movement["external_id"]), detail_ready)
 
     def show_selected_novedad(self):
+        context = self.capture_sisfe_context()
         movement = self.selected_novedad_data()
         if not movement:
             return
@@ -3745,6 +3757,7 @@ class MainWindow(QMainWindow):
             box.addButton(QMessageBox.StandardButton.Close)
             box.exec()
             remote_case_id = str(detail.get("remote_case_id") or "")
+            detail = dict(detail, _gestor_context=context)
             if download_button and box.clickedButton() is download_button:
                 self.start_sisfe_download(remote_case_id, detail)
             elif box.clickedButton() is open_button:
@@ -3763,7 +3776,11 @@ class MainWindow(QMainWindow):
         movement_detail: dict | None = None,
         auto_download: bool = False,
     ):
-        if not remote_case_id or not self._sisfe_login_dialog or not self.case:
+        if self._sisfe_download_active:
+            self.show_sisfe_download()
+            return
+        case = (movement_detail or {}).get("_gestor_context", {}).get("case", self.case)
+        if not remote_case_id or not self._sisfe_login_dialog or not case:
             return
         if self._sisfe_case_dialog is not None:
             self._sisfe_case_dialog.close()
@@ -3771,7 +3788,7 @@ class MainWindow(QMainWindow):
         self._sisfe_case_dialog = SisfeCaseBrowserDialog(
             self._sisfe_login_dialog.profile,
             remote_case_id,
-            self.case,
+            case,
             self,
             movement_detail=movement_detail,
             auto_download=auto_download,
@@ -3781,8 +3798,21 @@ class MainWindow(QMainWindow):
         self._sisfe_case_dialog.raise_()
         self._sisfe_case_dialog.activateWindow()
 
+    def capture_sisfe_context(self) -> dict:
+        return {
+            "case": self.case,
+            "professional": self.professional_combo.currentText(),
+            "profile_values": dict(self.professional_template_values()),
+        }
+
     def start_sisfe_download(self, remote_case_id: str, movement_detail: dict):
-        if not remote_case_id or not self._sisfe_login_dialog or not self.case:
+        if self._sisfe_download_active:
+            self.statusBar().showMessage("Esperá a que termine la descarga SISFE en curso.", 5000)
+            return
+        movement_detail = dict(movement_detail)
+        context = movement_detail.setdefault("_gestor_context", self.capture_sisfe_context())
+        case = context["case"]
+        if not remote_case_id or not self._sisfe_login_dialog or not case:
             return
         if self._sisfe_case_dialog is not None:
             self._sisfe_case_dialog.close()
@@ -3791,19 +3821,28 @@ class MainWindow(QMainWindow):
         self._sisfe_case_dialog = SisfeCaseBrowserDialog(
             self._sisfe_login_dialog.profile,
             remote_case_id,
-            self.case,
+            case,
             self,
             movement_detail=movement_detail,
             auto_download=True,
         )
         self._sisfe_case_dialog.documentSaved.connect(self.sisfe_document_saved)
         self._sisfe_case_dialog.automationFinished.connect(self.sisfe_download_finished)
+        dialog = self._sisfe_case_dialog
+
+        def dialog_closed(_result):
+            if self._sisfe_download_active and self._sisfe_case_dialog is dialog:
+                self.sisfe_download_finished(False, "Se cerró la ventana de descarga. Podés reintentar.")
+
+        dialog.finished.connect(dialog_closed)
+        self._sisfe_download_active = True
         self.sisfe_retry_button.setVisible(False)
         self.sisfe_show_download_button.setVisible(False)
         self.sisfe_status.set_state(OperationState.RUNNING, "Descargando desde SISFE…")
         self.statusBar().showMessage("La descarga SISFE continúa en segundo plano", 5000)
 
     def sisfe_download_finished(self, success: bool, message: str):
+        self._sisfe_download_active = False
         if success:
             self.sisfe_status.set_state(OperationState.SUCCESS, "Descarga SISFE completada")
             self.statusBar().showMessage(f"SISFE: {message}", 6500)
@@ -3816,7 +3855,6 @@ class MainWindow(QMainWindow):
             self.sisfe_show_download_button.setVisible(False)
             return
         self.sisfe_status.set_state(OperationState.ERROR, "No se pudo descargar desde SISFE")
-        self._pending_cedula_movement_id = ""
         self.sisfe_status.setToolTip(message)
         self.sisfe_retry_button.setVisible(True)
         self.sisfe_show_download_button.setVisible(True)
@@ -3847,7 +3885,8 @@ class MainWindow(QMainWindow):
         saved_path = Path(path)
         if pending_movement and pending_movement == downloaded_movement and saved_path.suffix.lower() == ".pdf":
             self._pending_cedula_movement_id = ""
-            QTimer.singleShot(0, lambda value=saved_path: self.generate_cedula_from_pdf(value))
+            context = request[1].get("_gestor_context", self.capture_sisfe_context())
+            QTimer.singleShot(0, lambda value=saved_path, owner=context: self.generate_cedula_from_pdf(value, context=owner))
 
     def require_study(self) -> bool:
         if self.store.settings.study_root:
@@ -4722,8 +4761,13 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, sqlite3.Error) as error:
             QMessageBox.warning(self, "No pudimos clasificar el documento", str(error))
 
-    def generate_cedula_from_pdf(self, pdf: Path):
-        if not self.case or self._cedula_thread is not None:
+    def generate_cedula_from_pdf(self, pdf: Path, *, context: dict | None = None):
+        context = context or self.capture_sisfe_context()
+        case = context["case"]
+        if not case or self._cedula_thread is not None:
+            return
+        if not pdf.resolve().is_relative_to(case.path.resolve()):
+            QMessageBox.warning(self, "Documento de otro expediente", "El decreto no pertenece al expediente de esta operación.")
             return
         models = [
             path for path in list_models(self.store.models_dir)
@@ -4747,7 +4791,6 @@ class MainWindow(QMainWindow):
         if picker.exec() != QDialog.DialogCode.Accepted or not picker.selected_model:
             return
         template = picker.selected_model
-        case = self.case
         self.statusBar().showMessage("Extrayendo el texto del decreto…")
         thread = QThread(self)
         worker = CedulaExtractionWorker(pdf)
@@ -4762,20 +4805,21 @@ class MainWindow(QMainWindow):
 
         def completed(extracted):
             try:
-                profile_values = self.professional_template_values()
+                profile_values = dict(context["profile_values"])
                 profile_values["TEXTO_PROVEIDO"] = extracted.text
                 writing = create_writing(
                     case,
                     f"Cédula - {pdf.stem}",
                     template,
-                    self.professional_combo.currentText(),
+                    context["professional"],
                     profile_values,
                 )
             except Exception as error:
                 QMessageBox.warning(self, "No pudimos generar la cédula", str(error))
             else:
-                self.reload_case_files(writing)
-                self.set_current_writing(writing)
+                if self.case == case:
+                    self.reload_case_files(writing)
+                    self.set_current_writing(writing)
                 open_file(writing)
                 self.warn_unresolved_placeholders(writing)
                 review = " Revisá los firmantes." if not extracted.signers_detected else ""
@@ -5305,6 +5349,10 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event):
+        if self._cedula_thread is not None or self._sisfe_download_active:
+            self.statusBar().showMessage("Esperá a que termine la extracción o descarga antes de cerrar.", 7000)
+            event.ignore()
+            return
         if self._compile_thread is not None and self._compile_thread.isRunning():
             if self._compile_cancelling:
                 event.ignore()

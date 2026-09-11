@@ -1,4 +1,6 @@
 import unittest
+import json
+import re
 from base64 import b64encode
 
 from gestor_documental.sisfe_browser import (
@@ -40,7 +42,8 @@ class SisfeBrowserTests(unittest.TestCase):
     def test_login_prefill_only_fills_visible_fields_and_never_submits(self):
         script = browser_prefill_login_script("usuario", "contraseña")
         self.assertIn("usuario", script)
-        self.assertIn("contraseña", script)
+        encoded = re.search(r"const password = (.+);", script).group(1)
+        self.assertEqual(json.loads(encoded), "contraseña")
         self.assertIn("type === 'password'", script)
         self.assertNotIn(".submit(", script)
         self.assertNotIn("click()", script)

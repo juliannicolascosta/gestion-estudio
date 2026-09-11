@@ -1,5 +1,9 @@
 # Estado del proyecto
 
+## Consolidación de operaciones por expediente
+
+Las consultas SISFE conservan el expediente de origen aunque cambie la selección. Las descargas y sus reintentos conservan también el profesional y sus variables para generar cédulas. Una descarga activa no se reemplaza por un segundo pedido; el cierre espera a que terminen descargas o extracción. La cédula se guarda en el caso de origen sin incorporarse al armado de otro caso seleccionado. La cola de múltiples descargas sigue pendiente. Estas garantías se verifican con pruebas de navegación durante operaciones y cierre.
+
 Actualizado: 2 de septiembre de 2026
 
 Ubicación canónica: `C:\Proyectos\Gestor de documental`

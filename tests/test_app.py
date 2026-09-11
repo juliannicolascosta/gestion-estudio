@@ -376,14 +376,81 @@ class AppSmokeTests(unittest.TestCase):
             window = MainWindow(store)
             window.reload_cases(case.path)
             window._pending_cedula_movement_id = "mov-10"
-            window._sisfe_download_request = ("remote-1", {"movement_id": "mov-10"})
+            context = window.capture_sisfe_context()
+            window._sisfe_download_request = ("remote-1", {"movement_id": "mov-10", "_gestor_context": context})
+            second = create_case(study, "Otro caso")
+            window.set_case(second)
 
             with patch.object(window, "generate_cedula_from_pdf") as generate:
                 window.sisfe_document_saved(str(pdf), False)
                 self.app.processEvents()
 
-            generate.assert_called_once_with(pdf)
+            self.assertEqual(generate.call_args.args, (pdf,))
+            self.assertEqual(generate.call_args.kwargs["context"]["case"], case)
+            self.assertEqual(generate.call_args.kwargs["context"]["professional"], context["professional"])
             self.assertEqual(window._pending_cedula_movement_id, "")
+            window.close()
+
+    def test_sisfe_sync_keeps_original_case_after_navigation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = create_case(root / "Estudio", "Primero")
+            second = create_case(root / "Estudio", "Segundo")
+            save_case_metadata(first, {"CUIJ": "21-12345678-9"})
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(first.path.parent)
+            window = MainWindow(store)
+            window.set_case(first)
+            window.sisfe_session.mark_portal_opened()
+            window.sisfe_session.confirm_manual_login()
+            window._sisfe_login_dialog = MagicMock()
+            window.sync_sisfe()
+            callback = window._sisfe_login_dialog.request_snapshot.call_args.args[1]
+            window.set_case(second)
+            snapshot = object()
+            with patch.object(window.sisfe_portal, "import_snapshot") as importer:
+                callback(snapshot, None)
+                importer.assert_called_once_with(first, snapshot, first.path / "Documentos SISFE")
+            self.assertEqual(window.case, second)
+            window.close()
+
+    def test_download_retry_keeps_case_and_rejects_competing_job(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = create_case(root / "Estudio", "Primero")
+            second = create_case(root / "Estudio", "Segundo")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(first.path.parent)
+            window = MainWindow(store)
+            window.set_case(first)
+            window._sisfe_login_dialog = MagicMock()
+            with patch("gestor_documental.app.SisfeCaseBrowserDialog") as factory:
+                window.start_sisfe_download("remote-1", {"movement_id": "mov-1"})
+                window.set_case(second)
+                window.start_sisfe_download("remote-2", {"movement_id": "mov-2"})
+                self.assertEqual(factory.call_count, 1)
+                factory.return_value.close.assert_not_called()
+                event = MagicMock()
+                window.closeEvent(event)
+                event.ignore.assert_called_once()
+                closed = factory.return_value.finished.connect.call_args.args[0]
+                closed(0)
+                self.assertFalse(window._sisfe_download_active)
+                window.retry_sisfe_download()
+                self.assertEqual(factory.call_count, 2)
+                self.assertEqual(factory.call_args.args[2], first)
+                self.assertEqual(window._sisfe_download_request[0], "remote-1")
+                window.sisfe_download_finished(True, "Listo")
+            window.close()
+
+    def test_closing_waits_for_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow(SettingsStore(Path(directory)))
+            window._cedula_thread = MagicMock()
+            event = MagicMock()
+            window.closeEvent(event)
+            event.ignore.assert_called_once()
+            window._cedula_thread = None
             window.close()
 
     def test_professional_selector_starts_with_add_action_and_keeps_selection(self):
