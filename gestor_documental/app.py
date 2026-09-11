@@ -4331,7 +4331,7 @@ class MainWindow(QMainWindow):
         count = sum(
             1
             for key, value in self._loaded_metadata.items()
-            if key not in CASE_FIELDS and str(value).strip()
+            if key not in CASE_FIELDS and key not in SYSTEM_METADATA_KEYS and str(value).strip()
         )
         self.more_metadata_button.setText(f"Más datos · {count}" if count else "Más datos")
 

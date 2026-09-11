@@ -1,5 +1,9 @@
 # Estado del proyecto
 
+## Identidad portable del expediente
+
+Cada caso recibe al registrarse una identificación interna estable en `.gestor-caso.json`. SQLite la conserva separada de la ruta absoluta. Si toda la Ubicación del Estudio —incluida su base— se mueve a otra unidad o computadora, abrir el caso actualiza la ruta y reutiliza el expediente, movimientos, documentos y tareas existentes. Si la ruta anterior todavía existe, una segunda carpeta con la misma identidad se rechaza como copia ambigua y no toma el historial. La migración a esquema 7 es incremental. Esta base habilita el próximo bloque de backup y verificación de restauración.
+
 ## Recuperación de vínculos tras cambios externos
 
 El menú contextual de Archivos ofrece **Recuperar vínculos de documentos**. Busca en segundo plano dentro del caso y recupera registros cuya ruta falta sólo si tienen SHA-256 previo y un único archivo coincidente no ocupado por otro registro. No mueve archivos ni elige entre duplicados. Conserva identidad, categoría y relaciones SISFE; informa cuántos vínculos no pudo resolver. Archivos sin hash histórico, cambios de contenido y traslados fuera del caso requieren otro tratamiento. La búsqueda se solicita explícitamente para evitar recorrer todo el caso en cada actualización de pantalla.

@@ -10,7 +10,7 @@ from gestor_documental.study_database import SCHEMA_VERSION, StudyDatabase, stud
 
 class StudyDatabaseTests(unittest.TestCase):
 
-    def test_cases_with_the_same_person_share_a_client_record_without_touching_metadata(self):
+    def test_cases_with_the_same_person_share_a_client_and_receive_distinct_identities(self):
         with tempfile.TemporaryDirectory() as directory:
             study = Path(directory) / "Estudio"
             first = create_case(study, "Pérez c/ ART")
@@ -22,9 +22,6 @@ class StudyDatabaseTests(unittest.TestCase):
             }
             save_case_metadata(first, metadata)
             save_case_metadata(second, {**metadata, "CUIJ": "21-123"})
-            first_before = (first.path / ".gestor-caso.json").read_bytes()
-            second_before = (second.path / ".gestor-caso.json").read_bytes()
-
             with StudyDatabase(study_database_path(study)) as database:
                 first_record = database.import_case(first)
                 second_record = database.import_case(second)
@@ -36,8 +33,11 @@ class StudyDatabaseTests(unittest.TestCase):
 
             self.assertEqual(len(client_rows), 1)
             self.assertEqual({case.id for case in linked_cases}, {first_record.id, second_record.id})
-            self.assertEqual((first.path / ".gestor-caso.json").read_bytes(), first_before)
-            self.assertEqual((second.path / ".gestor-caso.json").read_bytes(), second_before)
+            first_identity = read_case_metadata(first)["Identificación interna del expediente"]
+            second_identity = read_case_metadata(second)["Identificación interna del expediente"]
+            self.assertNotEqual(first_identity, second_identity)
+            self.assertEqual(read_case_metadata(first)["Actor"], metadata["Actor"])
+            self.assertEqual(read_case_metadata(second)["CUIJ"], "21-123")
     def test_creates_versioned_relational_schema(self):
         with tempfile.TemporaryDirectory() as directory:
             database_path = study_database_path(Path(directory) / "Estudio")
@@ -49,6 +49,10 @@ class StudyDatabaseTests(unittest.TestCase):
                     for row in database.connection.execute(
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     )
+                }
+                columns = {
+                    row["name"]
+                    for row in database.connection.execute("PRAGMA table_info(expedientes)")
                 }
 
             self.assertEqual(version, SCHEMA_VERSION)
@@ -63,8 +67,9 @@ class StudyDatabaseTests(unittest.TestCase):
                 }
                 <= tables
             )
+            self.assertIn("case_identity", columns)
 
-    def test_import_is_idempotent_and_preserves_case_folder_and_json(self):
+    def test_import_is_idempotent_and_only_adds_portable_identity_to_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             study = Path(directory) / "Estudio"
             case = create_case(study, "Rosales c/ Provincia")
@@ -85,8 +90,57 @@ class StudyDatabaseTests(unittest.TestCase):
             self.assertEqual(total, 1)
             self.assertEqual(events, 1)
             self.assertTrue(case.path.is_dir())
-            self.assertEqual(read_case_metadata(case), metadata)
-            self.assertEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
+            stored = read_case_metadata(case)
+            self.assertEqual({key: stored[key] for key in metadata}, metadata)
+            self.assertRegex(stored["Identificación interna del expediente"], r"^GD-[A-F0-9]{32}$")
+            self.assertNotEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
+
+    def test_whole_study_move_recovers_case_and_history_by_portable_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original_study = Path(directory) / "Anterior" / "Estudio"
+            case = create_case(original_study, "Caso")
+            save_case_metadata(case, {"Actor": "Ana", "CUIJ": "21-1"})
+            with StudyDatabase(study_database_path(original_study)) as database:
+                original = database.import_case(case)
+                movement = database.add_movement(
+                    original.id, "Resolución", source="sisfe", external_id="portable-1"
+                )
+                identity = read_case_metadata(case)["Identificación interna del expediente"]
+
+            moved_study = Path(directory) / "Nueva computadora" / "Estudio"
+            moved_study.parent.mkdir()
+            original_study.rename(moved_study)
+            moved_case = type(case)(moved_study / case.name)
+            with StudyDatabase(study_database_path(moved_study)) as database:
+                recovered = database.import_case(moved_case)
+                count = database.connection.execute("SELECT COUNT(*) FROM expedientes").fetchone()[0]
+                stored_identity = database.connection.execute(
+                    "SELECT case_identity FROM expedientes WHERE id = ?", (recovered.id,)
+                ).fetchone()[0]
+                recovered_movement = database.find_movement_by_external_id(
+                    recovered.id, "portable-1"
+                )
+
+            self.assertEqual(recovered.id, original.id)
+            self.assertEqual(recovered.folder_path, moved_case.path.resolve())
+            self.assertEqual(recovered_movement.id, movement.id)
+            self.assertEqual(stored_identity, identity)
+            self.assertEqual(count, 1)
+
+    def test_duplicate_case_identity_does_not_hijack_existing_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            original = create_case(study, "Original")
+            with StudyDatabase(study_database_path(study)) as database:
+                record = database.import_case(original)
+                metadata = read_case_metadata(original)
+                duplicate = create_case(study, "Copia")
+                save_case_metadata(duplicate, metadata)
+                with self.assertRaisesRegex(RuntimeError, "misma identidad"):
+                    database.import_case(duplicate)
+                current = database.find_expediente_by_folder(original.path)
+                self.assertEqual(current.id, record.id)
+                self.assertIsNone(database.find_expediente_by_folder(duplicate.path))
 
     def test_import_refreshes_relational_projection_from_case_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

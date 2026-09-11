@@ -96,6 +96,7 @@ Para cambiar lo que genera **Escrito nuevo**, elegí **+ Escrito → Modificar m
 - Configuración general y modelos: `%APPDATA%\GestorDocumental`.
 - Caché local de conversiones Word: `%LOCALAPPDATA%\GestorDocumental\conversion-cache`; se invalida automáticamente al cambiar el archivo original.
 - Metadatos de cada caso: `.gestor-caso.json`, dentro de su carpeta.
+- Cada caso recibe una identidad interna estable; al mover toda la Ubicación del Estudio junto con su base, el Gestor recupera sus movimientos y vínculos en la nueva ruta.
 - El PIN del token no se almacena en configuración, metadatos ni registros. La sesión autenticada sólo vive mientras el proceso del Gestor está abierto.
 - Por decisión operativa, las claves ARCA/AFIP y ANSES pueden guardarse como texto en los metadatos locales del caso para copiar y pegar. No se envían automáticamente a ningún portal.
 - Los archivos importados se copian; el original externo no se modifica.

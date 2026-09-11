@@ -55,7 +55,8 @@ def latest_case_activity(
     timestamps: list[datetime] = []
     if case.path.is_dir():
         for path in case.path.rglob("*"):
-            if path.is_file():
+            relative = path.relative_to(case.path)
+            if path.is_file() and not any(part.startswith(".") for part in relative.parts):
                 try:
                     timestamps.append(datetime.fromtimestamp(path.stat().st_mtime, timezone.utc))
                 except OSError:

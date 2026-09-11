@@ -1,8 +1,8 @@
 """Persistencia relacional incremental para la gestión integral del Estudio.
 
-La base se crea sólo cuando una futura pantalla o integración la solicite. No
-reordena carpetas ni escribe en ``.gestor-caso.json``: durante la transición,
-ese archivo continúa siendo compatible con el gestor documental actual.
+La base se crea sólo cuando una pantalla o integración la solicita. No reordena
+carpetas. ``.gestor-caso.json`` continúa siendo compatible y recibe una única
+identidad interna para reconocer el caso después de trasladar el Estudio.
 """
 
 from __future__ import annotations
@@ -16,11 +16,12 @@ from pathlib import Path
 
 from .domain import Cliente, Documento, Expediente, Movimiento, Tarea
 from .models import Case
-from .services import read_case_metadata
+from .services import read_case_metadata, save_case_metadata
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 DATABASE_NAME = ".gestor-estudio.sqlite3"
+CASE_IDENTITY_FIELD = "Identificación interna del expediente"
 
 
 def utc_now() -> datetime:
@@ -84,6 +85,10 @@ class StudyDatabase:
         if current < 6:
             self._migrate_to_6()
             self.connection.execute("PRAGMA user_version = 6")
+            current = 6
+        if current < 7:
+            self._migrate_to_7()
+            self.connection.execute("PRAGMA user_version = 7")
         self.connection.commit()
 
     def _migrate_to_1(self):
@@ -212,6 +217,20 @@ class StudyDatabase:
             """
         )
 
+    def _migrate_to_7(self):
+        """Add an identity that survives changes to the absolute folder path."""
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(expedientes)")}
+        if "case_identity" not in columns:
+            self.connection.execute(
+                "ALTER TABLE expedientes ADD COLUMN case_identity TEXT NOT NULL DEFAULT ''"
+            )
+        self.connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS expedientes_portable_identity
+            ON expedientes(case_identity) WHERE case_identity <> ''
+            """
+        )
+
     @staticmethod
     def _client_values(metadata: dict[str, str]) -> dict[str, str]:
         name = (metadata.get("Nombre completo") or metadata.get("Actor") or "").strip()
@@ -279,7 +298,7 @@ class StudyDatabase:
         return [self._expediente_from_row(row) for row in rows]
 
     def import_case(self, case: Case) -> Expediente:
-        """Register or refresh a case folder, preserving its JSON unchanged.
+        """Register or refresh a case folder using a portable identity.
 
         ``.gestor-caso.json`` remains the source of truth during the transition
         to SQLite.  Reopening or saving a case therefore refreshes the small
@@ -293,7 +312,31 @@ class StudyDatabase:
         row = self.connection.execute(
             "SELECT * FROM expedientes WHERE folder_path = ?", (folder_path,)
         ).fetchone()
+        case_identity = metadata.get(CASE_IDENTITY_FIELD, "").strip()
+        if row is None and case_identity:
+            row = self.connection.execute(
+                "SELECT * FROM expedientes WHERE case_identity = ?", (case_identity,)
+            ).fetchone()
+            if row:
+                previous_path = Path(row["folder_path"])
+                if previous_path.exists() and previous_path.resolve() != case.path.resolve():
+                    raise RuntimeError(
+                        "Hay dos carpetas con la misma identidad interna. "
+                        "El Gestor no puede decidir cuál es el expediente original."
+                    )
+                now = utc_now().isoformat()
+                self.connection.execute(
+                    "UPDATE expedientes SET folder_path = ?, title = ?, updated_at = ? WHERE id = ?",
+                    (folder_path, case.name, now, row["id"]),
+                )
+                self._audit("expediente", row["id"], "portable_path_recovered", now)
+                self.connection.commit()
+                row = self.connection.execute(
+                    "SELECT * FROM expedientes WHERE id = ?", (row["id"],)
+                ).fetchone()
         if row:
+            if not case_identity:
+                case_identity = self._assign_case_identity(case, metadata)
             title = case.name
             client_name = metadata.get("Actor", "").strip()
             case_number = metadata.get("CUIJ", "").strip() or row["case_number"]
@@ -305,6 +348,7 @@ class StudyDatabase:
                     case_number != row["case_number"],
                     tribunal != row["tribunal"],
                     client_id != row["client_id"],
+                    case_identity != row["case_identity"],
                 )
             )
             if changed:
@@ -312,10 +356,11 @@ class StudyDatabase:
                 self.connection.execute(
                     """
                     UPDATE expedientes
-                    SET title = ?, client_name = ?, case_number = ?, tribunal = ?, client_id = ?, updated_at = ?
+                    SET title = ?, client_name = ?, case_number = ?, tribunal = ?,
+                        client_id = ?, case_identity = ?, updated_at = ?
                     WHERE id = ?
                     """,
-                    (title, client_name, case_number, tribunal, client_id, now, row["id"]),
+                    (title, client_name, case_number, tribunal, client_id, case_identity, now, row["id"]),
                 )
                 self._audit("expediente", row["id"], "synced_from_case_metadata", now)
                 self.connection.commit()
@@ -324,6 +369,8 @@ class StudyDatabase:
                 ).fetchone()
             return self._expediente_from_row(row)
 
+        if not case_identity:
+            case_identity = self._assign_case_identity(case, metadata)
         now = utc_now().isoformat()
         record = Expediente(
             id=str(uuid.uuid4()),
@@ -338,8 +385,9 @@ class StudyDatabase:
         self.connection.execute(
             """
             INSERT INTO expedientes
-                (id, folder_path, title, client_name, case_number, tribunal, client_id, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, folder_path, title, client_name, case_number, tribunal, client_id,
+                 case_identity, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -349,6 +397,7 @@ class StudyDatabase:
                 record.case_number,
                 record.tribunal,
                 client_id,
+                case_identity,
                 record.status,
                 now,
                 now,
@@ -364,6 +413,15 @@ class StudyDatabase:
         self.connection.commit()
         return record
 
+    @staticmethod
+    def _assign_case_identity(case: Case, metadata: dict[str, str]) -> str:
+        identity = f"GD-{uuid.uuid4().hex.upper()}"
+        updated = dict(metadata)
+        updated[CASE_IDENTITY_FIELD] = identity
+        save_case_metadata(case, updated)
+        metadata[CASE_IDENTITY_FIELD] = identity
+        return identity
+
     def relocate_case(self, previous_folder_path: Path, case: Case) -> Expediente:
         """Keep the relational identity when the user renames a case folder."""
         previous = str(Path(previous_folder_path).resolve())
@@ -374,12 +432,15 @@ class StudyDatabase:
             return self.import_case(case)
         metadata = read_case_metadata(case)
         client = self.sync_client_from_metadata(metadata)
+        case_identity = metadata.get(CASE_IDENTITY_FIELD, "").strip() or row["case_identity"]
+        if not case_identity:
+            case_identity = self._assign_case_identity(case, metadata)
         now = utc_now().isoformat()
         self.connection.execute(
             """
             UPDATE expedientes
             SET folder_path = ?, title = ?, client_name = ?,
-                case_number = ?, tribunal = ?, client_id = ?, updated_at = ?
+                case_number = ?, tribunal = ?, client_id = ?, case_identity = ?, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -389,6 +450,7 @@ class StudyDatabase:
                 metadata.get("CUIJ", "").strip() or row["case_number"],
                 metadata.get("Juzgado o tribunal", "").strip() or row["tribunal"],
                 client.id if client else "",
+                case_identity,
                 now,
                 row["id"],
             ),

@@ -139,7 +139,10 @@ class AppSmokeTests(unittest.TestCase):
                 ).fetchone()
 
             self.assertEqual(tuple(row), (case.name, "Pablo Rosales", "21-12345678-9"))
-            self.assertEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
+            stored = read_case_metadata(case)
+            self.assertEqual({key: stored[key] for key in metadata}, metadata)
+            self.assertIn("Identificación interna del expediente", stored)
+            self.assertNotEqual((case.path / ".gestor-caso.json").read_bytes(), json_before)
             window.close()
 
     def test_selected_case_shows_its_integrated_novedades(self):
@@ -574,7 +577,10 @@ class AppSmokeTests(unittest.TestCase):
             self.app.processEvents()
 
             self.assertTrue(window.isVisible())
-            self.assertEqual(read_case_metadata(case), {})
+            before_save = read_case_metadata(case)
+            self.assertNotIn("Actor", before_save)
+            self.assertNotIn("Causa", before_save)
+            self.assertIn("Identificación interna del expediente", before_save)
             window.commit_metadata()
             self.assertEqual(read_case_metadata(case)["Causa"], "DAÑOS Y PERJUICIOS")
             self.assertTrue(window.metadata_edits["Actor"].isReadOnly())

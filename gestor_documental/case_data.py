@@ -725,9 +725,7 @@ def ensure_system_metadata(
                 result[key] = value
         result["Actor"] = variants["Apellido y nombres"] or full_name
     if not str(result.get("Identificación interna del expediente", "")).strip():
-        result["Identificación interna del expediente"] = (
-            f"GD-{current.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-        )
+        result["Identificación interna del expediente"] = f"GD-{uuid.uuid4().hex.upper()}"
     result.setdefault("Fecha de creación del registro", current.isoformat())
     if professional.strip():
         result.setdefault("Profesional creador", professional.strip())
