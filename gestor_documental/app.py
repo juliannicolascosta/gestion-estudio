@@ -47,6 +47,7 @@ from PyQt6.QtWidgets import (
 
 from . import __version__
 from .case_documents import rename_document_entry
+from .ui.document_recovery import DocumentRecoveryWorker
 from .models import (
     ADVANCED_FIELD_VARIABLES,
     CASE_FIELDS,
@@ -1887,6 +1888,7 @@ class MainWindow(QMainWindow):
         self._metadata_snapshot: dict[str, str] = {}
         self._compile_thread: QThread | None = None
         self._cedula_thread: QThread | None = None
+        self._recovery_thread = None
         self._compile_worker: CompileWorker | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._compile_cancelling = False
@@ -4672,7 +4674,39 @@ class MainWindow(QMainWindow):
             if item:
                 menu.addSeparator()
             menu.addAction("Pegar", self.paste_case_files).setShortcut(QKeySequence.StandardKey.Paste)
+        menu.addSeparator()
+        menu.addAction("Recuperar vínculos de documentos", self.recover_case_document_links).setEnabled(self._recovery_thread is None)
         menu.exec(self.case_files.mapToGlobal(point))
+
+    def recover_case_document_links(self):
+        if not self.case or self._recovery_thread is not None:
+            return
+        case = self.case
+        worker = DocumentRecoveryWorker(case, self)
+        self._recovery_thread = worker
+        self.statusBar().showMessage(f"Buscando documentos movidos en {case.name}…")
+
+        def completed(result):
+            if self.case == case:
+                for previous, current in result.recovered:
+                    self.replace_path_everywhere(previous, current)
+                self.reload_case_files()
+                self.reload_novedades()
+            QMessageBox.information(
+                self, "Recuperación de vínculos",
+                f"{case.name}: {len(result.recovered)} vínculos recuperados.\n"
+                f"{result.unresolved} sin resolver (sin huella previa, sin coincidencia única o archivo cambiado).\n"
+                "Los archivos originales no se modificaron.",
+            )
+
+        def cleanup():
+            self._recovery_thread = None
+            worker.deleteLater()
+
+        worker.recovered.connect(completed)
+        worker.failed.connect(lambda message: QMessageBox.warning(self, "No pudimos recuperar los vínculos", message))
+        worker.finished.connect(cleanup)
+        worker.start()
 
     def clipboard_file_paths(self) -> list[Path]:
         mime = QApplication.clipboard().mimeData()
@@ -5351,6 +5385,10 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event):
+        if self._recovery_thread is not None:
+            self.statusBar().showMessage("Esperá a que termine la recuperación de vínculos antes de cerrar.", 5000)
+            event.ignore()
+            return
         if self._cedula_thread is not None or self._sisfe_download_active:
             self.statusBar().showMessage("Esperá a que termine la extracción o descarga antes de cerrar.", 7000)
             event.ignore()

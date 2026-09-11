@@ -1,15 +1,78 @@
 import sqlite3
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gestor_documental.case_documents import rename_document_entry
+from gestor_documental.case_documents import rename_document_entry, recover_document_links
 from gestor_documental.services import create_case
 from gestor_documental.study_database import StudyDatabase, study_database_path
 
 
 class CaseDocumentTests(unittest.TestCase):
+    def test_external_move_recovers_document_identity_and_movement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            digest = hashlib.sha256(b"original").hexdigest()
+            with StudyDatabase(study_database_path(case.path.parent)) as database:
+                expediente = database.import_case(case)
+                document = database.add_document(expediente.id, Path("original.pdf"), sha256=digest, category="judicial")
+                movement = database.add_movement(expediente.id, "Decreto")
+                database.link_document_to_movement(movement.id, document.id)
+            target = case.path / "Subcarpeta" / "renombrado.pdf"
+            target.parent.mkdir()
+            target.write_bytes(b"original")
+            result = recover_document_links(case)
+            self.assertEqual(result.recovered, ((case.path / "original.pdf", target),))
+            self.assertEqual(result.unresolved, 0)
+            with StudyDatabase(study_database_path(case.path.parent)) as database:
+                linked, = database.list_movement_documents(movement.id)
+                self.assertEqual(linked.id, document.id)
+                self.assertEqual(linked.category, "judicial")
+                self.assertEqual(linked.relative_path, target.relative_to(case.path))
+            self.assertEqual(recover_document_links(case).recovered, ())
+            self.assertEqual(target.read_bytes(), b"original")
+
+    def test_recovery_does_not_guess_between_duplicates_or_missing_hashes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            digest = hashlib.sha256(b"same").hexdigest()
+            with StudyDatabase(study_database_path(case.path.parent)) as database:
+                expediente = database.import_case(case)
+                database.add_document(expediente.id, Path("missing.pdf"), sha256=digest)
+                database.add_document(expediente.id, Path("no-hash.pdf"))
+            for name in ("a.pdf", "b.pdf"):
+                (case.path / name).write_bytes(b"same")
+            result = recover_document_links(case)
+            self.assertEqual(result.recovered, ())
+            self.assertEqual(result.unresolved, 2)
+
+    def test_recovery_rejects_occupied_destination_and_duplicate_missing_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            digest = hashlib.sha256(b"same").hexdigest()
+            (case.path / "occupied.pdf").write_bytes(b"same")
+            with StudyDatabase(study_database_path(case.path.parent)) as database:
+                expediente = database.import_case(case)
+                database.add_document(expediente.id, Path("missing.pdf"), sha256=digest)
+                database.add_document(expediente.id, Path("occupied.pdf"), sha256=digest)
+            self.assertEqual(recover_document_links(case).recovered, ())
+            (case.path / "occupied.pdf").unlink()
+            (case.path / "new.pdf").write_bytes(b"same")
+            self.assertEqual(recover_document_links(case).recovered, ())
+
+    def test_recovery_ignores_hidden_and_external_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            digest = hashlib.sha256(b"same").hexdigest()
+            with StudyDatabase(study_database_path(case.path.parent)) as database:
+                expediente = database.import_case(case)
+                database.add_document(expediente.id, Path("missing.pdf"), sha256=digest)
+            (case.path / ".hidden.pdf").write_bytes(b"same")
+            (Path(directory) / "outside.pdf").write_bytes(b"same")
+            self.assertEqual(recover_document_links(case).recovered, ())
+
     def test_file_rename_preserves_movement_category_and_hash(self):
         with tempfile.TemporaryDirectory() as directory:
             case = create_case(Path(directory), "Caso")

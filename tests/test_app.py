@@ -467,6 +467,42 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.movement_local_documents("rename-1", "sisfe"), [target])
             window.close()
 
+    def test_recovery_worker_keeps_original_case_after_navigation(self):
+        from threading import Event
+        from gestor_documental.case_documents import RecoveryResult
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = create_case(root / "Estudio", "Primero")
+            second = create_case(root / "Estudio", "Segundo")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(first.path.parent)
+            window = MainWindow(store)
+            window.set_case(first)
+            release = Event()
+
+            def recover(case):
+                release.wait(5)
+                self.assertEqual(case, first)
+                return RecoveryResult(((first.path / "old.pdf", first.path / "new.pdf"),), 0)
+
+            with patch("gestor_documental.ui.document_recovery.recover_document_links", side_effect=recover), patch.object(QMessageBox, "information"), patch.object(window, "replace_path_everywhere") as replace:
+                window.recover_case_document_links()
+                event = MagicMock()
+                window.closeEvent(event)
+                event.ignore.assert_called_once()
+                window.set_case(second)
+                release.set()
+                for _ in range(300):
+                    self.app.processEvents()
+                    if window._recovery_thread is None:
+                        break
+                    QTest.qWait(10)
+                self.assertIsNone(window._recovery_thread)
+                replace.assert_not_called()
+                self.assertEqual(window.case, second)
+            window.close()
+
     def test_closing_waits_for_extraction(self):
         with tempfile.TemporaryDirectory() as directory:
             window = MainWindow(SettingsStore(Path(directory)))

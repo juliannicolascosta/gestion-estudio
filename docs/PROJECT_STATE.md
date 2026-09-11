@@ -1,5 +1,9 @@
 # Estado del proyecto
 
+## Recuperación de vínculos tras cambios externos
+
+El menú contextual de Archivos ofrece **Recuperar vínculos de documentos**. Busca en segundo plano dentro del caso y recupera registros cuya ruta falta sólo si tienen SHA-256 previo y un único archivo coincidente no ocupado por otro registro. No mueve archivos ni elige entre duplicados. Conserva identidad, categoría y relaciones SISFE; informa cuántos vínculos no pudo resolver. Archivos sin hash histórico, cambios de contenido y traslados fuera del caso requieren otro tratamiento. La búsqueda se solicita explícitamente para evitar recorrer todo el caso en cada actualización de pantalla.
+
 ## Identidad documental al renombrar
 
 Renombrar un archivo o una carpeta interna desde Archivos actualiza las rutas SQLite sin cambiar los identificadores documentales, categorías, hashes ni vínculos con movimientos SISFE. El armado y el Portal se refrescan con el nuevo nombre. Ante un error del registro se intenta restaurar el nombre original; los conflictos no sobrescriben registros existentes. No requiere migración de esquema. La reconciliación de cambios realizados desde el Explorador y el traslado completo entre computadoras quedan pendientes.
