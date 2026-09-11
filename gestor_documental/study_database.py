@@ -553,6 +553,38 @@ class StudyDatabase:
         rows = self.connection.execute(sql, parameters).fetchall()
         return [self._movimiento_from_row(row) for row in rows]
 
+    def relocate_documents(self, expediente_id: str, previous: Path, current: Path) -> int:
+        """Move registered paths without changing document identity or links."""
+        previous, current = Path(previous), Path(current)
+        for path in (previous, current):
+            if path.is_absolute() or ".." in path.parts or not path.parts:
+                raise ValueError("La ruta debe estar dentro del expediente.")
+        if previous == current:
+            return 0
+        changes = []
+        for document in self.list_documents(expediente_id):
+            try:
+                suffix = document.relative_path.relative_to(previous)
+            except ValueError:
+                continue
+            changes.append((document.id, (current / suffix).as_posix()))
+        # Preflight all destinations before changing any record.
+        for document_id, destination in changes:
+            occupied = self.connection.execute(
+                "SELECT id FROM documentos WHERE expediente_id = ? AND relative_path = ?",
+                (expediente_id, destination),
+            ).fetchone()
+            if occupied and occupied["id"] != document_id:
+                raise ValueError("El destino ya tiene un documento registrado; no se modificó el vínculo.")
+        with self.connection:
+            for document_id, destination in changes:
+                self.connection.execute(
+                    "UPDATE documentos SET relative_path = ? WHERE id = ?",
+                    (destination, document_id),
+                )
+                self._audit("documento", document_id, "path_relocated", utc_now().isoformat())
+        return len(changes)
+
     def add_document(
         self,
         expediente_id: str,

@@ -46,6 +46,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import __version__
+from .case_documents import rename_document_entry
 from .models import (
     ADVANCED_FIELD_VARIABLES,
     CASE_FIELDS,
@@ -4585,9 +4586,10 @@ class MainWindow(QMainWindow):
         if not accepted or not name.strip() or name.strip() == source.name:
             return
         try:
-            renamed = rename_case_entry(source, name)
+            renamed = rename_document_entry(self.case, source, name)
             self.replace_path_everywhere(source, renamed)
             self.reload_case_files(renamed)
+            self.reload_novedades()
             self.statusBar().showMessage(f"Renombrado: {renamed.name}", 3500)
         except Exception as error:
             QMessageBox.warning(self, "No pudimos renombrar", str(error))

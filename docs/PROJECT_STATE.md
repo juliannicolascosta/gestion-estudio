@@ -1,5 +1,9 @@
 # Estado del proyecto
 
+## Identidad documental al renombrar
+
+Renombrar un archivo o una carpeta interna desde Archivos actualiza las rutas SQLite sin cambiar los identificadores documentales, categorías, hashes ni vínculos con movimientos SISFE. El armado y el Portal se refrescan con el nuevo nombre. Ante un error del registro se intenta restaurar el nombre original; los conflictos no sobrescriben registros existentes. No requiere migración de esquema. La reconciliación de cambios realizados desde el Explorador y el traslado completo entre computadoras quedan pendientes.
+
 ## Consolidación de operaciones por expediente
 
 Las consultas SISFE conservan el expediente de origen aunque cambie la selección. Las descargas y sus reintentos conservan también el profesional y sus variables para generar cédulas. Una descarga activa no se reemplaza por un segundo pedido; el cierre espera a que terminen descargas o extracción. La cédula se guarda en el caso de origen sin incorporarse al armado de otro caso seleccionado. La cola de múltiples descargas sigue pendiente. Estas garantías se verifican con pruebas de navegación durante operaciones y cierre.

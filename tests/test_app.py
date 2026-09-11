@@ -443,6 +443,30 @@ class AppSmokeTests(unittest.TestCase):
                 window.sisfe_download_finished(True, "Listo")
             window.close()
 
+    def test_ui_rename_keeps_compilation_and_portal_document_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            case = create_case(root / "Estudio", "Caso")
+            source = case.path / "decreto.pdf"
+            source.write_bytes(b"document")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(case.path.parent)
+            window = MainWindow(store)
+            window.set_case(case)
+            with StudyDatabase(study_database_path(case.path.parent)) as database:
+                expediente = database.import_case(case)
+                movement = database.add_movement(expediente.id, "Decreto", source="sisfe", external_id="rename-1")
+                document = database.add_document(expediente.id, Path(source.name), category="judicial")
+                database.link_document_to_movement(movement.id, document.id)
+            window.reload_case_files(source)
+            window.add_compilation_path(source)
+            with patch("gestor_documental.app.QInputDialog.getText", return_value=("Renombrado", True)):
+                window.rename_selected_file()
+            target = case.path / "Renombrado.pdf"
+            self.assertEqual(window.compilation_paths(), [target])
+            self.assertEqual(window.movement_local_documents("rename-1", "sisfe"), [target])
+            window.close()
+
     def test_closing_waits_for_extraction(self):
         with tempfile.TemporaryDirectory() as directory:
             window = MainWindow(SettingsStore(Path(directory)))
