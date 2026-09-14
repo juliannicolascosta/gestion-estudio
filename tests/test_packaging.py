@@ -34,6 +34,12 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("Move-WithRetry $InstallDir $BackupDir", install)
         self.assertIn("Move-WithRetry $StagingDir $InstallDir", install)
 
+    def test_installer_validates_shortcuts_before_finishing(self):
+        install = (ROOT / "packaging" / "install.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("$created = $shell.CreateShortcut($ShortcutPath)", install)
+        self.assertIn("[string]::IsNullOrWhiteSpace($created.TargetPath)", install)
+        self.assertIn("No se pudo crear correctamente el acceso directo", install)
+
 
 if __name__ == "__main__":
     unittest.main()

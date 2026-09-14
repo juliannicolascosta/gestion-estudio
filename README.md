@@ -107,4 +107,4 @@ Para cambiar lo que genera **Escrito nuevo**, elegí **+ Escrito → Modificar m
 
 ## Estado
 
-La versión estable actual es la `0.13.1`, una evolución del MVP `delivery-sisfe`. Incorpora firma PAdES con sesión de token reutilizable y apariencia visible opcional, ficha ampliada por tipo de caso, generación contextual desde modelos Word, semáforo del directorio e interpretación inicial de SISFE. Conserva las varias **Ubicaciones del Estudio**, la búsqueda conjunta y Xólido como alternativa. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio.
+La versión estable actual es la `0.13.2`, una evolución del MVP `delivery-sisfe`. Incorpora firma PAdES con sesión de token reutilizable y apariencia visible opcional, ficha ampliada por tipo de caso, generación contextual desde modelos Word, semáforo del directorio, interpretación inicial de SISFE y respaldo verificable de cada Ubicación. Conserva las varias **Ubicaciones del Estudio**, la búsqueda conjunta y Xólido como alternativa. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio.

@@ -4,6 +4,7 @@ import faulthandler
 import os
 import sys
 import traceback
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -13,8 +14,20 @@ LOG_FILE = LOG_DIR / "gestor-documental.log"
 
 
 def install_error_log():
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    crash_stream = LOG_FILE.open("a", encoding="utf-8")
+    log_file = LOG_FILE
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        crash_stream = log_file.open("a", encoding="utf-8")
+    except OSError:
+        # El registro es auxiliar: nunca debe impedir que abra la aplicación.
+        fallback_dir = Path(tempfile.gettempdir()) / "GestorDocumental"
+        try:
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            log_file = fallback_dir / "gestor-documental.log"
+            crash_stream = log_file.open("a", encoding="utf-8")
+        except OSError:
+            log_file = Path(os.devnull)
+            crash_stream = log_file.open("a", encoding="utf-8")
     crash_stream.write(f"\n--- Inicio {datetime.now().isoformat(timespec='seconds')} ---\n")
     crash_stream.flush()
     faulthandler.enable(crash_stream)
@@ -31,7 +44,7 @@ def install_error_log():
                     "Gestor de documental encontró un problema",
                     "La aplicación evitó un cierre silencioso.\n\n"
                     f"Detalle: {exception}\n\n"
-                    f"Registro: {LOG_FILE}",
+                    f"Registro: {log_file}",
                 )
         except Exception:
             pass

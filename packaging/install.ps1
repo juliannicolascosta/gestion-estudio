@@ -76,12 +76,21 @@ function Remove-Eventually([string]$Path) {
 function New-GestorShortcut([string]$ShortcutPath) {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($ShortcutPath)
-    $shortcut.TargetPath = Join-Path $InstallDir "runtime\pythonw.exe"
-    $shortcut.Arguments = '"' + (Join-Path $InstallDir "app\run.py") + '"'
-    $shortcut.WorkingDirectory = Join-Path $InstallDir "app"
-    $shortcut.IconLocation = (Join-Path $InstallDir "app\gestor_documental\gestor-documental.ico") + ",0"
+    $ShortcutTarget = [IO.Path]::GetFullPath((Join-Path $InstallDir "runtime\pythonw.exe"))
+    $ShortcutScript = [IO.Path]::GetFullPath((Join-Path $InstallDir "app\run.py"))
+    $ShortcutWorkDir = [IO.Path]::GetFullPath((Join-Path $InstallDir "app"))
+    $shortcut.TargetPath = $ShortcutTarget
+    $shortcut.Arguments = '"' + $ShortcutScript + '"'
+    $shortcut.WorkingDirectory = $ShortcutWorkDir
+    $shortcut.IconLocation = ([IO.Path]::GetFullPath((Join-Path $InstallDir "app\gestor_documental\gestor-documental.ico"))) + ",0"
     $shortcut.Description = "Casos, archivos y presentaciones en un mismo flujo"
     $shortcut.Save()
+    $created = $shell.CreateShortcut($ShortcutPath)
+    if ([string]::IsNullOrWhiteSpace($created.TargetPath) -or
+        [IO.Path]::GetFullPath($created.TargetPath) -ne $ShortcutTarget -or
+        $created.Arguments -notlike "*$ShortcutScript*") {
+        throw "No se pudo crear correctamente el acceso directo $ShortcutPath."
+    }
 }
 
 try {
