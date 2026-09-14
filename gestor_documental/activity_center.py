@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import re
+import unicodedata
 from typing import Iterable, Mapping
 
 from .domain import Movimiento
@@ -23,6 +25,7 @@ class ActivityItem:
     uncertain: bool = False
     task_key: str = ""
     confirmed: bool = False
+    file_path: str = ""
 
 
 def activity_task_key(source: str, external_id: str, kind: str, title: str) -> str:
@@ -40,11 +43,30 @@ def _movement_priority(due_at: datetime | None, uncertain: bool, now: datetime) 
     return 3
 
 
+def _search_tokens(value: str) -> tuple[str, ...]:
+    plain = unicodedata.normalize("NFKD", value.casefold())
+    plain = "".join(char for char in plain if not unicodedata.combining(char))
+    ignored = {"de", "del", "la", "el", "los", "las", "documento", "documentacion"}
+    return tuple(token for token in re.findall(r"[a-z0-9]+", plain) if token not in ignored)
+
+
+def matching_document(pending: str, available_paths: Iterable[str]) -> str:
+    expected = _search_tokens(pending)
+    if not expected:
+        return ""
+    for path in sorted(available_paths, key=str.casefold):
+        filename_tokens = set(_search_tokens(path.rsplit("/", 1)[-1].rsplit(".", 1)[0]))
+        if all(token in filename_tokens for token in expected):
+            return path
+    return ""
+
+
 def build_case_activity(
     movements: Iterable[Movimiento],
     pending_documents: Iterable[str],
     received_documents: Iterable[str],
     task_status_by_key: Mapping[str, str] | None = None,
+    available_document_paths: Iterable[str] = (),
     *,
     now: datetime | None = None,
 ) -> tuple[ActivityItem, ...]:
@@ -58,13 +80,19 @@ def build_case_activity(
         title = " ".join(value.split()).strip()
         if not title or title.casefold() in received:
             continue
+        matched_path = matching_document(title, available_document_paths)
         items.append(
             ActivityItem(
-                kind="Documentación",
+                kind="Posible recepción" if matched_path else "Documentación",
                 title=title,
-                detail="Solicitada al cliente · pendiente de recibir",
-                target="pending",
-                priority=2,
+                detail=(
+                    f"Revisar archivo compatible · {matched_path}"
+                    if matched_path
+                    else "Solicitada al cliente · pendiente de recibir"
+                ),
+                target="files" if matched_path else "pending",
+                priority=1 if matched_path else 2,
+                file_path=matched_path,
             )
         )
 

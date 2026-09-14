@@ -93,6 +93,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Centro de actividad derivado: reúne detecciones procesales y documental pendiente, ordena lo urgente y conserva navegación al dato de origen sin crear tareas automáticas dudosas.
 - Confirmación profesional e idempotente de detecciones como tareas internas, conservando responsable, fecha y vínculo lógico con el movimiento que las originó.
 - Cierre explícito de tareas confirmadas: las completadas dejan la bandeja activa sin perder su registro histórico ni el profesional que ejecutó la acción.
+- Sugerencia conservadora de recepción documental por coincidencia de nombre, navegable al archivo y sin modificar automáticamente el checklist.
 - Indicador visual reutilizable para estados del Portal: espera, proceso, resultado correcto y error; será alimentado por el gestor de descargas en segundo plano.
 - La bandeja del Portal muestra todos los movimientos guardados; ya no recorta silenciosamente la vista a los últimos veinte.
 - El flujo operativo de SISFE entra por un único servicio de aplicación y usa el navegador autenticado; el antiguo transporte HTTP queda fuera de la selección normal.

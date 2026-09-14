@@ -80,7 +80,7 @@
 - [ ] Generación automática del oficio y formulario RAEO desde la ficha validada.
 - [ ] Definir con el profesional una regla asistida para monto reclamado sin reemplazar la edición manual.
 - [ ] Sellado de tiempo y validación de largo plazo PAdES-LT/LTA, si los organismos receptores lo requieren.
-- [ ] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.
+- [x] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.
 - [ ] Recordatorios confirmados por el profesional para documentación todavía pendiente.
 
 ## Robustez

@@ -3528,8 +3528,18 @@ class MainWindow(QMainWindow):
                         for task in database.list_tasks(expediente.id)
                         if task.suggested_by
                     }
+            available_paths = [
+                path.relative_to(self.case.path).as_posix()
+                for path in self.case.path.rglob("*")
+                if path.is_file()
+                and not any(part.startswith(".") for part in path.relative_to(self.case.path).parts)
+            ]
             items = build_case_activity(
-                recent_case_novedades(self.case), pending, received, task_statuses
+                recent_case_novedades(self.case),
+                pending,
+                received,
+                task_statuses,
+                available_document_paths=available_paths,
             )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.activity_count.setText("No disponible")
@@ -3542,6 +3552,7 @@ class MainWindow(QMainWindow):
             "Traslado": "arrow-right",
             "Vencimiento": "check",
             "Documentación": "file",
+            "Posible recepción": "check",
         }
         for activity in items:
             item = QListWidgetItem(
@@ -3559,6 +3570,7 @@ class MainWindow(QMainWindow):
                     "due_at": activity.due_at.isoformat() if activity.due_at else "",
                     "task_key": activity.task_key,
                     "confirmed": activity.confirmed,
+                    "file_path": activity.file_path,
                 },
             )
             item.setToolTip(
@@ -3653,6 +3665,14 @@ class MainWindow(QMainWindow):
                     self.pending_documents_list.setCurrentItem(item)
                     self.pending_documents_list.scrollToItem(item)
                     break
+            return
+        if data.get("target") == "files":
+            relative = Path(str(data.get("file_path", "")))
+            candidate = self.case.path / relative if self.case else None
+            if candidate and candidate.is_file() and self.path_is_inside_case(candidate):
+                self.case_directory = candidate.parent
+                self.reload_case_files(candidate)
+                self.work_tabs.setCurrentIndex(self.files_tab_index)
             return
         self.work_tabs.setCurrentIndex(self.portal_tab_index)
         external_id = str(data.get("external_id", ""))

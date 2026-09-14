@@ -62,6 +62,18 @@ class ActivityCenterTests(unittest.TestCase):
         key = "movimiento:sisfe:audiencia-1:audiencia"
         self.assertEqual(build_case_activity([movement], [], [], {key: "completada"}), ())
 
+    def test_conservative_filename_match_suggests_review_without_marking_received(self):
+        items = build_case_activity(
+            [],
+            ["Recibo de sueldo"],
+            [],
+            available_document_paths=["Documental/RECIBO SUELDO agosto.pdf", "DNI.pdf"],
+        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].kind, "Posible recepción")
+        self.assertEqual(items[0].target, "files")
+        self.assertEqual(items[0].file_path, "Documental/RECIBO SUELDO agosto.pdf")
+
 
 if __name__ == "__main__":
     unittest.main()

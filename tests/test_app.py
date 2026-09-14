@@ -208,6 +208,33 @@ class AppSmokeTests(unittest.TestCase):
                 self.assertEqual(tasks[0].status, "completada")
             window.close()
 
+    def test_activity_suggests_matching_pending_file_and_opens_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            save_case_metadata(case, {"Documentación pendiente": "Recibo de sueldo"})
+            document = case.path / "Documental" / "RECIBO SUELDO agosto.pdf"
+            document.parent.mkdir()
+            document.write_bytes(b"%PDF-1.4")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.set_case(case)
+
+            activity = window.activity_list.item(0)
+            self.assertEqual(activity.data(ACTIVITY_ROLE)["target"], "files")
+            self.assertIn("POSIBLE RECEPCIÓN", activity.text())
+            window.activity_list.setCurrentItem(activity)
+            window.open_selected_activity()
+            self.assertEqual(window.work_tabs.currentIndex(), window.files_tab_index)
+            self.assertEqual(Path(window.case_files.currentItem().data(PATH_ROLE)), document)
+            self.assertEqual(
+                read_case_metadata(case)["Documentación pendiente"],
+                "Recibo de sueldo",
+            )
+            window.close()
+
     def test_selecting_case_registers_expediente_without_changing_json(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
