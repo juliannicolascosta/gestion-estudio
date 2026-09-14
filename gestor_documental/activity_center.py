@@ -21,6 +21,13 @@ class ActivityItem:
     external_id: str = ""
     source: str = ""
     uncertain: bool = False
+    task_key: str = ""
+    confirmed: bool = False
+
+
+def activity_task_key(source: str, external_id: str, kind: str, title: str) -> str:
+    identity = external_id.strip() or " ".join(title.casefold().split())
+    return f"movimiento:{source.strip().casefold()}:{identity}:{kind.casefold()}"
 
 
 def _movement_priority(due_at: datetime | None, uncertain: bool, now: datetime) -> int:
@@ -37,12 +44,14 @@ def build_case_activity(
     movements: Iterable[Movimiento],
     pending_documents: Iterable[str],
     received_documents: Iterable[str],
+    confirmed_task_keys: Iterable[str] = (),
     *,
     now: datetime | None = None,
 ) -> tuple[ActivityItem, ...]:
     """Build a deterministic inbox from movements and the existing checklist."""
     reference = now or datetime.now()
     received = {" ".join(value.split()).casefold() for value in received_documents if value.strip()}
+    confirmed = {value for value in confirmed_task_keys if value}
     items: list[ActivityItem] = []
 
     for value in pending_documents:
@@ -63,11 +72,16 @@ def build_case_activity(
         for interpretation in interpret_movement(movement.title):
             uncertain = bool(interpretation.warning)
             due = interpretation.extracted_at
+            task_key = activity_task_key(
+                movement.source, movement.external_id, interpretation.kind, movement.title
+            )
             detail_parts = [movement.source.upper()]
             if due:
                 detail_parts.append(due.strftime("%d/%m/%Y" + (" · %H:%M" if due.hour or due.minute else "")))
             if uncertain:
                 detail_parts.append("Requiere revisión profesional")
+            if task_key in confirmed:
+                detail_parts.append("Confirmada como tarea")
             items.append(
                 ActivityItem(
                     kind=interpretation.kind,
@@ -79,6 +93,8 @@ def build_case_activity(
                     external_id=movement.external_id,
                     source=movement.source,
                     uncertain=uncertain,
+                    task_key=task_key,
+                    confirmed=task_key in confirmed,
                 )
             )
 

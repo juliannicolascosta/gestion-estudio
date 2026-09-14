@@ -64,6 +64,7 @@
 - [x] Bandeja del Portal sin el recorte anterior de veinte movimientos.
 - [x] Servicio único de aplicación para importar la información obtenida en el navegador SISFE.
 - [x] Centro de actividad por expediente con navegación al origen y sin duplicar novedades ni pendientes.
+- [x] Confirmación profesional de detecciones como tareas internas, sin agenda automática.
 
 ## Próxima iteración
 

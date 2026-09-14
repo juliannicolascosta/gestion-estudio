@@ -314,6 +314,33 @@ class StudyDatabaseTests(unittest.TestCase):
             self.assertEqual(confirmed.confirmed_by, "Dra. Ana Pérez")
             self.assertEqual(audit_actions, ["suggested", "confirmed"])
 
+    def test_activity_confirmation_is_idempotent_and_listable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                first = database.confirm_activity_task(
+                    expediente.id,
+                    "Audiencia: comparecer",
+                    "Dra. Ana Pérez",
+                    due_at=datetime(2026, 9, 18, 9, 30),
+                    task_key="movimiento:sisfe:audiencia-1:audiencia",
+                )
+                second = database.confirm_activity_task(
+                    expediente.id,
+                    "Audiencia: comparecer",
+                    "Dra. Ana Pérez",
+                    due_at=datetime(2026, 9, 18, 9, 30),
+                    task_key="movimiento:sisfe:audiencia-1:audiencia",
+                )
+                tasks = database.list_tasks(expediente.id)
+
+            self.assertEqual(first.id, second.id)
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0].status, "confirmada")
+            self.assertEqual(tasks[0].confirmed_by, "Dra. Ana Pérez")
+
     def test_document_links_to_its_external_movement_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             study = Path(directory) / "Estudio"

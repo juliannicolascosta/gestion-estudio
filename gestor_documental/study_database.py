@@ -785,6 +785,44 @@ class StudyDatabase:
         confirmed = self.connection.execute("SELECT * FROM tareas WHERE id = ?", (task_id,)).fetchone()
         return self._tarea_from_row(confirmed)
 
+    def list_tasks(self, expediente_id: str) -> list[Tarea]:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM tareas WHERE expediente_id = ?
+            ORDER BY COALESCE(due_at, created_at), created_at
+            """,
+            (expediente_id,),
+        ).fetchall()
+        return [self._tarea_from_row(row) for row in rows]
+
+    def confirm_activity_task(
+        self,
+        expediente_id: str,
+        title: str,
+        professional: str,
+        *,
+        due_at: datetime | None = None,
+        task_key: str,
+    ) -> Tarea:
+        """Confirm an activity once; repeated clicks return the same task."""
+        key = task_key.strip()
+        if not key:
+            raise ValueError("La tarea necesita identificar la actividad de origen.")
+        existing = self.connection.execute(
+            "SELECT * FROM tareas WHERE expediente_id = ? AND suggested_by = ? ORDER BY created_at LIMIT 1",
+            (expediente_id, key),
+        ).fetchone()
+        if existing:
+            task = self._tarea_from_row(existing)
+            return task if task.status == "confirmada" else self.confirm_task(task.id, professional)
+        suggested = self.suggest_task(
+            expediente_id,
+            title,
+            due_at=due_at,
+            suggested_by=key,
+        )
+        return self.confirm_task(suggested.id, professional)
+
     def _audit(
         self,
         entity_type: str,

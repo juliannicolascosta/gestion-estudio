@@ -2423,13 +2423,22 @@ class MainWindow(QMainWindow):
         activity_layout.addLayout(activity_header)
         self.activity_list = QListWidget()
         self.activity_list.setObjectName("activityList")
+        self.activity_list.itemSelectionChanged.connect(self.update_activity_actions)
         self.activity_list.itemDoubleClicked.connect(lambda _: self.open_selected_activity())
         activity_layout.addWidget(self.activity_list, 1)
+        activity_actions = QHBoxLayout()
         activity_hint = QLabel(
             "Doble clic para ir al movimiento o documento pendiente que originó la acción."
         )
         activity_hint.setObjectName("muted")
-        activity_layout.addWidget(activity_hint)
+        activity_actions.addWidget(activity_hint, 1)
+        self.confirm_activity_button = QPushButton("Confirmar como tarea")
+        self.confirm_activity_button.setObjectName("green")
+        decorate_button(self.confirm_activity_button, "check", "#FFFFFF")
+        self.confirm_activity_button.clicked.connect(self.confirm_selected_activity)
+        self.confirm_activity_button.setEnabled(False)
+        activity_actions.addWidget(self.confirm_activity_button)
+        activity_layout.addLayout(activity_actions)
 
         pending_card, pending_layout = make_card()
         pending_header = QHBoxLayout()
@@ -3510,7 +3519,18 @@ class MainWindow(QMainWindow):
                 for line in str(metadata.get("Documentación recibida", "")).splitlines()
                 if line.strip()
             ]
-            items = build_case_activity(recent_case_novedades(self.case), pending, received)
+            confirmed_keys: set[str] = set()
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                expediente = database.find_expediente_by_folder(self.case.path)
+                if expediente:
+                    confirmed_keys = {
+                        task.suggested_by
+                        for task in database.list_tasks(expediente.id)
+                        if task.status == "confirmada"
+                    }
+            items = build_case_activity(
+                recent_case_novedades(self.case), pending, received, confirmed_keys
+            )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.activity_count.setText("No disponible")
             self.activity_list.addItem(f"No pudimos reunir la actividad: {error}")
@@ -3535,9 +3555,17 @@ class MainWindow(QMainWindow):
                     "title": activity.title,
                     "external_id": activity.external_id,
                     "source": activity.source,
+                    "kind": activity.kind,
+                    "due_at": activity.due_at.isoformat() if activity.due_at else "",
+                    "task_key": activity.task_key,
+                    "confirmed": activity.confirmed,
                 },
             )
-            item.setToolTip("Doble clic para abrir el origen")
+            item.setToolTip(
+                "Tarea ya confirmada · doble clic para abrir el origen"
+                if activity.confirmed
+                else "Doble clic para abrir el origen"
+            )
             if activity.priority <= 1:
                 font = QFont(item.font())
                 font.setBold(True)
@@ -3546,6 +3574,55 @@ class MainWindow(QMainWindow):
         count = len(items)
         self.activity_count.setText("Sin acciones" if not count else f"{count} por revisar")
         self.work_tabs.setTabText(self.activity_tab_index, f"Actividad · {count}")
+        self.update_activity_actions()
+
+    def update_activity_actions(self):
+        if not hasattr(self, "confirm_activity_button"):
+            return
+        selected = self.activity_list.currentItem()
+        data = selected.data(ACTIVITY_ROLE) if selected else None
+        enabled = (
+            isinstance(data, dict)
+            and data.get("target") == "portal"
+            and bool(data.get("task_key"))
+            and not bool(data.get("confirmed"))
+        )
+        self.confirm_activity_button.setEnabled(enabled)
+
+    def confirm_selected_activity(self):
+        selected = self.activity_list.currentItem()
+        data = selected.data(ACTIVITY_ROLE) if selected else None
+        if not self.case or not isinstance(data, dict) or not data.get("task_key"):
+            return
+        due_at = datetime.fromisoformat(data["due_at"]) if data.get("due_at") else None
+        due_text = due_at.strftime("%d/%m/%Y %H:%M") if due_at else "sin fecha cierta"
+        if QMessageBox.question(
+            self,
+            "Confirmar tarea",
+            f"{data.get('kind')}: {data.get('title')}\n\nFecha: {due_text}\n\n"
+            "¿Querés confirmarla como tarea del expediente?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        professional = self.professional_combo.currentText().strip()
+        if not professional or professional == ADD_PROFESSIONAL_LABEL:
+            QMessageBox.information(self, "Falta el profesional", "Seleccioná el profesional responsable.")
+            return
+        try:
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                expediente = database.find_expediente_by_folder(self.case.path)
+                if not expediente:
+                    raise RuntimeError("No encontramos el expediente en la base operativa.")
+                database.confirm_activity_task(
+                    expediente.id,
+                    f"{data.get('kind')}: {data.get('title')}",
+                    professional,
+                    due_at=due_at,
+                    task_key=str(data["task_key"]),
+                )
+            self.reload_activity()
+            self.statusBar().showMessage("Tarea confirmada para este expediente", 4500)
+        except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "No pudimos confirmar la tarea", str(error))
 
     def open_selected_activity(self):
         selected = self.activity_list.currentItem()

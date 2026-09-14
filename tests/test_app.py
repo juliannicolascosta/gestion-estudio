@@ -176,6 +176,26 @@ class AppSmokeTests(unittest.TestCase):
                 window.novedades_list.currentItem().data(MOVEMENT_ROLE)["external_id"],
                 "audiencia-1",
             )
+            window.work_tabs.setCurrentIndex(window.activity_tab_index)
+            window.activity_list.setCurrentItem(portal_item)
+            self.assertTrue(window.confirm_activity_button.isEnabled())
+            with patch.object(
+                QMessageBox,
+                "question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                window.confirm_selected_activity()
+            confirmed_item = next(
+                window.activity_list.item(index)
+                for index in range(window.activity_list.count())
+                if window.activity_list.item(index).data(ACTIVITY_ROLE)["target"] == "portal"
+            )
+            self.assertTrue(confirmed_item.data(ACTIVITY_ROLE)["confirmed"])
+            window.activity_list.setCurrentItem(confirmed_item)
+            self.assertFalse(window.confirm_activity_button.isEnabled())
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.find_expediente_by_folder(case.path)
+                self.assertEqual(len(database.list_tasks(expediente.id)), 1)
             window.close()
 
     def test_selecting_case_registers_expediente_without_changing_json(self):
