@@ -8,7 +8,7 @@ import re
 import unicodedata
 from typing import Iterable, Mapping
 
-from .domain import Movimiento
+from .domain import Movimiento, Tarea
 from .movement_interpretation import interpret_movement
 
 
@@ -26,6 +26,7 @@ class ActivityItem:
     task_key: str = ""
     confirmed: bool = False
     file_path: str = ""
+    task_id: str = ""
 
 
 def activity_task_key(source: str, external_id: str, kind: str, title: str) -> str:
@@ -67,6 +68,7 @@ def build_case_activity(
     received_documents: Iterable[str],
     task_status_by_key: Mapping[str, str] | None = None,
     available_document_paths: Iterable[str] = (),
+    tasks: Iterable[Tarea] = (),
     *,
     now: datetime | None = None,
 ) -> tuple[ActivityItem, ...]:
@@ -75,6 +77,26 @@ def build_case_activity(
     received = {" ".join(value.split()).casefold() for value in received_documents if value.strip()}
     task_statuses = dict(task_status_by_key or {})
     items: list[ActivityItem] = []
+
+    for task in tasks:
+        if task.status != "confirmada" or task.suggested_by != "manual":
+            continue
+        items.append(
+            ActivityItem(
+                kind="Tarea",
+                title=task.title,
+                detail=(
+                    f"Fecha objetivo · {task.due_at.strftime('%d/%m/%Y %H:%M')}"
+                    if task.due_at
+                    else "Sin fecha objetivo"
+                ),
+                target="task",
+                priority=_movement_priority(task.due_at, task.due_at is None, reference),
+                due_at=task.due_at,
+                confirmed=True,
+                task_id=task.id,
+            )
+        )
 
     for value in pending_documents:
         title = " ".join(value.split()).strip()

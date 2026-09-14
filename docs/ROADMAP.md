@@ -66,6 +66,7 @@
 - [x] Centro de actividad por expediente con navegación al origen y sin duplicar novedades ni pendientes.
 - [x] Confirmación profesional de detecciones como tareas internas, sin agenda automática.
 - [x] Finalización auditable de tareas confirmadas y retiro de la bandeja activa.
+- [x] Alta y finalización de tareas manuales con fecha objetivo opcional.
 
 ## Próxima iteración
 

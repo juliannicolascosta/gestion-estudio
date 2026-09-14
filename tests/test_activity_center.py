@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime
 
 from gestor_documental.activity_center import build_case_activity
-from gestor_documental.domain import Movimiento
+from gestor_documental.domain import Movimiento, Tarea
 
 
 class ActivityCenterTests(unittest.TestCase):
@@ -73,6 +73,13 @@ class ActivityCenterTests(unittest.TestCase):
         self.assertEqual(items[0].kind, "Posible recepción")
         self.assertEqual(items[0].target, "files")
         self.assertEqual(items[0].file_path, "Documental/RECIBO SUELDO agosto.pdf")
+
+    def test_confirmed_manual_task_is_visible_until_completed(self):
+        task = Tarea("t1", "e1", "Llamar al cliente", status="confirmada", suggested_by="manual")
+        item = build_case_activity([], [], [], tasks=[task])[0]
+        self.assertEqual((item.kind, item.target, item.task_id), ("Tarea", "task", "t1"))
+        completed = Tarea("t1", "e1", "Llamar al cliente", status="completada", suggested_by="manual")
+        self.assertEqual(build_case_activity([], [], [], tasks=[completed]), ())
 
 
 if __name__ == "__main__":

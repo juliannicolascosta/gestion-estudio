@@ -2432,6 +2432,10 @@ class MainWindow(QMainWindow):
         )
         activity_hint.setObjectName("muted")
         activity_actions.addWidget(activity_hint, 1)
+        new_activity_task = QPushButton("Nueva tarea")
+        decorate_button(new_activity_task, "plus")
+        new_activity_task.clicked.connect(self.create_manual_activity_task)
+        activity_actions.addWidget(new_activity_task)
         self.confirm_activity_button = QPushButton("Confirmar como tarea")
         self.confirm_activity_button.setObjectName("green")
         decorate_button(self.confirm_activity_button, "check", "#FFFFFF")
@@ -3520,12 +3524,14 @@ class MainWindow(QMainWindow):
                 if line.strip()
             ]
             task_statuses: dict[str, str] = {}
+            case_tasks = []
             with StudyDatabase(study_database_path(self.case.path.parent)) as database:
                 expediente = database.find_expediente_by_folder(self.case.path)
                 if expediente:
+                    case_tasks = database.list_tasks(expediente.id)
                     task_statuses = {
                         task.suggested_by: task.status
-                        for task in database.list_tasks(expediente.id)
+                        for task in case_tasks
                         if task.suggested_by
                     }
             available_paths = [
@@ -3540,6 +3546,7 @@ class MainWindow(QMainWindow):
                 received,
                 task_statuses,
                 available_document_paths=available_paths,
+                tasks=case_tasks,
             )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.activity_count.setText("No disponible")
@@ -3553,6 +3560,7 @@ class MainWindow(QMainWindow):
             "Vencimiento": "check",
             "Documentación": "file",
             "Posible recepción": "check",
+            "Tarea": "check",
         }
         for activity in items:
             item = QListWidgetItem(
@@ -3571,6 +3579,7 @@ class MainWindow(QMainWindow):
                     "task_key": activity.task_key,
                     "confirmed": activity.confirmed,
                     "file_path": activity.file_path,
+                    "task_id": activity.task_id,
                 },
             )
             item.setToolTip(
@@ -3594,7 +3603,8 @@ class MainWindow(QMainWindow):
         selected = self.activity_list.currentItem()
         data = selected.data(ACTIVITY_ROLE) if selected else None
         is_receipt = isinstance(data, dict) and data.get("target") == "files"
-        enabled = is_receipt or (
+        is_task = isinstance(data, dict) and data.get("target") == "task"
+        enabled = is_receipt or is_task or (
             isinstance(data, dict)
             and data.get("target") == "portal"
             and bool(data.get("task_key"))
@@ -3603,7 +3613,11 @@ class MainWindow(QMainWindow):
         self.confirm_activity_button.setText(
             "Marcar recibido"
             if is_receipt
-            else ("Marcar completada" if enabled and data.get("confirmed") else "Confirmar como tarea")
+            else (
+                "Marcar completada"
+                if is_task or (enabled and data.get("confirmed"))
+                else "Confirmar como tarea"
+            )
         )
 
     def confirm_selected_activity(self):
@@ -3613,6 +3627,9 @@ class MainWindow(QMainWindow):
             return
         if data.get("target") == "files":
             self.confirm_activity_receipt(str(data.get("title", "")))
+            return
+        if data.get("target") == "task":
+            self.complete_manual_activity_task(str(data.get("task_id", "")))
             return
         if not data.get("task_key"):
             return
@@ -3673,6 +3690,60 @@ class MainWindow(QMainWindow):
         received.add(matching)
         self.save_pending_documents(values, received)
         self.statusBar().showMessage(f"Documentación recibida: {matching}", 4500)
+
+    def create_manual_activity_task(self):
+        if not self.require_case():
+            return
+        title, accepted = QInputDialog.getText(self, "Nueva tarea", "Tarea del expediente:")
+        title = " ".join(title.split()).strip()
+        if not accepted or not title:
+            return
+        raw_date, accepted = QInputDialog.getText(
+            self, "Nueva tarea", "Fecha objetivo opcional (dd/mm/aaaa o dd/mm/aaaa hh:mm):"
+        )
+        if not accepted:
+            return
+        due_at = None
+        if raw_date.strip():
+            for pattern in ("%d/%m/%Y %H:%M", "%d/%m/%Y"):
+                try:
+                    due_at = datetime.strptime(raw_date.strip(), pattern)
+                    break
+                except ValueError:
+                    continue
+            if due_at is None:
+                QMessageBox.information(self, "Fecha inválida", "Usá el formato dd/mm/aaaa o dd/mm/aaaa hh:mm.")
+                return
+        professional = self.professional_combo.currentText().strip()
+        if not professional or professional == ADD_PROFESSIONAL_LABEL:
+            QMessageBox.information(self, "Falta el profesional", "Seleccioná el profesional responsable.")
+            return
+        try:
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                expediente = database.find_expediente_by_folder(self.case.path)
+                if not expediente:
+                    raise RuntimeError("No encontramos el expediente en la base operativa.")
+                database.create_manual_task(
+                    expediente.id, title, professional, due_at=due_at
+                )
+            self.reload_activity()
+            self.statusBar().showMessage("Tarea agregada al expediente", 4500)
+        except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "No pudimos crear la tarea", str(error))
+
+    def complete_manual_activity_task(self, task_id: str):
+        if not self.case or not task_id:
+            return
+        if QMessageBox.question(self, "Completar tarea", "¿Querés marcar esta tarea como completada?") != QMessageBox.StandardButton.Yes:
+            return
+        professional = self.professional_combo.currentText().strip()
+        try:
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                database.complete_task(task_id, professional)
+            self.reload_activity()
+            self.statusBar().showMessage("Tarea completada", 4500)
+        except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "No pudimos completar la tarea", str(error))
 
     def open_selected_activity(self):
         selected = self.activity_list.currentItem()

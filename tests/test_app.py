@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QMimeData, Qt, QUrl
 from PyQt6.QtGui import QPalette
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton
+from PyQt6.QtWidgets import QApplication, QInputDialog, QMessageBox, QPushButton
 from pypdf import PdfWriter
 
 from gestor_documental.app import (
@@ -253,6 +253,33 @@ class AppSmokeTests(unittest.TestCase):
                 window.pending_documents_list.item(0).checkState(),
                 Qt.CheckState.Checked,
             )
+            window.close()
+
+    def test_manual_task_is_created_and_completed_from_activity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.set_case(case)
+            with patch.object(
+                QInputDialog,
+                "getText",
+                side_effect=[("Llamar al cliente", True), ("18/09/2026 10:30", True)],
+            ):
+                window.create_manual_activity_task()
+            self.assertEqual(window.activity_list.count(), 1)
+            item = window.activity_list.item(0)
+            self.assertEqual(item.data(ACTIVITY_ROLE)["target"], "task")
+            window.activity_list.setCurrentItem(item)
+            self.assertEqual(window.confirm_activity_button.text(), "Marcar completada")
+            with patch.object(
+                QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes
+            ):
+                window.confirm_selected_activity()
+            self.assertEqual(window.activity_list.count(), 0)
             window.close()
 
     def test_selecting_case_registers_expediente_without_changing_json(self):

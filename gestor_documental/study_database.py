@@ -795,6 +795,38 @@ class StudyDatabase:
         ).fetchall()
         return [self._tarea_from_row(row) for row in rows]
 
+    def create_manual_task(
+        self,
+        expediente_id: str,
+        title: str,
+        professional: str,
+        *,
+        due_at: datetime | None = None,
+    ) -> Tarea:
+        suggested = self.suggest_task(
+            expediente_id, title, due_at=due_at, suggested_by="manual"
+        )
+        return self.confirm_task(suggested.id, professional)
+
+    def complete_task(self, task_id: str, professional: str) -> Tarea:
+        professional = professional.strip()
+        if not professional:
+            raise ValueError("Indicá el profesional que completa la tarea.")
+        row = self.connection.execute("SELECT * FROM tareas WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            raise KeyError("No encontramos la tarea confirmada.")
+        task = self._tarea_from_row(row)
+        if task.status == "completada":
+            return task
+        if task.status != "confirmada":
+            raise ValueError("La tarea debe estar confirmada antes de completarla.")
+        now = utc_now().isoformat()
+        self.connection.execute("UPDATE tareas SET status = 'completada' WHERE id = ?", (task.id,))
+        self._audit("tarea", task.id, "completed", now, professional)
+        self.connection.commit()
+        completed = self.connection.execute("SELECT * FROM tareas WHERE id = ?", (task.id,)).fetchone()
+        return self._tarea_from_row(completed)
+
     def confirm_activity_task(
         self,
         expediente_id: str,
@@ -824,26 +856,13 @@ class StudyDatabase:
         return self.confirm_task(suggested.id, professional)
 
     def complete_activity_task(self, expediente_id: str, task_key: str, professional: str) -> Tarea:
-        professional = professional.strip()
-        if not professional:
-            raise ValueError("Indicá el profesional que completa la tarea.")
         row = self.connection.execute(
             "SELECT * FROM tareas WHERE expediente_id = ? AND suggested_by = ? ORDER BY created_at LIMIT 1",
             (expediente_id, task_key.strip()),
         ).fetchone()
         if not row:
             raise KeyError("No encontramos la tarea confirmada.")
-        task = self._tarea_from_row(row)
-        if task.status == "completada":
-            return task
-        if task.status != "confirmada":
-            raise ValueError("La tarea debe estar confirmada antes de completarla.")
-        now = utc_now().isoformat()
-        self.connection.execute("UPDATE tareas SET status = 'completada' WHERE id = ?", (task.id,))
-        self._audit("tarea", task.id, "completed", now, professional)
-        self.connection.commit()
-        completed = self.connection.execute("SELECT * FROM tareas WHERE id = ?", (task.id,)).fetchone()
-        return self._tarea_from_row(completed)
+        return self.complete_task(row["id"], professional)
 
     def _audit(
         self,

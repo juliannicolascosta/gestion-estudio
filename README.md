@@ -49,6 +49,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Pestaña **Actividad** que reúne, sin duplicarlos, audiencias, traslados, vencimientos explícitos y documentación todavía pendiente; prioriza fechas próximas o vencidas y permite saltar con doble clic al origen en Portal o Pendientes.
 - Las detecciones procesales pueden confirmarse expresamente como tareas del expediente. La confirmación registra al profesional responsable, conserva la fecha detectada y es idempotente; ninguna inferencia se confirma ni agenda por sí sola.
 - Una tarea confirmada puede marcarse como completada desde la misma bandeja. Sale de Actividad para despejar el trabajo cotidiano, pero conserva su registro y auditoría en la base del Estudio.
+- Actividad permite crear tareas manuales con fecha objetivo opcional, vinculadas al expediente y al profesional seleccionado, y completarlas en el mismo flujo.
 - Si el nombre de un archivo incorporado coincide de forma conservadora con documental pendiente, Actividad muestra **Posible recepción** y permite abrirlo con doble clic. Es sólo una sugerencia: el documento no se marca como recibido automáticamente.
 - La sugerencia puede confirmarse con **Marcar recibido** desde Actividad; actualiza el checklist sin borrar la solicitud ni mover el archivo.
 - Indicador compacto de estado SISFE preparado para distinguir espera, operación en curso, finalización correcta y error sin ocupar espacio documental.

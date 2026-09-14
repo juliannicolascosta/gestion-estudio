@@ -352,6 +352,20 @@ class StudyDatabaseTests(unittest.TestCase):
             self.assertEqual(tasks[0].status, "completada")
             self.assertEqual(tasks[0].confirmed_by, "Dra. Ana Pérez")
 
+    def test_manual_task_can_be_created_confirmed_and_completed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                task = database.create_manual_task(
+                    expediente.id, "Llamar al cliente", "Dra. Ana Pérez"
+                )
+                completed = database.complete_task(task.id, "Dra. Ana Pérez")
+            self.assertEqual(task.status, "confirmada")
+            self.assertEqual(task.suggested_by, "manual")
+            self.assertEqual(completed.status, "completada")
+
     def test_document_links_to_its_external_movement_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             study = Path(directory) / "Estudio"
