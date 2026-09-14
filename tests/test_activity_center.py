@@ -80,6 +80,10 @@ class ActivityCenterTests(unittest.TestCase):
         self.assertEqual((item.kind, item.target, item.task_id), ("Tarea", "task", "t1"))
         completed = Tarea("t1", "e1", "Llamar al cliente", status="completada", suggested_by="manual")
         self.assertEqual(build_case_activity([], [], [], tasks=[completed]), ())
+        history = build_case_activity([], [], [], tasks=[completed], show_completed=True)
+        self.assertEqual(len(history), 1)
+        self.assertTrue(history[0].completed)
+        self.assertEqual(history[0].target, "history")
 
 
 if __name__ == "__main__":

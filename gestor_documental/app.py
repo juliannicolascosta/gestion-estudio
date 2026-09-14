@@ -2420,6 +2420,9 @@ class MainWindow(QMainWindow):
         self.activity_count = QLabel("Sin acciones")
         self.activity_count.setObjectName("muted")
         activity_header.addWidget(self.activity_count)
+        self.show_completed_tasks = QCheckBox("Ver completadas")
+        self.show_completed_tasks.toggled.connect(self.reload_activity)
+        activity_header.addWidget(self.show_completed_tasks)
         activity_layout.addLayout(activity_header)
         self.activity_list = QListWidget()
         self.activity_list.setObjectName("activityList")
@@ -3552,6 +3555,7 @@ class MainWindow(QMainWindow):
                 task_statuses,
                 available_document_paths=available_paths,
                 tasks=case_tasks,
+                show_completed=self.show_completed_tasks.isChecked(),
             )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.activity_count.setText("No disponible")
@@ -3585,6 +3589,7 @@ class MainWindow(QMainWindow):
                     "confirmed": activity.confirmed,
                     "file_path": activity.file_path,
                     "task_id": activity.task_id,
+                    "completed": activity.completed,
                 },
             )
             item.setToolTip(
@@ -3596,10 +3601,17 @@ class MainWindow(QMainWindow):
                 font = QFont(item.font())
                 font.setBold(True)
                 item.setFont(font)
+            if activity.completed:
+                item.setForeground(QColor("#7A8984"))
             self.activity_list.addItem(item)
-        count = len(items)
-        self.activity_count.setText("Sin acciones" if not count else f"{count} por revisar")
-        self.work_tabs.setTabText(self.activity_tab_index, f"Actividad · {count}")
+        active_count = sum(not activity.completed for activity in items)
+        completed_count = len(items) - active_count
+        self.activity_count.setText(
+            "Sin acciones"
+            if not items
+            else f"{active_count} activas" + (f" · {completed_count} completadas" if completed_count else "")
+        )
+        self.work_tabs.setTabText(self.activity_tab_index, f"Actividad · {active_count}")
         self.update_activity_actions()
 
     def update_activity_actions(self):
@@ -3613,6 +3625,7 @@ class MainWindow(QMainWindow):
             isinstance(data, dict)
             and data.get("target") == "portal"
             and bool(data.get("task_key"))
+            and not bool(data.get("completed"))
         )
         self.confirm_activity_button.setEnabled(enabled)
         self.edit_activity_task_button.setEnabled(is_task)

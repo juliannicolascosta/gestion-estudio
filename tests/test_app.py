@@ -290,6 +290,12 @@ class AppSmokeTests(unittest.TestCase):
             ):
                 window.confirm_selected_activity()
             self.assertEqual(window.activity_list.count(), 0)
+            window.show_completed_tasks.setChecked(True)
+            self.assertEqual(window.activity_list.count(), 1)
+            completed_item = window.activity_list.item(0)
+            self.assertTrue(completed_item.data(ACTIVITY_ROLE)["completed"])
+            window.activity_list.setCurrentItem(completed_item)
+            self.assertFalse(window.confirm_activity_button.isEnabled())
             window.close()
 
     def test_selecting_case_registers_expediente_without_changing_json(self):

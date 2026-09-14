@@ -27,6 +27,7 @@ class ActivityItem:
     confirmed: bool = False
     file_path: str = ""
     task_id: str = ""
+    completed: bool = False
 
 
 def activity_task_key(source: str, external_id: str, kind: str, title: str) -> str:
@@ -69,6 +70,7 @@ def build_case_activity(
     task_status_by_key: Mapping[str, str] | None = None,
     available_document_paths: Iterable[str] = (),
     tasks: Iterable[Tarea] = (),
+    show_completed: bool = False,
     *,
     now: datetime | None = None,
 ) -> tuple[ActivityItem, ...]:
@@ -79,22 +81,25 @@ def build_case_activity(
     items: list[ActivityItem] = []
 
     for task in tasks:
-        if task.status != "confirmada" or task.suggested_by != "manual":
+        if task.suggested_by != "manual" or task.status not in {"confirmada", "completada"}:
+            continue
+        is_completed = task.status == "completada"
+        if is_completed and not show_completed:
             continue
         items.append(
             ActivityItem(
                 kind="Tarea",
                 title=task.title,
-                detail=(
+                detail=("COMPLETADA · " if is_completed else "") + (
                     f"Fecha objetivo · {task.due_at.strftime('%d/%m/%Y %H:%M')}"
-                    if task.due_at
-                    else "Sin fecha objetivo"
+                    if task.due_at else "Sin fecha objetivo"
                 ),
-                target="task",
-                priority=_movement_priority(task.due_at, task.due_at is None, reference),
+                target="history" if is_completed else "task",
+                priority=4 if is_completed else _movement_priority(task.due_at, task.due_at is None, reference),
                 due_at=task.due_at,
                 confirmed=True,
                 task_id=task.id,
+                completed=is_completed,
             )
         )
 
@@ -126,7 +131,7 @@ def build_case_activity(
                 movement.source, movement.external_id, interpretation.kind, movement.title
             )
             task_status = task_statuses.get(task_key, "")
-            if task_status == "completada":
+            if task_status == "completada" and not show_completed:
                 continue
             detail_parts = [movement.source.upper()]
             if due:
@@ -135,19 +140,22 @@ def build_case_activity(
                 detail_parts.append("Requiere revisión profesional")
             if task_status == "confirmada":
                 detail_parts.append("Confirmada como tarea")
+            elif task_status == "completada":
+                detail_parts.append("Tarea completada")
             items.append(
                 ActivityItem(
                     kind=interpretation.kind,
                     title=movement.title,
                     detail=" · ".join(detail_parts),
                     target="portal",
-                    priority=_movement_priority(due, uncertain, reference),
+                    priority=4 if task_status == "completada" else _movement_priority(due, uncertain, reference),
                     due_at=due,
                     external_id=movement.external_id,
                     source=movement.source,
                     uncertain=uncertain,
                     task_key=task_key,
                     confirmed=task_status == "confirmada",
+                    completed=task_status == "completada",
                 )
             )
 

@@ -51,6 +51,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Una tarea confirmada puede marcarse como completada desde la misma bandeja. Sale de Actividad para despejar el trabajo cotidiano, pero conserva su registro y auditoría en la base del Estudio.
 - Actividad permite crear tareas manuales con fecha objetivo opcional, vinculadas al expediente y al profesional seleccionado, y completarlas en el mismo flujo.
 - Las tareas manuales activas pueden editar su descripción y fecha sin recrearse ni perder el historial de auditoría.
+- Actividad oculta por defecto las tareas cerradas y ofrece **Ver completadas** para consultar el historial sin permitir modificaciones accidentales.
 - Si el nombre de un archivo incorporado coincide de forma conservadora con documental pendiente, Actividad muestra **Posible recepción** y permite abrirlo con doble clic. Es sólo una sugerencia: el documento no se marca como recibido automáticamente.
 - La sugerencia puede confirmarse con **Marcar recibido** desde Actividad; actualiza el checklist sin borrar la solicitud ni mover el archivo.
 - Indicador compacto de estado SISFE preparado para distinguir espera, operación en curso, finalización correcta y error sin ocupar espacio documental.
