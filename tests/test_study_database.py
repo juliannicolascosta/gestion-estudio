@@ -361,9 +361,17 @@ class StudyDatabaseTests(unittest.TestCase):
                 task = database.create_manual_task(
                     expediente.id, "Llamar al cliente", "Dra. Ana Pérez"
                 )
-                completed = database.complete_task(task.id, "Dra. Ana Pérez")
+                updated = database.update_manual_task(
+                    task.id,
+                    "Llamar al cliente mañana",
+                    "Dra. Ana Pérez",
+                    due_at=datetime(2026, 9, 18, 10, 30),
+                )
+                completed = database.complete_task(updated.id, "Dra. Ana Pérez")
             self.assertEqual(task.status, "confirmada")
             self.assertEqual(task.suggested_by, "manual")
+            self.assertEqual(updated.title, "Llamar al cliente mañana")
+            self.assertEqual(updated.due_at, datetime(2026, 9, 18, 10, 30))
             self.assertEqual(completed.status, "completada")
 
     def test_document_links_to_its_external_movement_idempotently(self):

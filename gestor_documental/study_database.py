@@ -808,6 +808,35 @@ class StudyDatabase:
         )
         return self.confirm_task(suggested.id, professional)
 
+    def update_manual_task(
+        self,
+        task_id: str,
+        title: str,
+        professional: str,
+        *,
+        due_at: datetime | None = None,
+    ) -> Tarea:
+        title = title.strip()
+        professional = professional.strip()
+        if not title:
+            raise ValueError("La tarea necesita una descripción.")
+        if not professional:
+            raise ValueError("Indicá el profesional que modifica la tarea.")
+        row = self.connection.execute("SELECT * FROM tareas WHERE id = ?", (task_id,)).fetchone()
+        if not row or row["suggested_by"] != "manual":
+            raise KeyError("No encontramos la tarea manual.")
+        if row["status"] == "completada":
+            raise ValueError("Una tarea completada no puede modificarse.")
+        now = utc_now().isoformat()
+        self.connection.execute(
+            "UPDATE tareas SET title = ?, due_at = ? WHERE id = ?",
+            (title, due_at.isoformat() if due_at else None, task_id),
+        )
+        self._audit("tarea", task_id, "updated", now, professional)
+        self.connection.commit()
+        updated = self.connection.execute("SELECT * FROM tareas WHERE id = ?", (task_id,)).fetchone()
+        return self._tarea_from_row(updated)
+
     def complete_task(self, task_id: str, professional: str) -> Tarea:
         professional = professional.strip()
         if not professional:

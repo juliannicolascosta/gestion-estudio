@@ -2436,6 +2436,11 @@ class MainWindow(QMainWindow):
         decorate_button(new_activity_task, "plus")
         new_activity_task.clicked.connect(self.create_manual_activity_task)
         activity_actions.addWidget(new_activity_task)
+        self.edit_activity_task_button = QPushButton("Editar tarea")
+        decorate_button(self.edit_activity_task_button, "edit")
+        self.edit_activity_task_button.clicked.connect(self.edit_manual_activity_task)
+        self.edit_activity_task_button.setEnabled(False)
+        activity_actions.addWidget(self.edit_activity_task_button)
         self.confirm_activity_button = QPushButton("Confirmar como tarea")
         self.confirm_activity_button.setObjectName("green")
         decorate_button(self.confirm_activity_button, "check", "#FFFFFF")
@@ -3610,6 +3615,7 @@ class MainWindow(QMainWindow):
             and bool(data.get("task_key"))
         )
         self.confirm_activity_button.setEnabled(enabled)
+        self.edit_activity_task_button.setEnabled(is_task)
         self.confirm_activity_button.setText(
             "Marcar recibido"
             if is_receipt
@@ -3744,6 +3750,50 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Tarea completada", 4500)
         except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error) as error:
             QMessageBox.warning(self, "No pudimos completar la tarea", str(error))
+
+    def edit_manual_activity_task(self):
+        selected = self.activity_list.currentItem()
+        data = selected.data(ACTIVITY_ROLE) if selected else None
+        if not self.case or not isinstance(data, dict) or data.get("target") != "task":
+            return
+        title, accepted = QInputDialog.getText(
+            self, "Editar tarea", "Descripción:", text=str(data.get("title", ""))
+        )
+        title = " ".join(title.split()).strip()
+        if not accepted or not title:
+            return
+        current_due = ""
+        if data.get("due_at"):
+            current_due = datetime.fromisoformat(data["due_at"]).strftime("%d/%m/%Y %H:%M")
+        raw_date, accepted = QInputDialog.getText(
+            self,
+            "Editar tarea",
+            "Fecha objetivo opcional (dd/mm/aaaa o dd/mm/aaaa hh:mm):",
+            text=current_due,
+        )
+        if not accepted:
+            return
+        due_at = None
+        if raw_date.strip():
+            for pattern in ("%d/%m/%Y %H:%M", "%d/%m/%Y"):
+                try:
+                    due_at = datetime.strptime(raw_date.strip(), pattern)
+                    break
+                except ValueError:
+                    continue
+            if due_at is None:
+                QMessageBox.information(self, "Fecha inválida", "Usá el formato dd/mm/aaaa o dd/mm/aaaa hh:mm.")
+                return
+        professional = self.professional_combo.currentText().strip()
+        try:
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                database.update_manual_task(
+                    str(data.get("task_id", "")), title, professional, due_at=due_at
+                )
+            self.reload_activity()
+            self.statusBar().showMessage("Tarea actualizada", 4500)
+        except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error) as error:
+            QMessageBox.warning(self, "No pudimos editar la tarea", str(error))
 
     def open_selected_activity(self):
         selected = self.activity_list.currentItem()

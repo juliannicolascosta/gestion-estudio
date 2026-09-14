@@ -67,6 +67,7 @@
 - [x] Confirmación profesional de detecciones como tareas internas, sin agenda automática.
 - [x] Finalización auditable de tareas confirmadas y retiro de la bandeja activa.
 - [x] Alta y finalización de tareas manuales con fecha objetivo opcional.
+- [x] Edición auditable de descripción y fecha de tareas manuales activas.
 
 ## Próxima iteración
 

@@ -274,6 +274,16 @@ class AppSmokeTests(unittest.TestCase):
             item = window.activity_list.item(0)
             self.assertEqual(item.data(ACTIVITY_ROLE)["target"], "task")
             window.activity_list.setCurrentItem(item)
+            self.assertTrue(window.edit_activity_task_button.isEnabled())
+            with patch.object(
+                QInputDialog,
+                "getText",
+                side_effect=[("Llamar mañana", True), ("19/09/2026 11:00", True)],
+            ):
+                window.edit_manual_activity_task()
+            item = window.activity_list.item(0)
+            self.assertIn("Llamar mañana", item.text())
+            window.activity_list.setCurrentItem(item)
             self.assertEqual(window.confirm_activity_button.text(), "Marcar completada")
             with patch.object(
                 QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes
