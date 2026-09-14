@@ -226,12 +226,32 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(activity.data(ACTIVITY_ROLE)["target"], "files")
             self.assertIn("POSIBLE RECEPCIÓN", activity.text())
             window.activity_list.setCurrentItem(activity)
+            self.assertEqual(window.confirm_activity_button.text(), "Marcar recibido")
+            window.activity_list.setCurrentItem(activity)
             window.open_selected_activity()
             self.assertEqual(window.work_tabs.currentIndex(), window.files_tab_index)
             self.assertEqual(Path(window.case_files.currentItem().data(PATH_ROLE)), document)
             self.assertEqual(
                 read_case_metadata(case)["Documentación pendiente"],
                 "Recibo de sueldo",
+            )
+            window.work_tabs.setCurrentIndex(window.activity_tab_index)
+            window.activity_list.setCurrentItem(window.activity_list.item(0))
+            with patch.object(
+                QMessageBox,
+                "question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                window.confirm_selected_activity()
+            self.assertEqual(window.activity_list.count(), 0)
+            self.assertEqual(
+                read_case_metadata(case)["Documentación recibida"],
+                "Recibo de sueldo",
+            )
+            self.assertEqual(window.pending_documents_list.count(), 1)
+            self.assertEqual(
+                window.pending_documents_list.item(0).checkState(),
+                Qt.CheckState.Checked,
             )
             window.close()
 

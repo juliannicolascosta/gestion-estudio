@@ -81,6 +81,7 @@
 - [ ] Definir con el profesional una regla asistida para monto reclamado sin reemplazar la edición manual.
 - [ ] Sellado de tiempo y validación de largo plazo PAdES-LT/LTA, si los organismos receptores lo requieren.
 - [x] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.
+- [x] Confirmar la recepción sugerida desde Actividad manteniendo el historial del checklist.
 - [ ] Recordatorios confirmados por el profesional para documentación todavía pendiente.
 
 ## Robustez

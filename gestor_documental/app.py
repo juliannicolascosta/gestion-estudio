@@ -3593,20 +3593,28 @@ class MainWindow(QMainWindow):
             return
         selected = self.activity_list.currentItem()
         data = selected.data(ACTIVITY_ROLE) if selected else None
-        enabled = (
+        is_receipt = isinstance(data, dict) and data.get("target") == "files"
+        enabled = is_receipt or (
             isinstance(data, dict)
             and data.get("target") == "portal"
             and bool(data.get("task_key"))
         )
         self.confirm_activity_button.setEnabled(enabled)
         self.confirm_activity_button.setText(
-            "Marcar completada" if enabled and data.get("confirmed") else "Confirmar como tarea"
+            "Marcar recibido"
+            if is_receipt
+            else ("Marcar completada" if enabled and data.get("confirmed") else "Confirmar como tarea")
         )
 
     def confirm_selected_activity(self):
         selected = self.activity_list.currentItem()
         data = selected.data(ACTIVITY_ROLE) if selected else None
-        if not self.case or not isinstance(data, dict) or not data.get("task_key"):
+        if not self.case or not isinstance(data, dict):
+            return
+        if data.get("target") == "files":
+            self.confirm_activity_receipt(str(data.get("title", "")))
+            return
+        if not data.get("task_key"):
             return
         due_at = datetime.fromisoformat(data["due_at"]) if data.get("due_at") else None
         due_text = due_at.strftime("%d/%m/%Y %H:%M") if due_at else "sin fecha cierta"
@@ -3650,6 +3658,21 @@ class MainWindow(QMainWindow):
             )
         except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
             QMessageBox.warning(self, "No pudimos confirmar la tarea", str(error))
+
+    def confirm_activity_receipt(self, description: str):
+        values, received = self._pending_values_and_received()
+        matching = next((value for value in values if value.casefold() == description.casefold()), "")
+        if not matching:
+            return
+        if QMessageBox.question(
+            self,
+            "Confirmar recepción",
+            f"¿Querés marcar como recibido?\n\n{matching}",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        received.add(matching)
+        self.save_pending_documents(values, received)
+        self.statusBar().showMessage(f"Documentación recibida: {matching}", 4500)
 
     def open_selected_activity(self):
         selected = self.activity_list.currentItem()
