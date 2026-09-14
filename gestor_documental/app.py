@@ -3590,6 +3590,7 @@ class MainWindow(QMainWindow):
                     "file_path": activity.file_path,
                     "task_id": activity.task_id,
                     "completed": activity.completed,
+                    "urgency": activity.urgency,
                 },
             )
             item.setToolTip(
@@ -3606,10 +3607,16 @@ class MainWindow(QMainWindow):
             self.activity_list.addItem(item)
         active_count = sum(not activity.completed for activity in items)
         completed_count = len(items) - active_count
+        urgent_count = sum(
+            activity.urgency in {"Vencida", "Hoy", "Próxima"} and not activity.completed
+            for activity in items
+        )
         self.activity_count.setText(
             "Sin acciones"
             if not items
-            else f"{active_count} activas" + (f" · {completed_count} completadas" if completed_count else "")
+            else f"{active_count} activas"
+            + (f" · {urgent_count} urgentes" if urgent_count else "")
+            + (f" · {completed_count} completadas" if completed_count else "")
         )
         self.work_tabs.setTabText(self.activity_tab_index, f"Actividad · {active_count}")
         self.update_activity_actions()

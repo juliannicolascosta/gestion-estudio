@@ -69,6 +69,7 @@
 - [x] Alta y finalización de tareas manuales con fecha objetivo opcional.
 - [x] Edición auditable de descripción y fecha de tareas manuales activas.
 - [x] Consulta opcional de tareas completadas fuera de la bandeja activa.
+- [x] Recordatorios locales visibles por vencimiento, día, próxima semana y fecha futura.
 
 ## Próxima iteración
 

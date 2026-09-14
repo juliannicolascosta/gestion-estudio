@@ -28,6 +28,7 @@ class ActivityItem:
     file_path: str = ""
     task_id: str = ""
     completed: bool = False
+    urgency: str = ""
 
 
 def activity_task_key(source: str, external_id: str, kind: str, title: str) -> str:
@@ -36,13 +37,25 @@ def activity_task_key(source: str, external_id: str, kind: str, title: str) -> s
 
 
 def _movement_priority(due_at: datetime | None, uncertain: bool, now: datetime) -> int:
-    if due_at is not None and due_at < now:
+    if due_at is not None and due_at.date() < now.date():
         return 0
-    if due_at is not None and due_at <= now + timedelta(days=7):
+    if due_at is not None and due_at.date() <= (now + timedelta(days=7)).date():
         return 1
     if uncertain:
         return 2
     return 3
+
+
+def due_urgency(due_at: datetime | None, now: datetime) -> str:
+    if due_at is None:
+        return ""
+    if due_at.date() < now.date():
+        return "Vencida"
+    if due_at.date() == now.date():
+        return "Hoy"
+    if due_at.date() <= (now + timedelta(days=7)).date():
+        return "Próxima"
+    return "Programada"
 
 
 def _search_tokens(value: str) -> tuple[str, ...]:
@@ -86,11 +99,12 @@ def build_case_activity(
         is_completed = task.status == "completada"
         if is_completed and not show_completed:
             continue
+        urgency = due_urgency(task.due_at, reference)
         items.append(
             ActivityItem(
                 kind="Tarea",
                 title=task.title,
-                detail=("COMPLETADA · " if is_completed else "") + (
+                detail=("COMPLETADA · " if is_completed else (f"{urgency.upper()} · " if urgency else "")) + (
                     f"Fecha objetivo · {task.due_at.strftime('%d/%m/%Y %H:%M')}"
                     if task.due_at else "Sin fecha objetivo"
                 ),
@@ -100,6 +114,7 @@ def build_case_activity(
                 confirmed=True,
                 task_id=task.id,
                 completed=is_completed,
+                urgency=urgency,
             )
         )
 
@@ -127,6 +142,7 @@ def build_case_activity(
         for interpretation in interpret_movement(movement.title):
             uncertain = bool(interpretation.warning)
             due = interpretation.extracted_at
+            urgency = due_urgency(due, reference)
             task_key = activity_task_key(
                 movement.source, movement.external_id, interpretation.kind, movement.title
             )
@@ -135,6 +151,7 @@ def build_case_activity(
                 continue
             detail_parts = [movement.source.upper()]
             if due:
+                detail_parts.append(urgency.upper())
                 detail_parts.append(due.strftime("%d/%m/%Y" + (" · %H:%M" if due.hour or due.minute else "")))
             if uncertain:
                 detail_parts.append("Requiere revisión profesional")
@@ -156,6 +173,7 @@ def build_case_activity(
                     task_key=task_key,
                     confirmed=task_status == "confirmada",
                     completed=task_status == "completada",
+                    urgency=urgency,
                 )
             )
 

@@ -44,7 +44,18 @@ class ActivityCenterTests(unittest.TestCase):
         )
         item = build_case_activity([movement], [], [], now=datetime(2026, 9, 14))[0]
         self.assertEqual(item.priority, 0)
+        self.assertEqual(item.urgency, "Vencida")
         self.assertEqual(item.target, "portal")
+
+    def test_due_dates_distinguish_today_next_week_and_future(self):
+        reference = datetime(2026, 9, 14, 8)
+        tasks = [
+            Tarea("today", "e", "Hoy", datetime(2026, 9, 14, 18), "confirmada", "manual"),
+            Tarea("soon", "e", "Próxima", datetime(2026, 9, 18), "confirmada", "manual"),
+            Tarea("future", "e", "Futura", datetime(2026, 10, 1), "confirmada", "manual"),
+        ]
+        items = build_case_activity([], [], [], tasks=tasks, now=reference)
+        self.assertEqual([item.urgency for item in items], ["Hoy", "Próxima", "Programada"])
 
     def test_does_not_show_received_or_unrelated_information(self):
         unrelated = Movimiento(id="m1", expediente_id="e1", title="Escrito presentado", source="sisfe")

@@ -52,6 +52,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Actividad permite crear tareas manuales con fecha objetivo opcional, vinculadas al expediente y al profesional seleccionado, y completarlas en el mismo flujo.
 - Las tareas manuales activas pueden editar su descripción y fecha sin recrearse ni perder el historial de auditoría.
 - Actividad oculta por defecto las tareas cerradas y ofrece **Ver completadas** para consultar el historial sin permitir modificaciones accidentales.
+- Las fechas de Actividad se distinguen como **Vencida**, **Hoy**, **Próxima** o **Programada**, y el encabezado resume las acciones urgentes sin mostrar avisos emergentes.
 - Si el nombre de un archivo incorporado coincide de forma conservadora con documental pendiente, Actividad muestra **Posible recepción** y permite abrirlo con doble clic. Es sólo una sugerencia: el documento no se marca como recibido automáticamente.
 - La sugerencia puede confirmarse con **Marcar recibido** desde Actividad; actualiza el checklist sin borrar la solicitud ni mover el archivo.
 - Indicador compacto de estado SISFE preparado para distinguir espera, operación en curso, finalización correcta y error sin ocupar espacio documental.
