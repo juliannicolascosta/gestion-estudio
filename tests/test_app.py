@@ -22,7 +22,7 @@ from gestor_documental.app import (
     ModelPickerDialog,
     PATH_ROLE,
 )
-from gestor_documental.ui.roles import MOVEMENT_ROLE
+from gestor_documental.ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE
 from gestor_documental.services import (
     CompilationCancelled,
     SettingsStore,
@@ -70,8 +70,12 @@ class AppSmokeTests(unittest.TestCase):
             settings_actions = [action.text() for action in window.professional_settings_button.menu().actions()]
             self.assertIn("Crear respaldo del Estudio…", settings_actions)
             self.assertIn("Restaurar respaldo del Estudio…", settings_actions)
-            self.assertEqual(window.work_tabs.count(), 3)
+            self.assertEqual(window.work_tabs.count(), 4)
             self.assertEqual(window.work_tabs.tabText(window.files_tab_index), "Archivos")
+            self.assertEqual(
+                window.work_tabs.tabText(window.activity_tab_index),
+                "Actividad · 0",
+            )
             self.assertEqual(
                 window.work_tabs.tabText(window.portal_tab_index),
                 "Portal · 0",
@@ -120,6 +124,58 @@ class AppSmokeTests(unittest.TestCase):
             self.assertTrue(study_library_path(study).is_dir())
             window.reload_cases(case.path)
             self.assertEqual(window.case_title.text(), case.name)
+            window.close()
+
+    def test_activity_tab_unifies_sources_and_navigates_to_origin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            case = create_case(study, "Pérez c/ Aseguradora")
+            save_case_metadata(
+                case,
+                {
+                    "Documentación pendiente": "DNI\nRecibo de sueldo",
+                    "Documentación recibida": "DNI",
+                },
+            )
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                database.add_movement(
+                    expediente.id,
+                    "Audiencia fijada para el 18/09/2026 a las 09:30",
+                    source="sisfe",
+                    external_id="audiencia-1",
+                )
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.set_case(case)
+
+            self.assertEqual(window.activity_list.count(), 2)
+            self.assertEqual(window.work_tabs.tabText(window.activity_tab_index), "Actividad · 2")
+            pending_item = next(
+                window.activity_list.item(index)
+                for index in range(window.activity_list.count())
+                if window.activity_list.item(index).data(ACTIVITY_ROLE)["target"] == "pending"
+            )
+            window.activity_list.setCurrentItem(pending_item)
+            window.open_selected_activity()
+            self.assertEqual(window.work_tabs.currentIndex(), window.pending_tab_index)
+            self.assertEqual(window.pending_documents_list.currentItem().text(), "Recibo de sueldo")
+
+            portal_item = next(
+                window.activity_list.item(index)
+                for index in range(window.activity_list.count())
+                if window.activity_list.item(index).data(ACTIVITY_ROLE)["target"] == "portal"
+            )
+            window.activity_list.setCurrentItem(portal_item)
+            window.open_selected_activity()
+            self.assertEqual(window.work_tabs.currentIndex(), window.portal_tab_index)
+            self.assertEqual(
+                window.novedades_list.currentItem().data(MOVEMENT_ROLE)["external_id"],
+                "audiencia-1",
+            )
             window.close()
 
     def test_selecting_case_registers_expediente_without_changing_json(self):

@@ -29,7 +29,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Inserción automática del profesional seleccionado y de la carátula `ACTOR C/ DEMANDADO S/ CAUSA` con CUIJ.
 - Modelo precargado **Cedula LABVC**, basado en el formulario aportado por el usuario: completa fecha extensa, Actor, Demandado, Causa y Número de expediente.
 - Idioma predeterminado del modelo base: Español (Argentina).
-- Área central con pestañas **Archivos**, **Portal jurídico** y **Documentación pendiente**; la **Compilación** permanece a la derecha junto con las acciones finales, pero ahora puede redimensionarse u ocultarse desde el encabezado.
+- Área central con pestañas **Archivos**, **Actividad**, **Portal jurídico** y **Documentación pendiente**; la **Compilación** permanece a la derecha junto con las acciones finales, pero ahora puede redimensionarse u ocultarse desde el encabezado.
 - Los anchos del Directorio, el área de trabajo y la Compilación, junto con las divisiones verticales internas, se recuerdan en esta computadora. El engranaje permite **Restablecer distribución**.
 - Borrador de compilación guardado por expediente con rutas portátiles: conserva orden, escrito, perfil de tamaño y último resultado al cambiar de caso, reiniciar o abrir el Estudio desde otra computadora.
 - Lista ordenable de documental y escrito; el escrito nuevo se coloca al final y puede moverse con arrastre o con **Subir/Bajar**.
@@ -46,6 +46,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Compresión automática. Si el resultado todavía excede el límite, pregunta antes de dividirlo.
 - Compilación en segundo plano con una ventana de progreso, cancelación segura y sin mostrar PowerShell.
 - Pestaña **Portal jurídico** de altura completa, con el estado actual del expediente y desde cuándo rige, además de todas las novedades SISFE almacenadas, recorriendo todas las páginas disponibles y evitando movimientos repetidos.
+- Pestaña **Actividad** que reúne, sin duplicarlos, audiencias, traslados, vencimientos explícitos y documentación todavía pendiente; prioriza fechas próximas o vencidas y permite saltar con doble clic al origen en Portal o Pendientes.
 - Indicador compacto de estado SISFE preparado para distinguir espera, operación en curso, finalización correcta y error sin ocupar espacio documental.
 - Desde el detalle de una novedad, **Descargar documentos** abre el expediente, ubica la página correcta y acciona los clips oficiales de SISFE. Los PDF se guardan en `Documentos SISFE`, se vinculan con el movimiento de origen, se registran por hash y las copias idénticas se descartan de forma recuperable. Si SISFE no inicia la descarga, la vista oficial queda abierta para reintentar manualmente.
 - El estado vigente se toma de **Trámite interno / Ubicación actual** de SISFE, incluyendo la fecha “desde” cuando está disponible. Las novedades se interpretan por separado mediante reglas auditables para detectar audiencias, traslados y vencimientos explícitos; cada detección conserva su texto de origen y advierte cuando falta una fecha cierta.

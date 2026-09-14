@@ -63,6 +63,7 @@
 - [x] Borrador de compilación portátil y persistente por expediente.
 - [x] Bandeja del Portal sin el recorte anterior de veinte movimientos.
 - [x] Servicio único de aplicación para importar la información obtenida en el navegador SISFE.
+- [x] Centro de actividad por expediente con navegación al origen y sin duplicar novedades ni pendientes.
 
 ## Próxima iteración
 

@@ -90,6 +90,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Apariencia visible opcional integrada al campo PAdES, con página y posición configurables y vista previa antes de firmar; el estándar propuesto es última página, abajo a la derecha.
 - Inicio de sesión del token una sola vez por ejecución: el PIN no se persiste y la sesión puede cerrarse manualmente desde el menú Firmar.
 - Portal jurídico separado del área cotidiana de archivos, con contador propio, lista de altura completa y acceso a los movimientos integrados.
+- Centro de actividad derivado: reúne detecciones procesales y documental pendiente, ordena lo urgente y conserva navegación al dato de origen sin crear tareas automáticas dudosas.
 - Indicador visual reutilizable para estados del Portal: espera, proceso, resultado correcto y error; será alimentado por el gestor de descargas en segundo plano.
 - La bandeja del Portal muestra todos los movimientos guardados; ya no recorta silenciosamente la vista a los últimos veinte.
 - El flujo operativo de SISFE entra por un único servicio de aplicación y usa el navegador autenticado; el antiguo transporte HTTP queda fuera de la selección normal.

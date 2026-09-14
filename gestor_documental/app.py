@@ -47,6 +47,7 @@ from PyQt6.QtWidgets import (
 
 from . import __version__
 from .case_documents import rename_document_entry
+from .activity_center import build_case_activity
 from .ui.document_recovery import DocumentRecoveryWorker
 from .models import (
     ADVANCED_FIELD_VARIABLES,
@@ -153,7 +154,7 @@ from .study_backup import BackupResult, RestoreResult, create_study_backup, rest
 from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationList
 from .ui.operation_status import OperationState, OperationStatusIndicator
-from .ui.roles import MOVEMENT_ROLE, PATH_ROLE, ROOT_ROLE, TYPE_ROLE
+from .ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE, PATH_ROLE, ROOT_ROLE, TYPE_ROLE
 from .ui.sisfe import SisfeCaseBrowserDialog, SisfeLoginDialog
 
 
@@ -2407,6 +2408,29 @@ class MainWindow(QMainWindow):
         prep_actions.addStretch()
         preparation_layout.addLayout(prep_actions)
 
+        activity_card, activity_layout = make_card()
+        activity_header = QHBoxLayout()
+        activity_header.addLayout(
+            section_heading(
+                "Actividad del expediente",
+                "Lo que requiere atención, reunido desde Portal y Pendientes",
+            )
+        )
+        activity_header.addStretch()
+        self.activity_count = QLabel("Sin acciones")
+        self.activity_count.setObjectName("muted")
+        activity_header.addWidget(self.activity_count)
+        activity_layout.addLayout(activity_header)
+        self.activity_list = QListWidget()
+        self.activity_list.setObjectName("activityList")
+        self.activity_list.itemDoubleClicked.connect(lambda _: self.open_selected_activity())
+        activity_layout.addWidget(self.activity_list, 1)
+        activity_hint = QLabel(
+            "Doble clic para ir al movimiento o documento pendiente que originó la acción."
+        )
+        activity_hint.setObjectName("muted")
+        activity_layout.addWidget(activity_hint)
+
         pending_card, pending_layout = make_card()
         pending_header = QHBoxLayout()
         pending_header.addLayout(
@@ -2462,6 +2486,11 @@ class MainWindow(QMainWindow):
         self.work_tabs = QTabWidget()
         self.work_tabs.setDocumentMode(True)
         self.files_tab_index = self.work_tabs.addTab(files_card, ui_icon("folder-open", "#2B7564"), "Archivos")
+        self.activity_tab_index = self.work_tabs.addTab(
+            activity_card,
+            ui_icon("bell", "#B36A24"),
+            "Actividad · 0",
+        )
         self.portal_tab_index = self.work_tabs.addTab(
             novedades_card,
             ui_icon("bell", "#2B7564"),
@@ -3461,6 +3490,98 @@ class MainWindow(QMainWindow):
 
         self._sisfe_login_dialog.request_snapshot(cuij, completed)
 
+    def reload_activity(self):
+        if not hasattr(self, "activity_list"):
+            return
+        self.activity_list.clear()
+        if not self.case:
+            self.activity_count.setText("Sin acciones")
+            self.work_tabs.setTabText(self.activity_tab_index, "Actividad · 0")
+            return
+        try:
+            metadata = read_case_metadata(self.case)
+            pending = [
+                " ".join(line.split())
+                for line in str(metadata.get("Documentación pendiente", "")).splitlines()
+                if line.strip()
+            ]
+            received = [
+                " ".join(line.split())
+                for line in str(metadata.get("Documentación recibida", "")).splitlines()
+                if line.strip()
+            ]
+            items = build_case_activity(recent_case_novedades(self.case), pending, received)
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            self.activity_count.setText("No disponible")
+            self.activity_list.addItem(f"No pudimos reunir la actividad: {error}")
+            self.work_tabs.setTabText(self.activity_tab_index, "Actividad")
+            return
+        colors = {0: "#B42318", 1: "#B36A24", 2: "#8A5B12", 3: "#2B7564"}
+        icons = {
+            "Audiencia": "bell",
+            "Traslado": "arrow-right",
+            "Vencimiento": "check",
+            "Documentación": "file",
+        }
+        for activity in items:
+            item = QListWidgetItem(
+                ui_icon(icons.get(activity.kind, "bell"), colors.get(activity.priority, "#2B7564")),
+                f"{activity.kind.upper()} · {activity.title}\n{activity.detail}",
+            )
+            item.setData(
+                ACTIVITY_ROLE,
+                {
+                    "target": activity.target,
+                    "title": activity.title,
+                    "external_id": activity.external_id,
+                    "source": activity.source,
+                },
+            )
+            item.setToolTip("Doble clic para abrir el origen")
+            if activity.priority <= 1:
+                font = QFont(item.font())
+                font.setBold(True)
+                item.setFont(font)
+            self.activity_list.addItem(item)
+        count = len(items)
+        self.activity_count.setText("Sin acciones" if not count else f"{count} por revisar")
+        self.work_tabs.setTabText(self.activity_tab_index, f"Actividad · {count}")
+
+    def open_selected_activity(self):
+        selected = self.activity_list.currentItem()
+        data = selected.data(ACTIVITY_ROLE) if selected else None
+        if not isinstance(data, dict):
+            return
+        if data.get("target") == "pending":
+            self.work_tabs.setCurrentIndex(self.pending_tab_index)
+            expected = str(data.get("title", "")).casefold()
+            for index in range(self.pending_documents_list.count()):
+                item = self.pending_documents_list.item(index)
+                if item.text().casefold() == expected:
+                    self.pending_documents_list.setCurrentItem(item)
+                    self.pending_documents_list.scrollToItem(item)
+                    break
+            return
+        self.work_tabs.setCurrentIndex(self.portal_tab_index)
+        external_id = str(data.get("external_id", ""))
+        source = str(data.get("source", ""))
+        title = str(data.get("title", ""))
+        for index in range(self.novedades_list.count()):
+            item = self.novedades_list.item(index)
+            movement = item.data(MOVEMENT_ROLE)
+            if not isinstance(movement, dict):
+                continue
+            same_identity = external_id and movement.get("external_id") == external_id
+            same_fallback = (
+                not external_id
+                and movement.get("source") == source
+                and movement.get("title") == title
+            )
+            if same_identity or same_fallback:
+                self.novedades_list.setCurrentItem(item)
+                self.novedades_list.scrollToItem(item)
+                break
+
     def reload_novedades(self):
         self.novedades_list.clear()
         self.update_novedad_actions()
@@ -3469,6 +3590,7 @@ class MainWindow(QMainWindow):
             self.portal_case_status.setText("Trámite interno / ubicación actual: seleccioná un caso")
             if hasattr(self, "work_tabs"):
                 self.work_tabs.setTabText(self.portal_tab_index, "Portal · 0")
+            self.reload_activity()
             return
         try:
             movements = recent_case_novedades(self.case)
@@ -3489,6 +3611,7 @@ class MainWindow(QMainWindow):
             self.novedades_list.addItem(f"No pudimos cargar las novedades: {error}")
             if hasattr(self, "work_tabs"):
                 self.work_tabs.setTabText(self.portal_tab_index, "Portal jurídico")
+            self.reload_activity()
             return
         for movement in movements:
             stamp = movement.occurred_at.strftime("%d/%m/%Y %H:%M") if movement.occurred_at else "Sin fecha"
@@ -3527,6 +3650,7 @@ class MainWindow(QMainWindow):
         )
         if hasattr(self, "work_tabs"):
             self.work_tabs.setTabText(self.portal_tab_index, f"Portal · {count}")
+        self.reload_activity()
 
     def reload_pending_documents(self):
         if not hasattr(self, "pending_documents_list"):
@@ -3566,6 +3690,7 @@ class MainWindow(QMainWindow):
                 f"Pendientes · {pending_count}",
             )
         self.update_pending_document_actions()
+        self.reload_activity()
 
     def update_pending_document_actions(self):
         if hasattr(self, "pending_received_button"):
