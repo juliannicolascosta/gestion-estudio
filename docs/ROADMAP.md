@@ -70,6 +70,7 @@
 - [x] Edición auditable de descripción y fecha de tareas manuales activas.
 - [x] Consulta opcional de tareas completadas fuera de la bandeja activa.
 - [x] Recordatorios locales visibles por vencimiento, día, próxima semana y fecha futura.
+- [x] Bandeja transversal de actividad para todos los expedientes y Ubicaciones del Estudio.
 
 ## Próxima iteración
 

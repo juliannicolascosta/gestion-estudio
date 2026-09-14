@@ -208,6 +208,37 @@ class AppSmokeTests(unittest.TestCase):
                 self.assertEqual(tasks[0].status, "completada")
             window.close()
 
+    def test_study_activity_collects_cases_and_opens_selected_expediente(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            first = create_case(study, "Alfa")
+            second = create_case(study, "Beta")
+            save_case_metadata(first, {"Documentación pendiente": "DNI"})
+            save_case_metadata(second, {"Documentación pendiente": "Partida"})
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            entries = window.study_activity_entries()
+            self.assertEqual({case.name for case, _ in entries}, {"Alfa", "Beta"})
+            selected_case, selected_activity = next(entry for entry in entries if entry[0].name == "Beta")
+            selected_data = {
+                "case_path": str(selected_case.path),
+                "target": selected_activity.target,
+                "title": selected_activity.title,
+                "external_id": selected_activity.external_id,
+                "task_id": selected_activity.task_id,
+                "file_path": selected_activity.file_path,
+            }
+            with patch("gestor_documental.app.StudyActivityDialog") as dialog_class:
+                dialog_class.return_value.exec.return_value = 1
+                dialog_class.return_value.selected_data.return_value = selected_data
+                window.open_study_activity()
+            self.assertEqual(window.case.path, second.path)
+            self.assertEqual(window.work_tabs.currentIndex(), window.activity_tab_index)
+            self.assertEqual(window.activity_list.currentItem().text().splitlines()[0], "DOCUMENTACIÓN · Partida")
+            window.close()
+
     def test_activity_suggests_matching_pending_file_and_opens_it(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -1632,6 +1632,54 @@ class StudyBackupWorker(QObject):
             self.failed.emit(str(error))
 
 
+class StudyActivityDialog(QDialog):
+    def __init__(self, entries: list[tuple[Case, object]], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Actividad del Estudio")
+        self.resize(820, 620)
+        layout = QVBoxLayout(self)
+        title = QLabel("Actividad de todos los expedientes")
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title)
+        note = QLabel("Ordenada por urgencia. Doble clic para abrir el expediente.")
+        note.setObjectName("muted")
+        layout.addWidget(note)
+        self.list = QListWidget()
+        self.list.itemDoubleClicked.connect(lambda _: self.accept())
+        layout.addWidget(self.list, 1)
+        for case, activity in entries:
+            item = QListWidgetItem(
+                ui_icon("bell", "#B42318" if activity.priority <= 1 else "#2B7564"),
+                f"{case.name}\n{activity.kind.upper()} · {activity.title}\n{activity.detail}",
+            )
+            item.setData(
+                ACTIVITY_ROLE,
+                {
+                    "case_path": str(case.path),
+                    "target": activity.target,
+                    "title": activity.title,
+                    "external_id": activity.external_id,
+                    "source": activity.source,
+                    "task_id": activity.task_id,
+                    "file_path": activity.file_path,
+                },
+            )
+            self.list.addItem(item)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Open | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Open).setText("Abrir expediente")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Open).setEnabled(bool(entries))
+        layout.addWidget(buttons)
+
+    def selected_data(self) -> dict | None:
+        item = self.list.currentItem()
+        data = item.data(ACTIVITY_ROLE) if item else None
+        return data if isinstance(data, dict) else None
+
+
 class SignerDropDialog(QDialog):
     def __init__(self, pdf: Path, parent=None):
         super().__init__(parent)
@@ -2052,6 +2100,10 @@ class MainWindow(QMainWindow):
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self.reload_cases)
         side_layout.addWidget(self.search)
+        study_activity = QPushButton("Actividad del Estudio")
+        decorate_button(study_activity, "bell")
+        study_activity.clicked.connect(self.open_study_activity)
+        side_layout.addWidget(study_activity)
         new_case = QPushButton("Nuevo caso")
         new_case.setObjectName("primary")
         decorate_button(new_case, "folder-plus", "#FFFFFF")
@@ -3514,6 +3566,93 @@ class MainWindow(QMainWindow):
 
         self._sisfe_login_dialog.request_snapshot(cuij, completed)
 
+    def case_activity_items(self, case: Case, *, show_completed: bool = False):
+        metadata = read_case_metadata(case)
+        pending = [
+            " ".join(line.split())
+            for line in str(metadata.get("Documentación pendiente", "")).splitlines()
+            if line.strip()
+        ]
+        received = [
+            " ".join(line.split())
+            for line in str(metadata.get("Documentación recibida", "")).splitlines()
+            if line.strip()
+        ]
+        pending_due_dates = self.pending_document_due_dates(metadata)
+        task_statuses: dict[str, str] = {}
+        case_tasks = []
+        with StudyDatabase(study_database_path(case.path.parent)) as database:
+            expediente = database.find_expediente_by_folder(case.path)
+            if expediente:
+                case_tasks = database.list_tasks(expediente.id)
+                task_statuses = {
+                    task.suggested_by: task.status for task in case_tasks if task.suggested_by
+                }
+        available_paths = [
+            path.relative_to(case.path).as_posix()
+            for path in case.path.rglob("*")
+            if path.is_file()
+            and not any(part.startswith(".") for part in path.relative_to(case.path).parts)
+        ]
+        return build_case_activity(
+            recent_case_novedades(case),
+            pending,
+            received,
+            task_statuses,
+            available_document_paths=available_paths,
+            tasks=case_tasks,
+            show_completed=show_completed,
+            pending_due_dates=pending_due_dates,
+        )
+
+    def study_activity_entries(self) -> list[tuple[Case, object]]:
+        entries = []
+        for root in self.store.settings.study_roots:
+            if not root.is_dir():
+                continue
+            for case in list_cases(root):
+                try:
+                    entries.extend((case, item) for item in self.case_activity_items(case))
+                except (OSError, RuntimeError, sqlite3.Error):
+                    continue
+        entries.sort(
+            key=lambda entry: (
+                entry[1].priority,
+                entry[1].due_at.date() if entry[1].due_at else date.max,
+                entry[0].name.casefold(),
+            )
+        )
+        return entries
+
+    def open_study_activity(self):
+        entries = self.study_activity_entries()
+        if not entries:
+            QMessageBox.information(self, "Actividad del Estudio", "No hay acciones activas en los expedientes.")
+            return
+        dialog = StudyActivityDialog(entries, self)
+        if not dialog.exec():
+            return
+        selected = dialog.selected_data()
+        if not selected:
+            return
+        self.reload_cases(Path(selected["case_path"]))
+        self.work_tabs.setCurrentIndex(self.activity_tab_index)
+        for index in range(self.activity_list.count()):
+            item = self.activity_list.item(index)
+            data = item.data(ACTIVITY_ROLE)
+            if not isinstance(data, dict):
+                continue
+            if (
+                data.get("target") == selected.get("target")
+                and data.get("title") == selected.get("title")
+                and data.get("external_id") == selected.get("external_id")
+                and data.get("task_id") == selected.get("task_id")
+                and data.get("file_path") == selected.get("file_path")
+            ):
+                self.activity_list.setCurrentItem(item)
+                self.activity_list.scrollToItem(item)
+                break
+
     def reload_activity(self):
         if not hasattr(self, "activity_list"):
             return
@@ -3523,44 +3662,8 @@ class MainWindow(QMainWindow):
             self.work_tabs.setTabText(self.activity_tab_index, "Actividad · 0")
             return
         try:
-            metadata = read_case_metadata(self.case)
-            pending = [
-                " ".join(line.split())
-                for line in str(metadata.get("Documentación pendiente", "")).splitlines()
-                if line.strip()
-            ]
-            received = [
-                " ".join(line.split())
-                for line in str(metadata.get("Documentación recibida", "")).splitlines()
-                if line.strip()
-            ]
-            pending_due_dates = self.pending_document_due_dates(metadata)
-            task_statuses: dict[str, str] = {}
-            case_tasks = []
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
-                expediente = database.find_expediente_by_folder(self.case.path)
-                if expediente:
-                    case_tasks = database.list_tasks(expediente.id)
-                    task_statuses = {
-                        task.suggested_by: task.status
-                        for task in case_tasks
-                        if task.suggested_by
-                    }
-            available_paths = [
-                path.relative_to(self.case.path).as_posix()
-                for path in self.case.path.rglob("*")
-                if path.is_file()
-                and not any(part.startswith(".") for part in path.relative_to(self.case.path).parts)
-            ]
-            items = build_case_activity(
-                recent_case_novedades(self.case),
-                pending,
-                received,
-                task_statuses,
-                available_document_paths=available_paths,
-                tasks=case_tasks,
-                show_completed=self.show_completed_tasks.isChecked(),
-                pending_due_dates=pending_due_dates,
+            items = self.case_activity_items(
+                self.case, show_completed=self.show_completed_tasks.isChecked()
             )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.activity_count.setText("No disponible")

@@ -53,6 +53,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Las tareas manuales activas pueden editar su descripción y fecha sin recrearse ni perder el historial de auditoría.
 - Actividad oculta por defecto las tareas cerradas y ofrece **Ver completadas** para consultar el historial sin permitir modificaciones accidentales.
 - Las fechas de Actividad se distinguen como **Vencida**, **Hoy**, **Próxima** o **Programada**, y el encabezado resume las acciones urgentes sin mostrar avisos emergentes.
+- **Actividad del Estudio** reúne bajo demanda las acciones activas de todos los expedientes y ubicaciones, las ordena por urgencia y abre directamente el caso elegido.
 - Si el nombre de un archivo incorporado coincide de forma conservadora con documental pendiente, Actividad muestra **Posible recepción** y permite abrirlo con doble clic. Es sólo una sugerencia: el documento no se marca como recibido automáticamente.
 - La sugerencia puede confirmarse con **Marcar recibido** desde Actividad; actualiza el checklist sin borrar la solicitud ni mover el archivo.
 - Cada documento pendiente admite una fecha objetivo opcional; Actividad la integra en las categorías Vencida, Hoy, Próxima y Programada sin romper los casos anteriores.
