@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .domain import Movimiento
 from .movement_interpretation import interpret_movement
@@ -44,14 +44,14 @@ def build_case_activity(
     movements: Iterable[Movimiento],
     pending_documents: Iterable[str],
     received_documents: Iterable[str],
-    confirmed_task_keys: Iterable[str] = (),
+    task_status_by_key: Mapping[str, str] | None = None,
     *,
     now: datetime | None = None,
 ) -> tuple[ActivityItem, ...]:
     """Build a deterministic inbox from movements and the existing checklist."""
     reference = now or datetime.now()
     received = {" ".join(value.split()).casefold() for value in received_documents if value.strip()}
-    confirmed = {value for value in confirmed_task_keys if value}
+    task_statuses = dict(task_status_by_key or {})
     items: list[ActivityItem] = []
 
     for value in pending_documents:
@@ -75,12 +75,15 @@ def build_case_activity(
             task_key = activity_task_key(
                 movement.source, movement.external_id, interpretation.kind, movement.title
             )
+            task_status = task_statuses.get(task_key, "")
+            if task_status == "completada":
+                continue
             detail_parts = [movement.source.upper()]
             if due:
                 detail_parts.append(due.strftime("%d/%m/%Y" + (" · %H:%M" if due.hour or due.minute else "")))
             if uncertain:
                 detail_parts.append("Requiere revisión profesional")
-            if task_key in confirmed:
+            if task_status == "confirmada":
                 detail_parts.append("Confirmada como tarea")
             items.append(
                 ActivityItem(
@@ -94,7 +97,7 @@ def build_case_activity(
                     source=movement.source,
                     uncertain=uncertain,
                     task_key=task_key,
-                    confirmed=task_key in confirmed,
+                    confirmed=task_status == "confirmada",
                 )
             )
 

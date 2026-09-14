@@ -51,6 +51,17 @@ class ActivityCenterTests(unittest.TestCase):
         items = build_case_activity([unrelated], ["DNI"], [" dni "])
         self.assertEqual(items, ())
 
+    def test_completed_task_removes_its_detection_from_the_inbox(self):
+        movement = Movimiento(
+            id="m1",
+            expediente_id="e1",
+            title="Audiencia 18/09/2026",
+            source="sisfe",
+            external_id="audiencia-1",
+        )
+        key = "movimiento:sisfe:audiencia-1:audiencia"
+        self.assertEqual(build_case_activity([movement], [], [], {key: "completada"}), ())
+
 
 if __name__ == "__main__":
     unittest.main()

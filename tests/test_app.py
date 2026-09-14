@@ -192,10 +192,20 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertTrue(confirmed_item.data(ACTIVITY_ROLE)["confirmed"])
             window.activity_list.setCurrentItem(confirmed_item)
-            self.assertFalse(window.confirm_activity_button.isEnabled())
+            self.assertTrue(window.confirm_activity_button.isEnabled())
+            self.assertEqual(window.confirm_activity_button.text(), "Marcar completada")
+            with patch.object(
+                QMessageBox,
+                "question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                window.confirm_selected_activity()
+            self.assertEqual(window.activity_list.count(), 1)
             with StudyDatabase(study_database_path(study)) as database:
                 expediente = database.find_expediente_by_folder(case.path)
-                self.assertEqual(len(database.list_tasks(expediente.id)), 1)
+                tasks = database.list_tasks(expediente.id)
+                self.assertEqual(len(tasks), 1)
+                self.assertEqual(tasks[0].status, "completada")
             window.close()
 
     def test_selecting_case_registers_expediente_without_changing_json(self):

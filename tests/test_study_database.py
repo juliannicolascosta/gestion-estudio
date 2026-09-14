@@ -334,11 +334,22 @@ class StudyDatabaseTests(unittest.TestCase):
                     due_at=datetime(2026, 9, 18, 9, 30),
                     task_key="movimiento:sisfe:audiencia-1:audiencia",
                 )
+                completed = database.complete_activity_task(
+                    expediente.id,
+                    "movimiento:sisfe:audiencia-1:audiencia",
+                    "Dra. Ana Pérez",
+                )
+                repeated = database.complete_activity_task(
+                    expediente.id,
+                    "movimiento:sisfe:audiencia-1:audiencia",
+                    "Dra. Ana Pérez",
+                )
                 tasks = database.list_tasks(expediente.id)
 
             self.assertEqual(first.id, second.id)
             self.assertEqual(len(tasks), 1)
-            self.assertEqual(tasks[0].status, "confirmada")
+            self.assertEqual(completed.id, repeated.id)
+            self.assertEqual(tasks[0].status, "completada")
             self.assertEqual(tasks[0].confirmed_by, "Dra. Ana Pérez")
 
     def test_document_links_to_its_external_movement_idempotently(self):

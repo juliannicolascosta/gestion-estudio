@@ -3519,17 +3519,17 @@ class MainWindow(QMainWindow):
                 for line in str(metadata.get("Documentación recibida", "")).splitlines()
                 if line.strip()
             ]
-            confirmed_keys: set[str] = set()
+            task_statuses: dict[str, str] = {}
             with StudyDatabase(study_database_path(self.case.path.parent)) as database:
                 expediente = database.find_expediente_by_folder(self.case.path)
                 if expediente:
-                    confirmed_keys = {
-                        task.suggested_by
+                    task_statuses = {
+                        task.suggested_by: task.status
                         for task in database.list_tasks(expediente.id)
-                        if task.status == "confirmada"
+                        if task.suggested_by
                     }
             items = build_case_activity(
-                recent_case_novedades(self.case), pending, received, confirmed_keys
+                recent_case_novedades(self.case), pending, received, task_statuses
             )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.activity_count.setText("No disponible")
@@ -3585,9 +3585,11 @@ class MainWindow(QMainWindow):
             isinstance(data, dict)
             and data.get("target") == "portal"
             and bool(data.get("task_key"))
-            and not bool(data.get("confirmed"))
         )
         self.confirm_activity_button.setEnabled(enabled)
+        self.confirm_activity_button.setText(
+            "Marcar completada" if enabled and data.get("confirmed") else "Confirmar como tarea"
+        )
 
     def confirm_selected_activity(self):
         selected = self.activity_list.currentItem()
@@ -3596,11 +3598,16 @@ class MainWindow(QMainWindow):
             return
         due_at = datetime.fromisoformat(data["due_at"]) if data.get("due_at") else None
         due_text = due_at.strftime("%d/%m/%Y %H:%M") if due_at else "sin fecha cierta"
+        completing = bool(data.get("confirmed"))
         if QMessageBox.question(
             self,
-            "Confirmar tarea",
+            "Completar tarea" if completing else "Confirmar tarea",
             f"{data.get('kind')}: {data.get('title')}\n\nFecha: {due_text}\n\n"
-            "¿Querés confirmarla como tarea del expediente?",
+            + (
+                "¿Querés marcar esta tarea como completada?"
+                if completing
+                else "¿Querés confirmarla como tarea del expediente?"
+            ),
         ) != QMessageBox.StandardButton.Yes:
             return
         professional = self.professional_combo.currentText().strip()
@@ -3612,15 +3619,23 @@ class MainWindow(QMainWindow):
                 expediente = database.find_expediente_by_folder(self.case.path)
                 if not expediente:
                     raise RuntimeError("No encontramos el expediente en la base operativa.")
-                database.confirm_activity_task(
-                    expediente.id,
-                    f"{data.get('kind')}: {data.get('title')}",
-                    professional,
-                    due_at=due_at,
-                    task_key=str(data["task_key"]),
-                )
+                if completing:
+                    database.complete_activity_task(
+                        expediente.id, str(data["task_key"]), professional
+                    )
+                else:
+                    database.confirm_activity_task(
+                        expediente.id,
+                        f"{data.get('kind')}: {data.get('title')}",
+                        professional,
+                        due_at=due_at,
+                        task_key=str(data["task_key"]),
+                    )
             self.reload_activity()
-            self.statusBar().showMessage("Tarea confirmada para este expediente", 4500)
+            self.statusBar().showMessage(
+                "Tarea completada" if completing else "Tarea confirmada para este expediente",
+                4500,
+            )
         except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
             QMessageBox.warning(self, "No pudimos confirmar la tarea", str(error))
 
