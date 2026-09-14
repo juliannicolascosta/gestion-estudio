@@ -84,6 +84,7 @@ def build_case_activity(
     available_document_paths: Iterable[str] = (),
     tasks: Iterable[Tarea] = (),
     show_completed: bool = False,
+    pending_due_dates: Mapping[str, datetime] | None = None,
     *,
     now: datetime | None = None,
 ) -> tuple[ActivityItem, ...]:
@@ -91,6 +92,7 @@ def build_case_activity(
     reference = now or datetime.now()
     received = {" ".join(value.split()).casefold() for value in received_documents if value.strip()}
     task_statuses = dict(task_status_by_key or {})
+    pending_dates = {key.casefold(): value for key, value in (pending_due_dates or {}).items()}
     items: list[ActivityItem] = []
 
     for task in tasks:
@@ -123,18 +125,28 @@ def build_case_activity(
         if not title or title.casefold() in received:
             continue
         matched_path = matching_document(title, available_document_paths)
+        pending_due = pending_dates.get(title.casefold())
+        pending_urgency = due_urgency(pending_due, reference)
         items.append(
             ActivityItem(
                 kind="Posible recepción" if matched_path else "Documentación",
                 title=title,
-                detail=(
+                detail=(f"{pending_urgency.upper()} · " if pending_urgency else "") + (
                     f"Revisar archivo compatible · {matched_path}"
                     if matched_path
-                    else "Solicitada al cliente · pendiente de recibir"
+                    else (
+                        f"Fecha objetivo · {pending_due.strftime('%d/%m/%Y')}"
+                        if pending_due else "Solicitada al cliente · pendiente de recibir"
+                    )
                 ),
                 target="files" if matched_path else "pending",
-                priority=1 if matched_path else 2,
+                priority=(
+                    min(1, _movement_priority(pending_due, False, reference))
+                    if matched_path else _movement_priority(pending_due, pending_due is None, reference)
+                ),
                 file_path=matched_path,
+                due_at=pending_due,
+                urgency=pending_urgency,
             )
         )
 

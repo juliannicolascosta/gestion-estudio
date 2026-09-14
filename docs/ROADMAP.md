@@ -86,6 +86,7 @@
 - [ ] Sellado de tiempo y validación de largo plazo PAdES-LT/LTA, si los organismos receptores lo requieren.
 - [x] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.
 - [x] Confirmar la recepción sugerida desde Actividad manteniendo el historial del checklist.
+- [x] Fecha objetivo opcional para cada documento pendiente, integrada con Actividad.
 - [ ] Recordatorios confirmados por el profesional para documentación todavía pendiente.
 
 ## Robustez

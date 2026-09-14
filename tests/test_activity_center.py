@@ -57,6 +57,17 @@ class ActivityCenterTests(unittest.TestCase):
         items = build_case_activity([], [], [], tasks=tasks, now=reference)
         self.assertEqual([item.urgency for item in items], ["Hoy", "Próxima", "Programada"])
 
+    def test_pending_document_uses_its_own_due_date(self):
+        item = build_case_activity(
+            [],
+            ["Historia clínica"],
+            [],
+            pending_due_dates={"historia clínica": datetime(2026, 9, 14)},
+            now=datetime(2026, 9, 14, 8),
+        )[0]
+        self.assertEqual(item.urgency, "Hoy")
+        self.assertIn("HOY", item.detail)
+
     def test_does_not_show_received_or_unrelated_information(self):
         unrelated = Movimiento(id="m1", expediente_id="e1", title="Escrito presentado", source="sisfe")
         items = build_case_activity([unrelated], ["DNI"], [" dni "])

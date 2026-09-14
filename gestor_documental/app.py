@@ -4,6 +4,7 @@ import sys
 import re
 import sqlite3
 import shutil
+import json
 from datetime import date, datetime
 from pathlib import Path
 from threading import Event
@@ -154,7 +155,7 @@ from .study_backup import BackupResult, RestoreResult, create_study_backup, rest
 from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationList
 from .ui.operation_status import OperationState, OperationStatusIndicator
-from .ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE, PATH_ROLE, ROOT_ROLE, TYPE_ROLE
+from .ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE, PATH_ROLE, PENDING_DUE_ROLE, ROOT_ROLE, TYPE_ROLE
 from .ui.sisfe import SisfeCaseBrowserDialog, SisfeLoginDialog
 
 
@@ -2485,6 +2486,7 @@ class MainWindow(QMainWindow):
         decorate_button(pending_add, "plus")
         pending_add.clicked.connect(self.add_pending_document)
         self.pending_rename_button = icon_button("edit", "Renombrar pendiente", self.rename_pending_document)
+        self.pending_due_button = icon_button("bell", "Definir fecha objetivo", self.set_pending_document_due_date)
         self.pending_delete_button = icon_button("trash", "Borrar pendientes seleccionados", self.delete_pending_documents)
         self.pending_clear_button = icon_button("clear", "Vaciar la lista de pendientes", self.clear_pending_documents)
         self.pending_up_button = icon_button("arrow-up", "Subir en el orden", lambda: self.move_pending_document(-1))
@@ -2496,6 +2498,7 @@ class MainWindow(QMainWindow):
         self.pending_received_button.setEnabled(False)
         pending_actions.addWidget(pending_add)
         pending_actions.addWidget(self.pending_rename_button)
+        pending_actions.addWidget(self.pending_due_button)
         pending_actions.addWidget(self.pending_delete_button)
         pending_actions.addWidget(self.pending_clear_button)
         pending_actions.addWidget(self.pending_up_button)
@@ -3531,6 +3534,7 @@ class MainWindow(QMainWindow):
                 for line in str(metadata.get("Documentación recibida", "")).splitlines()
                 if line.strip()
             ]
+            pending_due_dates = self.pending_document_due_dates(metadata)
             task_statuses: dict[str, str] = {}
             case_tasks = []
             with StudyDatabase(study_database_path(self.case.path.parent)) as database:
@@ -3556,6 +3560,7 @@ class MainWindow(QMainWindow):
                 available_document_paths=available_paths,
                 tasks=case_tasks,
                 show_completed=self.show_completed_tasks.isChecked(),
+                pending_due_dates=pending_due_dates,
             )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.activity_count.setText("No disponible")
@@ -3935,6 +3940,7 @@ class MainWindow(QMainWindow):
         self.pending_documents_list.clear()
         values = []
         received = set()
+        due_dates = {}
         if self.case:
             metadata = read_case_metadata(self.case)
             raw = str(metadata.get("Documentación pendiente", ""))
@@ -3944,6 +3950,7 @@ class MainWindow(QMainWindow):
                 for line in str(metadata.get("Documentación recibida", "")).splitlines()
                 if line.strip()
             }
+            due_dates = self.pending_document_due_dates(metadata)
         for value in values:
             is_received = value in received
             color = "#2B7564" if is_received else "#8A5B12"
@@ -3951,6 +3958,10 @@ class MainWindow(QMainWindow):
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if is_received else Qt.CheckState.Unchecked)
             item.setToolTip("Recibido" if is_received else "Pendiente de recibir")
+            due_at = due_dates.get(value.casefold())
+            item.setData(PENDING_DUE_ROLE, due_at.isoformat() if due_at else "")
+            if due_at:
+                item.setToolTip(item.toolTip() + f" · fecha objetivo {due_at.strftime('%d/%m/%Y')}")
             self.pending_documents_list.addItem(item)
         self._loading_pending = False
         pending_count = sum(value not in received for value in values)
@@ -3974,6 +3985,7 @@ class MainWindow(QMainWindow):
             enabled = bool(selected) and self.case is not None
             self.pending_received_button.setEnabled(enabled)
             self.pending_rename_button.setEnabled(len(selected) == 1 and self.case is not None)
+            self.pending_due_button.setEnabled(len(selected) == 1 and self.case is not None)
             self.pending_delete_button.setEnabled(enabled)
             self.pending_clear_button.setEnabled(self.pending_documents_list.count() > 0 and self.case is not None)
             current = self.pending_documents_list.currentRow()
@@ -4050,11 +4062,61 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Documentación pendiente", "Ese documento ya figura en la lista.")
             return
         old = item.text()
+        metadata = read_case_metadata(self.case)
+        due_dates = self.pending_document_due_dates(metadata)
         values[values.index(old)] = normalized
         if old in received:
             received.remove(old)
             received.add(normalized)
-        self.save_pending_documents(values, received)
+        due = due_dates.pop(old.casefold(), None)
+        if due:
+            due_dates[normalized.casefold()] = due
+        self.save_pending_documents(values, received, due_dates)
+
+    @staticmethod
+    def pending_document_due_dates(metadata: dict[str, str]) -> dict[str, datetime]:
+        try:
+            raw = json.loads(str(metadata.get("Fechas de documentación pendiente", "{}")))
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        result = {}
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                try:
+                    result[str(key).casefold()] = datetime.fromisoformat(str(value))
+                except ValueError:
+                    continue
+        return result
+
+    def set_pending_document_due_date(self):
+        selected = self.pending_documents_list.selectedItems()
+        if len(selected) != 1 or not self.case:
+            return
+        item = selected[0]
+        current = str(item.data(PENDING_DUE_ROLE) or "")
+        initial = datetime.fromisoformat(current).strftime("%d/%m/%Y") if current else ""
+        raw, accepted = QInputDialog.getText(
+            self,
+            "Fecha de documentación",
+            "Fecha objetivo (dd/mm/aaaa; vacío para quitar):",
+            text=initial,
+        )
+        if not accepted:
+            return
+        due_at = None
+        if raw.strip():
+            try:
+                due_at = datetime.strptime(raw.strip(), "%d/%m/%Y")
+            except ValueError:
+                QMessageBox.information(self, "Fecha inválida", "Usá el formato dd/mm/aaaa.")
+                return
+        values, received = self._pending_values_and_received()
+        due_dates = self.pending_document_due_dates(read_case_metadata(self.case))
+        if due_at:
+            due_dates[item.text().casefold()] = due_at
+        else:
+            due_dates.pop(item.text().casefold(), None)
+        self.save_pending_documents(values, received, due_dates)
 
     def delete_pending_documents(self):
         selected = self.pending_documents_list.selectedItems()
@@ -4096,7 +4158,12 @@ class MainWindow(QMainWindow):
         values, received = self._pending_values_and_received()
         self.save_pending_documents(values, received)
 
-    def save_pending_documents(self, values: list[str], received: set[str] | None = None):
+    def save_pending_documents(
+        self,
+        values: list[str],
+        received: set[str] | None = None,
+        due_dates: dict[str, datetime] | None = None,
+    ):
         if not self.case:
             return
         metadata = read_case_metadata(self.case)
@@ -4110,6 +4177,17 @@ class MainWindow(QMainWindow):
                 metadata["Documentación recibida"] = "\n".join(ordered_received)
             else:
                 metadata.pop("Documentación recibida", None)
+        stored_dates = due_dates if due_dates is not None else self.pending_document_due_dates(metadata)
+        allowed = {value.casefold() for value in values}
+        stored_dates = {key.casefold(): value for key, value in stored_dates.items() if key.casefold() in allowed}
+        if stored_dates:
+            metadata["Fechas de documentación pendiente"] = json.dumps(
+                {key: value.isoformat() for key, value in stored_dates.items()},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        else:
+            metadata.pop("Fechas de documentación pendiente", None)
         try:
             save_case_metadata(self.case, metadata)
             self._loaded_metadata = read_case_metadata(self.case)

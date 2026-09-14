@@ -442,6 +442,18 @@ class AppSmokeTests(unittest.TestCase):
                 read_case_metadata(case)["Documentación pendiente"],
             )
 
+            window.pending_documents_list.setCurrentRow(1)
+            with patch(
+                "gestor_documental.app.QInputDialog.getText",
+                return_value=("18/09/2026", True),
+            ):
+                window.set_pending_document_due_date()
+            self.assertIn(
+                "2026-09-18T00:00:00",
+                read_case_metadata(case)["Fechas de documentación pendiente"],
+            )
+            self.assertIn("18/09/2026", window.pending_documents_list.item(1).toolTip())
+
             window.pending_documents_list.setCurrentRow(0)
             window.complete_pending_documents()
             self.assertIn(
