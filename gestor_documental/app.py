@@ -137,6 +137,7 @@ from .services import (
     list_models,
     move_to_recycle_bin,
     normalize_filename,
+    normalize_naming_pattern,
     open_file,
     read_case_metadata,
     rank_models_for_document,
@@ -160,6 +161,7 @@ from .ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE, PATH_ROLE, PENDING_DUE_ROLE,
 from .ui.settings_dialogs import (
     ActivitySettingsDialog,
     ApplicationSettingsDialog,
+    NamingPatternDialog,
     ProfessionalProfileDialog,
     SisfeAccessDialog,
 )
@@ -2503,6 +2505,7 @@ class MainWindow(QMainWindow):
             "models_count": len(list_models(self.store.models_dir)),
             "models_path": self.store.models_dir,
             "signer": signer.name if signer else "",
+            "naming_pattern": self.store.settings.naming_pattern,
         }
 
     def configure_application(self):
@@ -2516,6 +2519,7 @@ class MainWindow(QMainWindow):
             "open_models": self.open_models_folder,
             "open_base_template": self.open_base_template,
             "show_template_variables": self.show_template_variables,
+            "configure_naming": self.configure_naming_pattern,
             "configure_signer": self.configure_signer,
         }
 
@@ -2527,6 +2531,17 @@ class MainWindow(QMainWindow):
 
         dialog.actionRequested.connect(run_action)
         dialog.exec()
+
+    def configure_naming_pattern(self):
+        dialog = NamingPatternDialog(self.store.settings.naming_pattern, self)
+        if not dialog.exec():
+            return
+        try:
+            self.store.set_naming_pattern(normalize_naming_pattern(dialog.value()))
+            self.update_output_preview()
+            self.statusBar().showMessage("Regla de nombres actualizada", 3500)
+        except ValueError as error:
+            QMessageBox.warning(self, "Regla de nombres inválida", str(error))
 
     def reload_professionals(self):
         self.professional_combo.blockSignals(True)
@@ -4978,7 +4993,9 @@ class MainWindow(QMainWindow):
         if not self.case:
             self.output_preview.setText("Se definirá al compilar")
             return
-        suggestion = suggested_presentation_name(self.case, self.current_writing)
+        suggestion = suggested_presentation_name(
+            self.case, self.current_writing, pattern=self.store.settings.naming_pattern
+        )
         self.output_preview.setText(f"Se propondrá al compilar:\n{suggestion}")
 
     def reload_case_files(self, select_path: Path | None = None):
@@ -5940,6 +5957,7 @@ class MainWindow(QMainWindow):
         suggestion = self.output_name.text().strip() or suggested_presentation_name(
             self.case,
             self.current_writing,
+            pattern=self.store.settings.naming_pattern,
         )
         identifier_missing = not (
             metadata.get("Nombre corto para archivos", "").strip()

@@ -34,6 +34,7 @@ from gestor_documental.services import (
     import_directory,
     list_cases,
     normalize_filename,
+    normalize_naming_pattern,
     read_case_metadata,
     rank_models_for_document,
     repair_text,
@@ -153,6 +154,20 @@ class ServiceTests(unittest.TestCase):
                 "YOCCA_2026-08-21_DEMANDA.pdf",
             )
 
+    def test_presentation_name_accepts_a_configurable_pattern(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            save_case_metadata(case, {"Actor": "Perez, Ana"})
+            writing = case.path / "2026-08-13 - DEMANDA.docx"
+            self.assertEqual(
+                suggested_presentation_name(
+                    case, writing, date(2026, 8, 21), "{fecha} - {titulo} - {actor}"
+                ),
+                "2026-08-21 - DEMANDA - PEREZ.pdf",
+            )
+        with self.assertRaises(ValueError):
+            normalize_naming_pattern("{expediente}_{titulo}")
+
     def test_short_name_and_custom_metadata_are_available_to_models(self):
         with tempfile.TemporaryDirectory() as directory:
             case = create_case(Path(directory), "Caso")
@@ -239,6 +254,7 @@ class ServiceTests(unittest.TestCase):
             store.set_activity_settings(
                 {"yellow_days": 30, "red_days": 75, "show_archived": False}
             )
+            store.set_naming_pattern("{fecha}-{actor}-{titulo}")
             store.set_sisfe_profile("Dra. Ana Pérez", "ana.perez", "clave de prueba")
             reloaded = SettingsStore(app_dir)
             self.assertEqual(reloaded.settings.study_root, study)
@@ -252,6 +268,7 @@ class ServiceTests(unittest.TestCase):
             self.assertFalse(reloaded.settings.layout_state["compilation_visible"])
             self.assertEqual(reloaded.settings.activity_settings["yellow_days"], 30)
             self.assertFalse(reloaded.settings.activity_settings["show_archived"])
+            self.assertEqual(reloaded.settings.naming_pattern, "{fecha}-{actor}-{titulo}")
             self.assertEqual(
                 reloaded.settings.sisfe_profiles["Dra. Ana Pérez"],
                 {"user": "ana.perez", "password": "clave de prueba"},

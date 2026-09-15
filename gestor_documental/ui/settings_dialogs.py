@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..case_activity import DEFAULT_ACTIVITY_SETTINGS, normalized_activity_settings
+from ..models import DEFAULT_NAMING_PATTERN
 
 
 PROFESSIONAL_PROFILE_FIELDS = (
@@ -90,6 +91,7 @@ class ApplicationSettingsDialog(QDialog):
                     ("Abrir carpeta de modelos", "open_models"),
                     ("Modificar modelo base", "open_base_template"),
                     ("Ver campos automáticos", "show_template_variables"),
+                    ("Configurar nombres automáticos", "configure_naming"),
                 ),
             ),
             "Modelos",
@@ -133,7 +135,8 @@ class ApplicationSettingsDialog(QDialog):
         models_count = int(summary.get("models_count") or 0)
         models_path = str(summary.get("models_path") or "")
         self.models_summary.setText(
-            f"Modelos disponibles: {models_count}\nCarpeta: {models_path}"
+            f"Modelos disponibles: {models_count}\nCarpeta: {models_path}\n"
+            f"Nombres: {summary.get('naming_pattern') or DEFAULT_NAMING_PATTERN}"
         )
         signer = str(summary.get("signer") or "Sin aplicación externa configurada")
         self.signer_summary.setText(f"Firmador externo: {signer}")
@@ -197,6 +200,47 @@ class ActivitySettingsDialog(QDialog):
             color = QColor(edit.text().strip())
             values[key] = color.name() if color.isValid() else DEFAULT_ACTIVITY_SETTINGS[key]
         return values
+
+
+class NamingPatternDialog(QDialog):
+    def __init__(self, pattern: str = DEFAULT_NAMING_PATTERN, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Nombre automático de archivos")
+        self.setMinimumWidth(560)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.addLayout(_heading(
+            "Regla de nomenclatura",
+            "Podés combinar {actor}, {fecha} y {titulo}. El nombre siempre se puede editar al compilar.",
+        ))
+        self.pattern_edit = QLineEdit(pattern or DEFAULT_NAMING_PATTERN)
+        self.pattern_edit.setPlaceholderText(DEFAULT_NAMING_PATTERN)
+        layout.addWidget(self.pattern_edit)
+        self.preview = QLabel()
+        self.preview.setObjectName("settingsSummary")
+        layout.addWidget(self.preview)
+        self.pattern_edit.textChanged.connect(self._refresh_preview)
+        self._refresh_preview()
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("Guardar")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _refresh_preview(self):
+        value = self.pattern_edit.text() or DEFAULT_NAMING_PATTERN
+        for token, sample in (
+            ("{actor}", "PEREZ"),
+            ("{fecha}", "2026-09-15"),
+            ("{titulo}", "DEMANDA"),
+        ):
+            value = value.replace(token, sample)
+        self.preview.setText(f"Ejemplo: {value}.pdf")
+
+    def value(self) -> str:
+        return self.pattern_edit.text().strip()
 
 
 class ProfessionalProfileDialog(QDialog):

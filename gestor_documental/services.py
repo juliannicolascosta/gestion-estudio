@@ -23,7 +23,13 @@ from .case_data import (
     computed_values,
     ensure_system_metadata,
 )
-from .models import ADVANCED_FIELD_VARIABLES, AppSettings, Case, CompilationResult
+from .models import (
+    ADVANCED_FIELD_VARIABLES,
+    DEFAULT_NAMING_PATTERN,
+    AppSettings,
+    Case,
+    CompilationResult,
+)
 
 
 APP_DIR = Path(os.getenv("APPDATA", Path.home())) / "GestorDocumental"
@@ -143,12 +149,33 @@ def suggested_presentation_name(
     case: Case,
     writing: Path | None = None,
     value_date: date | None = None,
+    pattern: str = DEFAULT_NAMING_PATTERN,
 ) -> str:
     metadata = ensure_system_metadata(read_case_metadata(case))
     identifier = filename_component(short_case_identifier(case, metadata), 40)
     title = filename_component(writing_title_from_path(writing), 60)
     stamp = (value_date or date.today()).isoformat()
-    return f"{identifier}_{stamp}_{title}.pdf"
+    components = {"actor": identifier, "fecha": stamp, "titulo": title}
+    normalized_pattern = normalize_naming_pattern(pattern)
+    stem = re.sub(
+        r"\{(actor|fecha|titulo)\}",
+        lambda match: components[match.group(1)],
+        normalized_pattern,
+    )
+    return normalize_filename(stem, ".pdf")
+
+
+def normalize_naming_pattern(pattern: str) -> str:
+    """Accept only documented filename variables and keep a safe fallback."""
+    value = " ".join(str(pattern).split()).strip()
+    if not value:
+        return DEFAULT_NAMING_PATTERN
+    tokens = re.findall(r"\{[^{}]+\}", value)
+    if any(token not in {"{actor}", "{fecha}", "{titulo}"} for token in tokens):
+        raise ValueError("Usá únicamente {actor}, {fecha} y {titulo}.")
+    if not any(token in value for token in ("{actor}", "{fecha}", "{titulo}")):
+        raise ValueError("Incluí al menos una variable: {actor}, {fecha} o {titulo}.")
+    return value
 
 
 def ensure_bundled_writing_models(models_dir: Path) -> list[Path]:
@@ -239,6 +266,12 @@ class SettingsStore:
         signer = payload.get("signer_path")
         raw_layout = payload.get("layout_state", {})
         layout_state = dict(raw_layout) if isinstance(raw_layout, dict) else {}
+        try:
+            naming_pattern = normalize_naming_pattern(
+                str(payload.get("naming_pattern") or DEFAULT_NAMING_PATTERN)
+            )
+        except ValueError:
+            naming_pattern = DEFAULT_NAMING_PATTERN
         return AppSettings(
             study_roots=roots,
             active_study_root=active,
@@ -265,6 +298,7 @@ class SettingsStore:
                 if isinstance(payload.get("activity_settings", {}), dict)
                 else {}
             ),
+            naming_pattern=naming_pattern,
         )
 
     def save(self):
@@ -282,6 +316,7 @@ class SettingsStore:
             "sisfe_profiles": self.settings.sisfe_profiles,
             "layout_state": self.settings.layout_state,
             "activity_settings": self.settings.activity_settings,
+            "naming_pattern": self.settings.naming_pattern,
         }
         self.config.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -386,6 +421,10 @@ class SettingsStore:
 
     def set_activity_settings(self, settings: dict[str, object]):
         self.settings.activity_settings = dict(settings)
+        self.save()
+
+    def set_naming_pattern(self, pattern: str):
+        self.settings.naming_pattern = normalize_naming_pattern(pattern)
         self.save()
 
 

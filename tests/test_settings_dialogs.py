@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QApplication, QPushButton
 from gestor_documental.ui.settings_dialogs import (
     ActivitySettingsDialog,
     ApplicationSettingsDialog,
+    NamingPatternDialog,
     ProfessionalProfileDialog,
     SisfeAccessDialog,
 )
@@ -41,6 +42,7 @@ class SettingsDialogTests(unittest.TestCase):
                 "models_count": 3,
                 "models_path": "C:/Modelos",
                 "signer": "XolidoSign.exe",
+                "naming_pattern": "{fecha}_{titulo}",
             }
         )
         requested = []
@@ -52,10 +54,17 @@ class SettingsDialogTests(unittest.TestCase):
         )
         self.assertIn("Ana Pérez", dialog.professional_summary.text())
         self.assertIn("3", dialog.models_summary.text())
+        self.assertIn("{fecha}_{titulo}", dialog.models_summary.text())
         self.assertIn("XolidoSign.exe", dialog.signer_summary.text())
         professional_buttons = dialog.tabs.widget(0).findChildren(QPushButton)
         professional_buttons[0].click()
         self.assertEqual(requested, ["add_professional"])
+        dialog.close()
+
+    def test_naming_pattern_dialog_shows_live_preview(self):
+        dialog = NamingPatternDialog("{fecha}-{actor}")
+        self.assertEqual(dialog.value(), "{fecha}-{actor}")
+        self.assertIn("2026-09-15-PEREZ.pdf", dialog.preview.text())
         dialog.close()
 
     def test_external_case_preview_normalizes_name_and_shows_destination(self):

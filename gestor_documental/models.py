@@ -17,6 +17,7 @@ PRESENTATION_PROFILES = {
 }
 
 DEFAULT_PROFILE = "SISFE común · 3 MB"
+DEFAULT_NAMING_PATTERN = "{actor}_{fecha}_{titulo}"
 
 CASE_FIELDS = (
     "Actor",
@@ -151,6 +152,7 @@ class AppSettings:
     sisfe_profiles: dict[str, dict[str, str]] = field(default_factory=dict)
     layout_state: dict[str, object] = field(default_factory=dict)
     activity_settings: dict[str, object] = field(default_factory=dict)
+    naming_pattern: str = DEFAULT_NAMING_PATTERN
 
     @property
     def study_root(self) -> Path | None:
