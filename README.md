@@ -32,6 +32,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Área central con pestañas **Archivos**, **Actividad**, **Portal jurídico** y **Documentación pendiente**; la **Compilación** permanece a la derecha junto con las acciones finales, pero ahora puede redimensionarse u ocultarse desde el encabezado.
 - Los anchos del Directorio, el área de trabajo y la Compilación, junto con las divisiones verticales internas, se recuerdan en esta computadora. El engranaje permite **Restablecer distribución**.
 - Borrador de compilación guardado por expediente con rutas portátiles: conserva orden, escrito y perfil de tamaño al cambiar de caso, reiniciar o abrir el Estudio desde otra computadora. La bandeja resume archivos, páginas PDF y peso total; al compilar correctamente se limpia para la próxima presentación y conserva el último resultado para abrirlo o firmarlo.
+- Historial de compilaciones por expediente: registra los últimos armados exitosos y permite recuperar sus archivos, orden y perfil sin modificar los PDF anteriores.
 - Lista ordenable de documental y escrito; el escrito nuevo se coloca al final y puede moverse con arrastre o con **Subir/Bajar**.
 - Compilación de todos los elementos en un único PDF, respetando el orden visible.
 - Al pulsar **Compilar PDF** propone un nombre identificable `ACTOR_FECHA_TÍTULO.pdf`, editable antes de comenzar. Si ya existe, permite reemplazarlo de forma segura o crear `_V2`, `_V3`, etc.

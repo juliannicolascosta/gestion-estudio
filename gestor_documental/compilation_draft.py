@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -18,6 +19,9 @@ from .models import DEFAULT_PROFILE, PRESENTATION_PROFILES, Case
 
 DRAFT_FILE_NAME = ".gestor-compilacion.json"
 DRAFT_VERSION = 1
+HISTORY_FILE_NAME = ".gestor-compilaciones.json"
+HISTORY_VERSION = 1
+HISTORY_LIMIT = 20
 VALID_ITEM_KINDS = {"document", "writing"}
 
 
@@ -36,8 +40,20 @@ class CompilationDraft:
     profile: str = DEFAULT_PROFILE
 
 
+@dataclass(frozen=True)
+class CompilationHistoryEntry:
+    created_at: datetime
+    items: tuple[DraftItem, ...]
+    output: Path | None = None
+    profile: str = DEFAULT_PROFILE
+
+
 def compilation_draft_path(case: Case) -> Path:
     return case.path / DRAFT_FILE_NAME
+
+
+def compilation_history_path(case: Case) -> Path:
+    return case.path / HISTORY_FILE_NAME
 
 
 def _relative_path(case: Case, path: Path | None) -> str | None:
@@ -135,6 +151,85 @@ def save_compilation_draft(
     temporary = target.with_name(f"{target.name}.tmp")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(temporary, target)
+    return target
+
+
+def load_compilation_history(case: Case) -> tuple[CompilationHistoryEntry, ...]:
+    try:
+        payload = json.loads(compilation_history_path(case).read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        return ()
+    if not isinstance(payload, dict) or payload.get("version") != HISTORY_VERSION:
+        return ()
+    entries = []
+    for row in payload.get("entries", []):
+        if not isinstance(row, dict):
+            continue
+        try:
+            created_at = datetime.fromisoformat(str(row.get("created_at", "")))
+        except ValueError:
+            continue
+        items = []
+        for item in row.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            path = _case_path(case, item.get("path"))
+            kind = str(item.get("kind", "document"))
+            if path:
+                items.append(DraftItem(path, kind if kind in VALID_ITEM_KINDS else "document"))
+        if not items:
+            continue
+        profile = str(row.get("profile", DEFAULT_PROFILE))
+        entries.append(
+            CompilationHistoryEntry(
+                created_at,
+                tuple(items),
+                _case_path(case, row.get("output")),
+                profile if profile in PRESENTATION_PROFILES else DEFAULT_PROFILE,
+            )
+        )
+    return tuple(entries)
+
+
+def record_compilation_history(
+    case: Case,
+    items: Iterable[DraftItem],
+    output: Path,
+    profile: str,
+    *,
+    created_at: datetime | None = None,
+) -> Path:
+    serialized_items = []
+    for item in items:
+        relative = _relative_path(case, item.path)
+        if relative:
+            serialized_items.append({"path": relative, "kind": item.kind})
+    if not serialized_items:
+        raise ValueError("La compilación no contiene archivos del expediente.")
+    existing = []
+    target = compilation_history_path(case)
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        if isinstance(payload, dict) and payload.get("version") == HISTORY_VERSION:
+            existing = [row for row in payload.get("entries", []) if isinstance(row, dict)]
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        pass
+    entry = {
+        "created_at": (created_at or datetime.now()).isoformat(timespec="seconds"),
+        "items": serialized_items,
+        "output": _relative_path(case, output),
+        "profile": profile if profile in PRESENTATION_PROFILES else DEFAULT_PROFILE,
+    }
+    temporary = target.with_name(f"{target.name}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {"version": HISTORY_VERSION, "entries": [entry, *existing][:HISTORY_LIMIT]},
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
     os.replace(temporary, target)

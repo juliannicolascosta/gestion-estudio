@@ -22,6 +22,7 @@ from gestor_documental.app import (
     ModelPickerDialog,
     PATH_ROLE,
 )
+from gestor_documental.compilation_draft import load_compilation_history
 from gestor_documental.ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE
 from gestor_documental.services import (
     CompilationCancelled,
@@ -1587,6 +1588,9 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.compilation.count(), 0)
             self.assertIsNone(window.current_writing)
             self.assertEqual(window.compilation_count.text(), "0 elementos")
+            history = load_compilation_history(case)
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0].items[0].path, source)
             saved_result = window.last_compiled
             window.close()
 

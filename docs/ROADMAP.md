@@ -94,7 +94,7 @@
 - [x] Cancelación segura de conversiones en segundo plano.
 - [x] Compresión que preserve texto vectorial cuando sea posible.
 - [x] Conservación del armado vigente por expediente.
-- [ ] Historial versionado de compilaciones anteriores y repetición de un armado histórico.
+- [x] Historial versionado de compilaciones anteriores y repetición de un armado histórico.
 - [ ] Instalador firmado y actualización controlada.
 
 ## Fuera de alcance hasta decisión expresa

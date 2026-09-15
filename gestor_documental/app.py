@@ -99,7 +99,9 @@ from .case_activity import (
 from .compilation_draft import (
     CompilationDraft,
     DraftItem,
+    load_compilation_history,
     load_compilation_draft,
+    record_compilation_history,
     save_compilation_draft as persist_compilation_draft,
 )
 from .sisfe_session import ManualSisfeSession
@@ -154,7 +156,7 @@ from .services import (
 )
 from .study_backup import BackupResult, RestoreResult
 from .study_database import StudyDatabase, study_database_path
-from .ui.compilation import CompilationList
+from .ui.compilation import CompilationHistoryDialog, CompilationList
 from .ui.case_files import CaseFilesList, QuickAccessList
 from .ui.case_import import ExternalCaseImportDialog
 from .ui.operation_status import OperationState, OperationStatusIndicator
@@ -2114,10 +2116,15 @@ class MainWindow(QMainWindow):
         decorate_button(clear, "clear")
         clear.setToolTip("Quita sólo las referencias de esta bandeja; conserva todos los archivos")
         clear.clicked.connect(self.clear_compilation)
+        history = QPushButton("Historial")
+        decorate_button(history, "history")
+        history.setToolTip("Recuperar el orden y los archivos de una compilación anterior")
+        history.clicked.connect(self.open_compilation_history)
         move_up = icon_button("arrow-up", "Subir en el orden", lambda: self.move_compilation_item(-1))
         move_down = icon_button("arrow-down", "Bajar en el orden", lambda: self.move_compilation_item(1))
         prep_actions.addWidget(remove)
         prep_actions.addWidget(clear)
+        prep_actions.addWidget(history)
         prep_actions.addWidget(move_up)
         prep_actions.addWidget(move_down)
         prep_actions.addStretch()
@@ -5672,6 +5679,39 @@ class MainWindow(QMainWindow):
             "Preparación limpia; los archivos originales se conservaron.", 5000
         )
 
+    def open_compilation_history(self):
+        if not self.case:
+            return
+        entries = load_compilation_history(self.case)
+        if not entries:
+            QMessageBox.information(
+                self,
+                "Historial de compilaciones",
+                "Todavía no hay compilaciones anteriores para este expediente.",
+            )
+            return
+        dialog = CompilationHistoryDialog(entries, self)
+        if not dialog.exec() or not dialog.selected_entry:
+            return
+        entry = dialog.selected_entry
+        self._loading_compilation = True
+        try:
+            self.compilation.clear()
+            self.current_writing = next(
+                (item.path for item in entry.items if item.kind == "writing"), None
+            )
+            for item in entry.items:
+                self.add_compilation_path(item.path, item.kind)
+            profile_index = self.limit_combo.findText(entry.profile)
+            if profile_index >= 0:
+                self.limit_combo.setCurrentIndex(profile_index)
+        finally:
+            self._loading_compilation = False
+        self.update_compilation_count()
+        self.update_writing_label()
+        self.set_compilation_panel_visible(True)
+        self.statusBar().showMessage("Armado anterior recuperado", 4500)
+
     @staticmethod
     def compilation_pdf_pages(path: Path) -> int:
         if path.suffix.casefold() not in PDF_EXTENSIONS:
@@ -6001,6 +6041,22 @@ class MainWindow(QMainWindow):
             return
         self.last_compiled = result.output
         self.last_signed = None
+        history_items = tuple(
+            DraftItem(
+                Path(self.compilation.item(index).data(PATH_ROLE)),
+                str(self.compilation.item(index).data(TYPE_ROLE) or "document"),
+            )
+            for index in range(self.compilation.count())
+        )
+        try:
+            record_compilation_history(
+                self.case,
+                history_items,
+                result.output,
+                self.limit_combo.currentText(),
+            )
+        except (OSError, ValueError) as error:
+            self.statusBar().showMessage(f"No se pudo actualizar el historial: {error}", 7000)
         # Una compilación exitosa cierra esta preparación. Sólo se descartan
         # referencias internas; los originales y el PDF resultante permanecen
         # en el expediente y el último resultado sigue disponible para firmar.
