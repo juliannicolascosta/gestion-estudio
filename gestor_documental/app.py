@@ -45,6 +45,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from . import __version__
 from .case_documents import rename_document_entry
@@ -2406,7 +2408,12 @@ class MainWindow(QMainWindow):
         files_layout.addLayout(files_actions)
         preparation_card, preparation_layout = make_card()
         prep_header = QHBoxLayout()
-        prep_header.addLayout(section_heading("Documental a adjuntarse", "Ordená de arriba hacia abajo"))
+        prep_header.addLayout(
+            section_heading(
+                "Preparación de la presentación",
+                "Escrito principal y anexos, en el orden final del PDF",
+            )
+        )
         prep_header.addStretch()
         self.compilation_count = QLabel("0 elementos")
         self.compilation_count.setObjectName("muted")
@@ -2451,7 +2458,10 @@ class MainWindow(QMainWindow):
         preparation_layout.addWidget(self.compilation, 1)
         prep_actions = QHBoxLayout()
         remove = icon_button("trash", "Quitar de la compilación", self.remove_from_compilation)
-        clear = icon_button("clear", "Vaciar la compilación", self.clear_compilation)
+        clear = QPushButton("Limpiar preparación")
+        decorate_button(clear, "clear")
+        clear.setToolTip("Quita sólo las referencias de esta bandeja; conserva todos los archivos")
+        clear.clicked.connect(self.clear_compilation)
         move_up = icon_button("arrow-up", "Subir en el orden", lambda: self.move_compilation_item(-1))
         move_down = icon_button("arrow-down", "Bajar en el orden", lambda: self.move_compilation_item(1))
         prep_actions.addWidget(remove)
@@ -4931,15 +4941,25 @@ class MainWindow(QMainWindow):
     def restore_case_tree_selection(self):
         if not self.case:
             return
+
+        def matching_descendant(parent: QTreeWidgetItem) -> QTreeWidgetItem | None:
+            for index in range(parent.childCount()):
+                child = parent.child(index)
+                if child.data(0, PATH_ROLE) == str(self.case.path):
+                    return child
+                nested = matching_descendant(child)
+                if nested:
+                    return nested
+            return None
+
         self.case_tree.blockSignals(True)
         try:
             for root_index in range(self.case_tree.topLevelItemCount()):
                 root = self.case_tree.topLevelItem(root_index)
-                for child_index in range(root.childCount()):
-                    child = root.child(child_index)
-                    if child.data(0, PATH_ROLE) == str(self.case.path):
-                        self.case_tree.setCurrentItem(child)
-                        return
+                item = matching_descendant(root)
+                if item:
+                    self.case_tree.setCurrentItem(item)
+                    return
         finally:
             self.case_tree.blockSignals(False)
 
@@ -4948,6 +4968,7 @@ class MainWindow(QMainWindow):
             return
         metadata = dict(self._loaded_metadata)
         metadata.update(self.basic_metadata_values())
+        metadata = self.with_shared_client_defaults(metadata)
         dialog = ExtendedMetadataDialog(
             metadata,
             self,
@@ -4960,6 +4981,35 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return
         self.save_extended_metadata_values(dialog.values())
+
+    def with_shared_client_defaults(self, metadata: dict[str, str]) -> dict[str, str]:
+        """Prefill missing personal data already known for the same client.
+
+        The values are offered only in the form. They are written to this case
+        if the user explicitly saves it, and no sibling case file is modified.
+        """
+        if not self.case:
+            return dict(metadata)
+        try:
+            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                client = database.find_client_by_case_folder(self.case.path)
+        except (OSError, RuntimeError, sqlite3.Error):
+            client = None
+        result = dict(metadata)
+        if not client:
+            return result
+        shared_values = {
+            "Nombre completo": client.name,
+            "DNI del actor": client.dni,
+            "CUIL del actor": client.cuil,
+            "Teléfono del actor": client.phone,
+            "Correo electrónico del actor": client.email,
+            "Domicilio real": client.address,
+        }
+        for key, value in shared_values.items():
+            if value and not str(result.get(key, "")).strip():
+                result[key] = value
+        return result
 
     def save_extended_metadata_values(self, values: dict[str, str]) -> bool:
         if not self.case:
@@ -5745,14 +5795,50 @@ class MainWindow(QMainWindow):
         self.update_compilation_count()
 
     def clear_compilation(self):
+        """Close the working preparation without touching any case file."""
         self.compilation.clear()
+        self.current_writing = None
+        self.output_name.clear()
+        self.update_writing_label()
+        self.update_output_preview()
         self.update_compilation_count()
+        self.statusBar().showMessage(
+            "Preparación limpia; los archivos originales se conservaron.", 5000
+        )
+
+    @staticmethod
+    def compilation_pdf_pages(path: Path) -> int:
+        if path.suffix.casefold() not in PDF_EXTENSIONS:
+            return 0
+        try:
+            with path.open("rb") as stream:
+                if stream.read(5) != b"%PDF-":
+                    return 0
+                stream.seek(0)
+                return len(PdfReader(stream).pages)
+        except (OSError, PdfReadError, ValueError):
+            return 0
 
     def update_compilation_count(self):
         count = self.compilation.count()
-        self.compilation_count.setText(
-            f"{count} elemento" if count == 1 else f"{count} elementos"
-        )
+        label = f"{count} elemento" if count == 1 else f"{count} elementos"
+        total_size = 0
+        pdf_pages = 0
+        for path in self.compilation_paths():
+            try:
+                total_size += path.stat().st_size
+            except OSError:
+                pass
+            pdf_pages += self.compilation_pdf_pages(path)
+        if count:
+            details = []
+            if pdf_pages:
+                details.append(
+                    f"{pdf_pages} página PDF" if pdf_pages == 1 else f"{pdf_pages} páginas PDF"
+                )
+            details.append(human_size(total_size))
+            label = f"{label} · {' · '.join(details)}"
+        self.compilation_count.setText(label)
         self.save_compilation_draft()
 
     def compilation_paths(self) -> list[Path]:
@@ -6048,8 +6134,11 @@ class MainWindow(QMainWindow):
             return
         self.last_compiled = result.output
         self.last_signed = None
+        # Una compilación exitosa cierra esta preparación. Sólo se descartan
+        # referencias internas; los originales y el PDF resultante permanecen
+        # en el expediente y el último resultado sigue disponible para firmar.
+        self.clear_compilation()
         self.update_last_output_label()
-        self.save_compilation_draft()
         self.case_directory = result.output.parent
         self.work_tabs.setCurrentIndex(self.files_tab_index)
         self.reload_case_files(result.output)

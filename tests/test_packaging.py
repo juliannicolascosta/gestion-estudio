@@ -19,6 +19,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('@@ASSEMBLY_VERSION@@', bootstrapper)
         self.assertNotRegex(bootstrapper, r"Gestor de documental 0\.\d+")
         self.assertRegex(gestor_documental.__version__, r"^\d+\.\d+\.\d+$")
+        self.assertFalse((ROOT / "gestor_documental" / "version_info.txt").exists())
 
     def test_installer_does_not_delete_application_data(self):
         install = (ROOT / "packaging" / "install.ps1").read_text(encoding="utf-8-sig")

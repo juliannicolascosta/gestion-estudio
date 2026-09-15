@@ -61,6 +61,8 @@
 - [x] Columnas y secciones verticales redimensionables, persistentes y con Compilación contraíble.
 - [x] Indicador visual común para tareas SISFE en espera, ejecución, éxito o error.
 - [x] Borrador de compilación portátil y persistente por expediente.
+- [x] Resumen de páginas y peso de la preparación, con limpieza de referencias internas al compilar correctamente sin tocar originales.
+- [x] Clientes vinculados a múltiples casos con agrupación visual y precarga conservadora de datos personales conocidos.
 - [x] Bandeja del Portal sin el recorte anterior de veinte movimientos.
 - [x] Servicio único de aplicación para importar la información obtenida en el navegador SISFE.
 - [x] Centro de actividad por expediente con navegación al origen y sin duplicar novedades ni pendientes.
@@ -102,4 +104,4 @@
 ## Fuera de alcance hasta decisión expresa
 
 - Carga automática en SRT, SISFE o portales de Provincia.
-- Agenda, clientes, expedientes y gestión jurídica integral.
+- Agenda y gestión jurídica integral.

@@ -31,7 +31,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 - Idioma predeterminado del modelo base: Español (Argentina).
 - Área central con pestañas **Archivos**, **Actividad**, **Portal jurídico** y **Documentación pendiente**; la **Compilación** permanece a la derecha junto con las acciones finales, pero ahora puede redimensionarse u ocultarse desde el encabezado.
 - Los anchos del Directorio, el área de trabajo y la Compilación, junto con las divisiones verticales internas, se recuerdan en esta computadora. El engranaje permite **Restablecer distribución**.
-- Borrador de compilación guardado por expediente con rutas portátiles: conserva orden, escrito, perfil de tamaño y último resultado al cambiar de caso, reiniciar o abrir el Estudio desde otra computadora.
+- Borrador de compilación guardado por expediente con rutas portátiles: conserva orden, escrito y perfil de tamaño al cambiar de caso, reiniciar o abrir el Estudio desde otra computadora. La bandeja resume archivos, páginas PDF y peso total; al compilar correctamente se limpia para la próxima presentación y conserva el último resultado para abrirlo o firmarlo.
 - Lista ordenable de documental y escrito; el escrito nuevo se coloca al final y puede moverse con arrastre o con **Subir/Bajar**.
 - Compilación de todos los elementos en un único PDF, respetando el orden visible.
 - Al pulsar **Compilar PDF** propone un nombre identificable `ACTOR_FECHA_TÍTULO.pdf`, editable antes de comenzar. Si ya existe, permite reemplazarlo de forma segura o crear `_V2`, `_V3`, etc.
@@ -118,4 +118,4 @@ Para cambiar lo que genera **Escrito nuevo**, elegí **+ Escrito → Modificar m
 
 ## Estado
 
-La versión estable actual es la `0.13.2`, una evolución del MVP `delivery-sisfe`. Incorpora firma PAdES con sesión de token reutilizable y apariencia visible opcional, ficha ampliada por tipo de caso, generación contextual desde modelos Word, semáforo del directorio, interpretación inicial de SISFE y respaldo verificable de cada Ubicación. Conserva las varias **Ubicaciones del Estudio**, la búsqueda conjunta y Xólido como alternativa. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio.
+La versión estable actual es la `0.13.3`, una evolución del MVP `delivery-sisfe`. Incorpora firma PAdES con sesión de token reutilizable y apariencia visible opcional, ficha ampliada por tipo de caso, generación contextual desde modelos Word, semáforo del directorio, interpretación inicial de SISFE, clientes vinculados con varios casos y respaldo verificable de cada Ubicación. Conserva las varias **Ubicaciones del Estudio**, la búsqueda conjunta y Xólido como alternativa. Una carpeta compartida de Google Drive debe aparecer en el Explorador mediante Google Drive para escritorio.

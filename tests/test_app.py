@@ -1163,6 +1163,52 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.client_cases_button.text(), "2 casos del cliente")
             self.assertEqual(len(window.client_cases_for_current_case()), 2)
             self.assertEqual({first.path, second.path}, paths_before)
+
+            other_item = next(
+                client_item.child(index)
+                for index in range(client_item.childCount())
+                if Path(client_item.child(index).data(0, PATH_ROLE)) == second.path
+            )
+            window.case_tree.blockSignals(True)
+            window.case_tree.setCurrentItem(other_item)
+            window.case_tree.blockSignals(False)
+            window.restore_case_tree_selection()
+            self.assertEqual(
+                Path(window.case_tree.currentItem().data(0, PATH_ROLE)),
+                first.path,
+            )
+            window.close()
+
+    def test_missing_personal_fields_are_prefilled_from_the_shared_client(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            first = create_case(study, "Pérez c ART")
+            second = create_case(study, "Pérez c empleador")
+            save_case_metadata(
+                first,
+                {
+                    "Actor": "Juan Pérez",
+                    "DNI del actor": "30111222",
+                    "Teléfono del actor": "3415550101",
+                    "Correo electrónico del actor": "juan@example.com",
+                },
+            )
+            save_case_metadata(
+                second,
+                {"Actor": "Juan Pérez", "DNI del actor": "30111222"},
+            )
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.set_case(first)
+            window.set_case(second)
+
+            defaults = window.with_shared_client_defaults(read_case_metadata(second))
+
+            self.assertEqual(defaults["Teléfono del actor"], "3415550101")
+            self.assertEqual(defaults["Correo electrónico del actor"], "juan@example.com")
+            self.assertNotIn("Teléfono del actor", read_case_metadata(second))
             window.close()
 
     def test_import_dialog_leaves_pdf_conversion_unselected_by_default(self):
@@ -1265,7 +1311,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.compilation.count(), 1)
             self.assertEqual(Path(window.compilation.item(0).data(PATH_ROLE)), pdf)
             self.assertEqual(window.work_tabs.currentIndex(), window.files_tab_index)
-            self.assertEqual(window.compilation_count.text(), "1 elemento")
+            self.assertIn("1 elemento · 1 página PDF", window.compilation_count.text())
             window.close()
 
     def test_compilation_draft_survives_case_switch_and_window_restart(self):
@@ -1448,7 +1494,19 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIsNone(window._compile_thread)
             self.assertIsNotNone(window.last_compiled)
             self.assertTrue(window.last_compiled.is_file())
+            self.assertTrue(source.is_file())
+            self.assertEqual(window.compilation.count(), 0)
+            self.assertIsNone(window.current_writing)
+            self.assertEqual(window.compilation_count.text(), "0 elementos")
+            saved_result = window.last_compiled
             window.close()
+
+            reopened = MainWindow(store)
+            reopened.reload_cases(case.path)
+            self.assertEqual(reopened.compilation.count(), 0)
+            self.assertIsNone(reopened.current_writing)
+            self.assertEqual(reopened.last_compiled, saved_result)
+            reopened.close()
 
 
 if __name__ == "__main__":

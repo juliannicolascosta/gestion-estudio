@@ -297,6 +297,19 @@ class StudyDatabase:
         ).fetchall()
         return [self._expediente_from_row(row) for row in rows]
 
+    def find_client_by_case_folder(self, folder_path: Path) -> Cliente | None:
+        """Return the shared client profile without changing case metadata."""
+        row = self.connection.execute(
+            """
+            SELECT clientes.*
+            FROM expedientes
+            INNER JOIN clientes ON clientes.id = expedientes.client_id
+            WHERE expedientes.folder_path = ?
+            """,
+            (str(Path(folder_path).resolve()),),
+        ).fetchone()
+        return self._cliente_from_row(row) if row else None
+
     def import_case(self, case: Case) -> Expediente:
         """Register or refresh a case folder using a portable identity.
 

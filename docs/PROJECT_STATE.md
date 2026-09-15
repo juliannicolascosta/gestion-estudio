@@ -18,7 +18,7 @@ Renombrar un archivo o una carpeta interna desde Archivos actualiza las rutas SQ
 
 Las consultas SISFE conservan el expediente de origen aunque cambie la selección. Las descargas y sus reintentos conservan también el profesional y sus variables para generar cédulas. Una descarga activa no se reemplaza por un segundo pedido; el cierre espera a que terminen descargas o extracción. La cédula se guarda en el caso de origen sin incorporarse al armado de otro caso seleccionado. La cola de múltiples descargas sigue pendiente. Estas garantías se verifican con pruebas de navegación durante operaciones y cierre.
 
-Actualizado: 2 de septiembre de 2026
+Actualizado: 14 de septiembre de 2026
 
 Ubicación canónica: `C:\Proyectos\Gestor de documental`
 
@@ -72,7 +72,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Compilación y acciones finales visibles simultáneamente junto a Archivos, Portal y Pendientes.
 - Directorio, información del expediente y Compilación distribuidos mediante divisores ajustables; la columna derecha parte de un ancho compacto, puede ocultarse y recuerda tamaños por computadora.
 - Acción **Restablecer distribución** disponible en el engranaje para recuperar proporciones seguras.
-- Borrador portátil por caso en `.gestor-compilacion.json`: conserva orden, escrito, perfil y último resultado mediante rutas relativas, incluso al cambiar de computadora.
+- Borrador portátil por caso en `.gestor-compilacion.json`: conserva una preparación inconclusa mediante rutas relativas, incluso al cambiar de computadora. La bandeja informa cantidad, páginas PDF y peso total; una compilación exitosa cierra ese borrador sin tocar originales y conserva el último PDF para abrirlo o firmarlo.
 - Nombre de salida propuesto al compilar como `ACTOR_FECHA_TÍTULO.pdf`, con Actor abreviado configurable y confirmación editable.
 - Recompilación mediante reemplazo recuperable del PDF anterior o versiones legibles `_V2`, `_V3`, sin sufijos ambiguos `(2)`.
 - Identificación visual de Word editable, PDF para firmar y PDF firmado sin crear nuevas subcarpetas.
@@ -107,6 +107,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Perfil persistente por profesional con identidad, contacto, condición fiscal, matrículas y datos bancarios reutilizables como variables Word; el último profesional elegido se restaura al iniciar.
 - Checklist operativo de documentación pendiente, compartido con la entrevista del caso y actualizable al recibir cada elemento.
 - Proyección SQLite refrescada desde los metadatos vigentes del caso y conservación de la identidad relacional al renombrar su carpeta.
+- Clientes compartidos por identidad con varios casos visualmente agrupados; los datos personales ya conocidos precargan campos vacíos de otro caso sólo al abrir su formulario, sin modificar carpetas ni metadatos hermanos.
 - Nombre `_FIRMADO` con versiones legibles y advertencia si el tamaño posterior a la firma supera el perfil seleccionado.
 - Apertura o preparación del PDF para una aplicación externa de firma configurable como alternativa.
 - Reutilización de la sesión abierta de Xólido y archivo arrastrable hacia su grilla.
@@ -129,8 +130,8 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 
 ## Alcance preservado
 
-La prioridad inmediata sigue siendo consolidar el flujo documental y SISFE. Agenda, clientes y seguimiento procesal se incorporarán por etapas después de separar dominio, servicios e interfaz; MEV y SRT permanecen pausados.
+La prioridad inmediata sigue siendo consolidar el flujo documental y SISFE. La relación básica cliente-casos ya existe; agenda y seguimiento procesal integral se incorporarán por etapas después de separar dominio, servicios e interfaz. MEV y SRT permanecen pausados.
 
 ## Publicación
 
-La versión `0.13.2` es la referencia estable de trabajo y cuenta con instalador transaccional para Windows. Primero prepara y valida el programa nuevo, cierra todos los procesos de la instalación anterior y conserva una copia de respaldo durante el intercambio. Reemplaza sólo el programa y mantiene las Ubicaciones del Estudio, `%APPDATA%\GestorDocumental`, los modelos personalizados y las bases locales. El arranque no depende de poder escribir el registro de diagnóstico y el instalador valida los accesos directos antes de confirmar la actualización. El instalador todavía no está firmado con un certificado de publicación ni incorpora actualización automática.
+La versión `0.13.3` es la referencia estable de trabajo y cuenta con instalador transaccional para Windows. Primero prepara y valida el programa nuevo, cierra todos los procesos de la instalación anterior y conserva una copia de respaldo durante el intercambio. Reemplaza sólo el programa y mantiene las Ubicaciones del Estudio, `%APPDATA%\GestorDocumental`, los modelos personalizados y las bases locales. El arranque no depende de poder escribir el registro de diagnóstico y el instalador valida los accesos directos antes de confirmar la actualización. El instalador todavía no está firmado con un certificado de publicación ni incorpora actualización automática.

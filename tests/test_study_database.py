@@ -38,6 +38,12 @@ class StudyDatabaseTests(unittest.TestCase):
             self.assertNotEqual(first_identity, second_identity)
             self.assertEqual(read_case_metadata(first)["Actor"], metadata["Actor"])
             self.assertEqual(read_case_metadata(second)["CUIJ"], "21-123")
+
+            with StudyDatabase(study_database_path(study)) as database:
+                shared_client = database.find_client_by_case_folder(second.path)
+            self.assertIsNotNone(shared_client)
+            self.assertEqual(shared_client.phone, "341 555 000")
+
     def test_creates_versioned_relational_schema(self):
         with tempfile.TemporaryDirectory() as directory:
             database_path = study_database_path(Path(directory) / "Estudio")
