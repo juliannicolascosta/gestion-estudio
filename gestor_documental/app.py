@@ -1976,7 +1976,9 @@ class MainWindow(QMainWindow):
         self._sisfe_login_dialog: SisfeLoginDialog | None = None
         self._sisfe_case_dialog: SisfeCaseBrowserDialog | None = None
         self._sisfe_download_request: tuple[str, dict] | None = None
-        self._pending_cedula_movement_id = ""
+        self._sisfe_download_queue: list[tuple[str, dict]] = []
+        self._sisfe_download_failures: dict[tuple[str, str], tuple[str, dict]] = {}
+        self._sisfe_download_states: dict[tuple[str, str], tuple[str, str]] = {}
         self._sisfe_download_active = False
         self._cut_paths: list[Path] = []
         self._directory_expanded = False
@@ -4013,9 +4015,34 @@ class MainWindow(QMainWindow):
             detail_line = f"\nDETECCIÓN · {interpretation}" if interpretation else ""
             local_documents = self.movement_local_documents(movement.external_id, movement.source)
             document_line = "\nPDF disponible localmente" if local_documents else ""
+            download_key = self.sisfe_download_key(self.case, movement.external_id)
+            download_state, download_message = self._sisfe_download_states.get(
+                download_key, ("", "")
+            )
+            if local_documents and download_state == "completed":
+                self._sisfe_download_states.pop(download_key, None)
+                download_state = ""
+            state_line = {
+                "queued": "\nEN COLA · descarga SISFE pendiente",
+                "running": "\nDESCARGANDO · SISFE en segundo plano",
+                "failed": "\nERROR · clic derecho para reintentar",
+            }.get(download_state, "")
+            icon_color = (
+                "#C9493C" if download_state == "failed"
+                else "#2774A6" if download_state in {"queued", "running"}
+                else "#B36A24" if interpretation
+                else "#2B7564"
+            )
             item = QListWidgetItem(
-                ui_icon("bell", "#B36A24" if interpretation else "#2B7564"),
-                f"{movement.title}\n{stamp} · {movement.source.upper()}{detail_line}{document_line}",
+                ui_icon(
+                    "warning" if download_state == "failed"
+                    else "refresh" if download_state in {"queued", "running"}
+                    else "check" if local_documents
+                    else "bell",
+                    icon_color,
+                ),
+                f"{movement.title}\n{stamp} · {movement.source.upper()}"
+                f"{detail_line}{document_line}{state_line}",
             )
             if "CARGO A VERIFICAR" in f"{movement.title} {interpretation}".upper():
                 item.setForeground(QColor("#B42318"))
@@ -4025,6 +4052,8 @@ class MainWindow(QMainWindow):
             tooltip = f"Texto de origen: {movement.title}"
             if interpretation:
                 tooltip += f"\n\n{interpretation}"
+            if download_message:
+                tooltip += f"\n\nDescarga SISFE: {download_message}"
             item.setToolTip(tooltip)
             item.setData(
                 MOVEMENT_ROLE,
@@ -4035,6 +4064,7 @@ class MainWindow(QMainWindow):
                     "occurred_at": movement.occurred_at.isoformat() if movement.occurred_at else "",
                     "interpretation": interpretation,
                     "local_documents": [str(path) for path in local_documents],
+                    "download_state": download_state,
                 },
             )
             self.novedades_list.addItem(item)
@@ -4358,6 +4388,7 @@ class MainWindow(QMainWindow):
             return
         menu = QMenu(self)
         local_documents = [Path(path) for path in movement.get("local_documents", [])]
+        download_state = str(movement.get("download_state") or "")
         if local_documents:
             if len(local_documents) == 1:
                 menu.addAction("Abrir documento", lambda: open_file(local_documents[0]))
@@ -4372,6 +4403,17 @@ class MainWindow(QMainWindow):
                 action = menu.addAction("Descargar documento")
                 action.setEnabled(False)
                 action.setToolTip("Ya está disponible localmente; no se crea una copia.")
+            elif download_state == "failed":
+                key = self.sisfe_download_key(self.case, str(movement["external_id"]))
+                menu.addAction(
+                    "Reintentar descarga",
+                    lambda checked=False, value=key: self.retry_sisfe_movement(value),
+                )
+            elif download_state in {"queued", "running"}:
+                action = menu.addAction(
+                    "Descarga en curso" if download_state == "running" else "Descarga en cola"
+                )
+                action.setEnabled(False)
             else:
                 menu.addAction("Descargar documento", self.download_selected_novedad_document)
                 menu.addAction("Generar cédula", self.generate_cedula_from_selected_novedad)
@@ -4387,25 +4429,17 @@ class MainWindow(QMainWindow):
     def generate_cedula_from_selected_novedad(self):
         """Descarga el PDF conocido por SISFE y continúa con la cédula."""
         def continue_after_detail(remote_case_id, detail, movement):
-            if self._sisfe_download_active:
-                self.statusBar().showMessage("Esperá a que termine la descarga SISFE en curso.", 5000)
-                return
             if not (detail.get("has_primary_document") or detail.get("has_additional_documents")):
                 QMessageBox.information(
                     self, "Sin documento", "Este movimiento no tiene documentos descargables en SISFE."
                 )
                 return
-            self._pending_cedula_movement_id = str(
-                detail.get("movement_id") or movement.get("external_id") or ""
-            )
+            detail["_generate_cedula"] = True
             self.start_sisfe_download(remote_case_id, detail)
 
         self._request_selected_movement_detail(continue_after_detail)
 
     def _request_selected_movement_detail(self, completed):
-        if self._sisfe_download_active:
-            self.statusBar().showMessage("Esperá a que termine la descarga SISFE en curso.", 5000)
-            return
         context = self.capture_sisfe_context()
         movement = self.selected_novedad_data()
         if not movement or movement.get("source") != "sisfe" or not movement.get("external_id"):
@@ -4551,19 +4585,61 @@ class MainWindow(QMainWindow):
             "profile_values": dict(self.professional_template_values()),
         }
 
+    @staticmethod
+    def sisfe_download_key(case: Case | None, movement_id: str) -> tuple[str, str]:
+        case_path = str(case.path.resolve()) if case else ""
+        return case_path, str(movement_id or "")
+
+    def sisfe_request_key(self, request: tuple[str, dict] | None) -> tuple[str, str]:
+        if not request:
+            return "", ""
+        _remote_case_id, detail = request
+        context = detail.get("_gestor_context", {})
+        return self.sisfe_download_key(
+            context.get("case"), str(detail.get("movement_id") or "")
+        )
+
     def start_sisfe_download(self, remote_case_id: str, movement_detail: dict):
-        if self._sisfe_download_active:
-            self.statusBar().showMessage("Esperá a que termine la descarga SISFE en curso.", 5000)
-            return
         movement_detail = dict(movement_detail)
         context = movement_detail.setdefault("_gestor_context", self.capture_sisfe_context())
         case = context["case"]
         if not remote_case_id or not self._sisfe_login_dialog or not case:
             return
+        request = (remote_case_id, movement_detail)
+        key = self.sisfe_request_key(request)
+        known_requests = [self._sisfe_download_request, *self._sisfe_download_queue]
+        if key != ("", "") and any(self.sisfe_request_key(known) == key for known in known_requests):
+            self.statusBar().showMessage("Ese movimiento ya está en la cola de descargas.", 5000)
+            return
+        self._sisfe_download_failures.pop(key, None)
+        if self._sisfe_download_active:
+            self._sisfe_download_queue.append(request)
+            self._sisfe_download_states[key] = (
+                "queued",
+                f"En espera · posición {len(self._sisfe_download_queue)}",
+            )
+            if self.case == case:
+                self.reload_novedades()
+            self.sisfe_status.set_state(
+                OperationState.RUNNING,
+                f"Descargando desde SISFE · {len(self._sisfe_download_queue)} en cola",
+            )
+            self.statusBar().showMessage("Movimiento agregado a la cola SISFE.", 5000)
+            return
+        self._begin_sisfe_download(request)
+
+    def _begin_sisfe_download(self, request: tuple[str, dict]):
+        remote_case_id, movement_detail = request
+        context = movement_detail.get("_gestor_context", {})
+        case = context.get("case")
+        if not self._sisfe_login_dialog or not case:
+            return
         if self._sisfe_case_dialog is not None:
             self._sisfe_case_dialog.close()
             self._sisfe_case_dialog.deleteLater()
-        self._sisfe_download_request = (remote_case_id, dict(movement_detail))
+        self._sisfe_download_request = request
+        key = self.sisfe_request_key(request)
+        self._sisfe_download_states[key] = ("running", "Descarga en segundo plano")
         self._sisfe_case_dialog = SisfeCaseBrowserDialog(
             self._sisfe_login_dialog.profile,
             remote_case_id,
@@ -4584,12 +4660,26 @@ class MainWindow(QMainWindow):
         self._sisfe_download_active = True
         self.sisfe_retry_button.setVisible(False)
         self.sisfe_show_download_button.setVisible(False)
-        self.sisfe_status.set_state(OperationState.RUNNING, "Descargando desde SISFE…")
+        queue_suffix = (
+            f" · {len(self._sisfe_download_queue)} en cola"
+            if self._sisfe_download_queue else ""
+        )
+        self.sisfe_status.set_state(
+            OperationState.RUNNING, f"Descargando desde SISFE…{queue_suffix}"
+        )
         self.statusBar().showMessage("La descarga SISFE continúa en segundo plano", 5000)
+        if self.case == case:
+            self.reload_novedades()
 
     def sisfe_download_finished(self, success: bool, message: str):
+        request = self._sisfe_download_request
+        key = self.sisfe_request_key(request)
+        case = request[1].get("_gestor_context", {}).get("case") if request else None
         self._sisfe_download_active = False
+        self._sisfe_download_request = None
         if success:
+            self._sisfe_download_states[key] = ("completed", message)
+            self._sisfe_download_failures.pop(key, None)
             self.sisfe_status.set_state(OperationState.SUCCESS, "Descarga SISFE completada")
             self.statusBar().showMessage(f"SISFE: {message}", 6500)
             dialog = self._sisfe_case_dialog
@@ -4599,17 +4689,37 @@ class MainWindow(QMainWindow):
                 dialog.deleteLater()
             self.sisfe_retry_button.setVisible(False)
             self.sisfe_show_download_button.setVisible(False)
-            return
-        self.sisfe_status.set_state(OperationState.ERROR, "No se pudo descargar desde SISFE")
-        self.sisfe_status.setToolTip(message)
-        self.sisfe_retry_button.setVisible(True)
-        self.sisfe_show_download_button.setVisible(True)
-        self.statusBar().showMessage(f"SISFE: {message}", 9000)
+        else:
+            self._sisfe_download_states[key] = ("failed", message)
+            if request:
+                self._sisfe_download_failures[key] = request
+            self.sisfe_status.set_state(OperationState.ERROR, "No se pudo descargar desde SISFE")
+            self.sisfe_status.setToolTip(message)
+            self.sisfe_retry_button.setVisible(True)
+            self.sisfe_show_download_button.setVisible(True)
+            self.statusBar().showMessage(f"SISFE: {message}", 9000)
+        if self.case == case:
+            self.reload_novedades()
+        if self._sisfe_download_queue:
+            failed_dialog = self._sisfe_case_dialog
+            self._sisfe_case_dialog = None
+            if failed_dialog is not None:
+                failed_dialog.close()
+                failed_dialog.deleteLater()
+            next_request = self._sisfe_download_queue.pop(0)
+            QTimer.singleShot(0, lambda value=next_request: self._begin_sisfe_download(value))
 
     def retry_sisfe_download(self):
-        if self._sisfe_download_request:
-            remote_case_id, movement_detail = self._sisfe_download_request
-            self.start_sisfe_download(remote_case_id, movement_detail)
+        if not self._sisfe_download_failures:
+            return
+        key = next(reversed(self._sisfe_download_failures))
+        self.retry_sisfe_movement(key)
+
+    def retry_sisfe_movement(self, key: tuple[str, str]):
+        request = self._sisfe_download_failures.pop(key, None)
+        if not request:
+            return
+        self.start_sisfe_download(*request)
 
     def show_sisfe_download(self):
         if self._sisfe_case_dialog is None:
@@ -4619,19 +4729,20 @@ class MainWindow(QMainWindow):
         self._sisfe_case_dialog.activateWindow()
 
     def sisfe_document_saved(self, path: str, duplicate: bool):
-        self.reload_case_files()
+        request = self._sisfe_download_request
+        context = request[1].get("_gestor_context", {}) if request else {}
+        owner_case = context.get("case")
+        if self.case == owner_case:
+            self.reload_case_files()
+            self.reload_novedades()
         if duplicate:
             message = "SISFE: el documento ya estaba guardado"
         else:
             message = f"SISFE: archivo guardado en {Path(path).parent.name}"
         self.statusBar().showMessage(message, 6000)
-        pending_movement = self._pending_cedula_movement_id
-        request = self._sisfe_download_request
-        downloaded_movement = str(request[1].get("movement_id") or "") if request else ""
         saved_path = Path(path)
-        if pending_movement and pending_movement == downloaded_movement and saved_path.suffix.lower() == ".pdf":
-            self._pending_cedula_movement_id = ""
-            context = request[1].get("_gestor_context", self.capture_sisfe_context())
+        generate_cedula = bool(request and request[1].pop("_generate_cedula", False))
+        if generate_cedula and saved_path.suffix.lower() == ".pdf":
             QTimer.singleShot(0, lambda value=saved_path, owner=context: self.generate_cedula_from_pdf(value, context=owner))
 
     def require_study(self) -> bool:

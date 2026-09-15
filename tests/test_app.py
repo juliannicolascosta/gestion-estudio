@@ -600,9 +600,15 @@ class AppSmokeTests(unittest.TestCase):
             store.set_study_root(study)
             window = MainWindow(store)
             window.reload_cases(case.path)
-            window._pending_cedula_movement_id = "mov-10"
             context = window.capture_sisfe_context()
-            window._sisfe_download_request = ("remote-1", {"movement_id": "mov-10", "_gestor_context": context})
+            window._sisfe_download_request = (
+                "remote-1",
+                {
+                    "movement_id": "mov-10",
+                    "_gestor_context": context,
+                    "_generate_cedula": True,
+                },
+            )
             second = create_case(study, "Otro caso")
             window.set_case(second)
 
@@ -613,7 +619,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(generate.call_args.args, (pdf,))
             self.assertEqual(generate.call_args.kwargs["context"]["case"], case)
             self.assertEqual(generate.call_args.kwargs["context"]["professional"], context["professional"])
-            self.assertEqual(window._pending_cedula_movement_id, "")
+            self.assertNotIn("_generate_cedula", window._sisfe_download_request[1])
             window.close()
 
     def test_sisfe_sync_keeps_original_case_after_navigation(self):
@@ -639,7 +645,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.case, second)
             window.close()
 
-    def test_download_retry_keeps_case_and_rejects_competing_job(self):
+    def test_download_queue_keeps_each_case_and_continues_after_an_error(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first = create_case(root / "Estudio", "Primero")
@@ -654,17 +660,30 @@ class AppSmokeTests(unittest.TestCase):
                 window.set_case(second)
                 window.start_sisfe_download("remote-2", {"movement_id": "mov-2"})
                 self.assertEqual(factory.call_count, 1)
-                factory.return_value.close.assert_not_called()
+                self.assertEqual(len(window._sisfe_download_queue), 1)
+                queued = window.sisfe_download_key(second, "mov-2")
+                self.assertEqual(window._sisfe_download_states[queued][0], "queued")
                 event = MagicMock()
                 window.closeEvent(event)
                 event.ignore.assert_called_once()
-                closed = factory.return_value.finished.connect.call_args.args[0]
-                closed(0)
-                self.assertFalse(window._sisfe_download_active)
-                window.retry_sisfe_download()
+
+                window.sisfe_download_finished(True, "Primera lista")
+                self.app.processEvents()
                 self.assertEqual(factory.call_count, 2)
-                self.assertEqual(factory.call_args.args[2], first)
-                self.assertEqual(window._sisfe_download_request[0], "remote-1")
+                self.assertTrue(window._sisfe_download_active)
+                self.assertEqual(window._sisfe_download_request[0], "remote-2")
+                self.assertEqual(
+                    window._sisfe_download_request[1]["_gestor_context"]["case"], second
+                )
+
+                window.sisfe_download_finished(False, "SISFE no respondió")
+                self.assertFalse(window._sisfe_download_active)
+                self.assertEqual(window._sisfe_download_states[queued][0], "failed")
+                self.assertFalse(window.sisfe_retry_button.isHidden())
+                window.retry_sisfe_download()
+                self.assertEqual(factory.call_count, 3)
+                self.assertEqual(factory.call_args.args[2], second)
+                self.assertEqual(window._sisfe_download_request[0], "remote-2")
                 window.sisfe_download_finished(True, "Listo")
             window.close()
 
@@ -1039,6 +1058,39 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIn("PDF disponible localmente", window.novedades_list.item(0).text())
             self.assertEqual(data["local_documents"], [str(local_pdf.resolve())])
             self.assertEqual(local_pdf.read_bytes(), before)
+            window.close()
+
+    def test_portal_shows_queued_and_failed_download_states_per_movement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                database.add_movement(
+                    expediente.id,
+                    "Resolución para descargar",
+                    source="sisfe",
+                    external_id="mov-state",
+                )
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+            key = window.sisfe_download_key(case, "mov-state")
+
+            window._sisfe_download_states[key] = ("queued", "En espera · posición 1")
+            window.reload_novedades()
+            queued_item = window.novedades_list.item(0)
+            self.assertIn("EN COLA", queued_item.text())
+            self.assertEqual(queued_item.data(MOVEMENT_ROLE)["download_state"], "queued")
+
+            window._sisfe_download_states[key] = ("failed", "SISFE no respondió")
+            window.reload_novedades()
+            failed_item = window.novedades_list.item(0)
+            self.assertIn("ERROR", failed_item.text())
+            self.assertIn("SISFE no respondió", failed_item.toolTip())
+            self.assertFalse(any(case.path.glob("Documentos SISFE/*")))
             window.close()
 
     def test_case_files_can_be_ordered_visually_without_changing_the_case(self):

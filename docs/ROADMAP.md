@@ -78,7 +78,7 @@
 
 - [ ] Completar la separación de `app.py` en paneles y controladores; los componentes de compilación y los diálogos SISFE ya fueron extraídos sin cambiar el flujo probado.
 - [x] Automatizar la acción oficial de descarga dentro del navegador SISFE y vincular cada archivo con su movimiento.
-- [ ] Ejecutar las descargas SISFE en una cola oculta y reflejar check, error y reintento en el Portal.
+- [x] Ejecutar las descargas SISFE en una cola oculta y reflejar check, error y reintento en el Portal.
 - [ ] Retirar el transporte HTTP SISFE heredado cuando existan pruebas de aceptación suficientes del flujo de navegador.
 - [ ] Pantalla completa de configuración: profesionales, modelos y firmador.
 - [ ] Vincular carpeta externa como caso mediante copia normalizada y vista previa.
