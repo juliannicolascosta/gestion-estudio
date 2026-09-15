@@ -123,9 +123,11 @@ from .services import (
     add_model,
     can_convert_to_pdf,
     case_matches,
+    copy_external_case,
     create_case,
     create_writing,
     ensure_default_writing_template,
+    external_case_summary,
     find_unresolved_placeholders,
     focus_or_launch_signer,
     human_size,
@@ -152,6 +154,7 @@ from .study_backup import BackupResult, RestoreResult
 from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationList
 from .ui.case_files import CaseFilesList, QuickAccessList
+from .ui.case_import import ExternalCaseImportDialog
 from .ui.operation_status import OperationState, OperationStatusIndicator
 from .ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE, PATH_ROLE, PENDING_DUE_ROLE, ROOT_ROLE, TYPE_ROLE
 from .ui.settings_dialogs import (
@@ -1746,6 +1749,11 @@ class MainWindow(QMainWindow):
         decorate_button(new_case, "folder-plus", "#FFFFFF")
         new_case.clicked.connect(self.new_case)
         side_layout.addWidget(new_case)
+        import_case = QPushButton("Incorporar carpeta como caso")
+        decorate_button(import_case, "folder-plus")
+        import_case.setToolTip("Copiar una carpeta externa completa después de revisar el destino")
+        import_case.clicked.connect(self.import_external_case)
+        side_layout.addWidget(import_case)
         self.case_tree = QTreeWidget()
         self.case_tree.setObjectName("caseTree")
         self.case_tree.setHeaderHidden(True)
@@ -4435,6 +4443,46 @@ class MainWindow(QMainWindow):
         if not self.require_study():
             return
         self.new_case_in_root(self.store.settings.study_root)
+
+    def import_external_case(self):
+        if not self.require_study():
+            return
+        root = self.store.settings.study_root
+        if root is None or not root.is_dir():
+            QMessageBox.warning(
+                self,
+                "Ubicación no disponible",
+                "Conectá o sincronizá esta ubicación antes de incorporar un caso.",
+            )
+            return
+        source_name = QFileDialog.getExistingDirectory(
+            self,
+            "Elegí la carpeta externa del caso",
+            str(root.parent),
+        )
+        if not source_name:
+            return
+        source = Path(source_name)
+        try:
+            file_count, total_bytes = external_case_summary(source)
+            dialog = ExternalCaseImportDialog(
+                source,
+                root,
+                file_count,
+                total_bytes,
+                self,
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            case = copy_external_case(root, source, dialog.case_name)
+            self.reload_cases(case.path)
+            self.set_case(case)
+            self.statusBar().showMessage(
+                f"Caso incorporado por copia: {case.name} · el origen no fue modificado",
+                7000,
+            )
+        except Exception as error:
+            QMessageBox.critical(self, "No pudimos incorporar la carpeta", str(error))
 
     def new_case_in_root(self, root: Path):
         if not root.is_dir():

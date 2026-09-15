@@ -81,7 +81,7 @@
 - [x] Ejecutar las descargas SISFE en una cola oculta y reflejar check, error y reintento en el Portal.
 - [ ] Retirar el transporte HTTP SISFE heredado cuando existan pruebas de aceptación suficientes del flujo de navegador.
 - [x] Pantalla completa de configuración: profesionales, modelos y firmador.
-- [ ] Vincular carpeta externa como caso mediante copia normalizada y vista previa.
+- [x] Vincular carpeta externa como caso mediante copia normalizada y vista previa.
 - [ ] Reglas avanzadas configurables de nomenclatura para quienes no usen el formato recomendado.
 - [ ] Detección configurable de la carpeta de salida del firmador para recuperar automáticamente el PDF firmado.
 - [x] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.

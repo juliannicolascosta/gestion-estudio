@@ -422,6 +422,42 @@ def create_case(study_root: Path, name: str) -> Case:
     return case
 
 
+def external_case_summary(source: Path) -> tuple[int, int]:
+    """Return file count and total bytes without changing the selected folder."""
+    if not source.is_dir():
+        raise NotADirectoryError(f"No encontramos la carpeta {source.name}.")
+    files = 0
+    total_bytes = 0
+    for path in source.rglob("*"):
+        if path.is_symlink():
+            raise ValueError("La carpeta contiene accesos simbólicos y no puede copiarse de forma segura.")
+        if path.is_file():
+            files += 1
+            total_bytes += path.stat().st_size
+    return files, total_bytes
+
+
+def copy_external_case(study_root: Path, source: Path, name: str | None = None) -> Case:
+    """Copy an external folder into a Study location without modifying its source."""
+    root = study_root.resolve()
+    origin = source.resolve()
+    if not root.is_dir():
+        raise NotADirectoryError("La Ubicación del Estudio no está disponible.")
+    if origin == root or origin.is_relative_to(root) or root.is_relative_to(origin):
+        raise ValueError("Elegí una carpeta externa a la Ubicación del Estudio.")
+    external_case_summary(origin)
+    normalized = safe_name(name or origin.name)
+    if not normalized:
+        raise ValueError("Escribí un nombre para el caso.")
+    target = root / normalized
+    if target.exists():
+        raise FileExistsError(f"Ya existe un caso llamado “{normalized}”.")
+    # El origen nunca se altera. Ante una interrupción, no se elimina de forma
+    # automática lo ya copiado dentro de ESTUDIO: el usuario conserva el control.
+    shutil.copytree(origin, target)
+    return Case(target)
+
+
 def rename_case(case: Case, new_name: str) -> Case:
     normalized = safe_name(new_name)
     if not normalized:

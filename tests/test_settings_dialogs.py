@@ -1,5 +1,6 @@
 import os
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -11,6 +12,7 @@ from gestor_documental.ui.settings_dialogs import (
     ProfessionalProfileDialog,
     SisfeAccessDialog,
 )
+from gestor_documental.ui.case_import import ExternalCaseImportDialog
 
 
 class SettingsDialogTests(unittest.TestCase):
@@ -54,6 +56,19 @@ class SettingsDialogTests(unittest.TestCase):
         professional_buttons = dialog.tabs.widget(0).findChildren(QPushButton)
         professional_buttons[0].click()
         self.assertEqual(requested, ["add_professional"])
+        dialog.close()
+
+    def test_external_case_preview_normalizes_name_and_shows_destination(self):
+        dialog = ExternalCaseImportDialog(
+            Path("C:/Origen/Caso externo"),
+            Path("C:/Estudio"),
+            12,
+            2048,
+        )
+        dialog.name_edit.setText('Pérez: c/ "Empresa"')
+
+        self.assertEqual(dialog.case_name, "Pérez- c- -Empresa")
+        self.assertIn("Pérez- c- -Empresa", dialog.destination_label.text())
         dialog.close()
 
     def test_professional_profile_trims_values_and_omits_empty_fields(self):

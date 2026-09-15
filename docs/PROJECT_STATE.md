@@ -34,6 +34,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Diálogos de configuración de actividad, perfiles profesionales y acceso SISFE separados de la ventana principal, con validación de sus valores cubierta de forma independiente.
 - Tareas en segundo plano de compilación, extracción de cédulas y respaldo/restauración separadas de la ventana principal, manteniendo señales diferenciadas de progreso, cancelación, resultado y error.
 - Centro único de configuración con pestañas para profesionales, modelos Word y firmador externo; reutiliza las operaciones existentes y actualiza sus resúmenes al regresar de cada acción.
+- Incorporación de carpetas externas como casos mediante copia explícita: antes de confirmar muestra origen, destino normalizado, cantidad de archivos y tamaño; rechaza relaciones recursivas y nunca mueve ni modifica la carpeta original.
 - Varias Ubicaciones del Estudio configurables, con migración automática de la configuración anterior de una sola carpeta.
 - Árbol con una raíz azul por ubicación y buscador inteligente que consulta todos los casos en conjunto.
 - Selección del árbol sin el bloque azul nativo de Windows e iconografía vectorial coherente con la paleta del producto.
@@ -138,4 +139,4 @@ La prioridad inmediata sigue siendo consolidar el flujo documental y SISFE. La r
 
 ## Publicación
 
-La versión `0.13.5` es la referencia estable de trabajo y cuenta con instalador transaccional para Windows. Primero prepara y valida el programa nuevo, cierra todos los procesos de la instalación anterior y conserva una copia de respaldo durante el intercambio. Reemplaza sólo el programa y mantiene las Ubicaciones del Estudio, `%APPDATA%\GestorDocumental`, los modelos personalizados y las bases locales. El arranque no depende de poder escribir el registro de diagnóstico y el instalador valida los accesos directos antes de confirmar la actualización. El instalador todavía no está firmado con un certificado de publicación ni incorpora actualización automática.
+La versión `0.13.6` es la referencia estable de trabajo y cuenta con instalador transaccional para Windows. Primero prepara y valida el programa nuevo, cierra todos los procesos de la instalación anterior y conserva una copia de respaldo durante el intercambio. Reemplaza sólo el programa y mantiene las Ubicaciones del Estudio, `%APPDATA%\GestorDocumental`, los modelos personalizados y las bases locales. El arranque no depende de poder escribir el registro de diagnóstico y el instalador valida los accesos directos antes de confirmar la actualización. El instalador todavía no está firmado con un certificado de publicación ni incorpora actualización automática.

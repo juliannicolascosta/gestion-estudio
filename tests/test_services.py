@@ -23,9 +23,11 @@ from gestor_documental.services import (
     case_matches,
     compile_documents,
     compress_pdf,
+    copy_external_case,
     create_case,
     create_writing,
     ensure_default_writing_template,
+    external_case_summary,
     find_unresolved_placeholders,
     ensure_bundled_writing_models,
     import_file,
@@ -674,6 +676,39 @@ class ServiceTests(unittest.TestCase):
             parts = split_pdf(source, 600, root)
             self.assertGreaterEqual(len(parts), 1)
             self.assertTrue(all(path.parent == root for path in parts))
+
+    def test_external_case_is_copied_with_normalized_name_and_source_untouched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            source = root / "Carpeta externa"
+            study.mkdir()
+            (source / "Documental").mkdir(parents=True)
+            original = source / "Documental" / "DNI.txt"
+            original.write_text("contenido original", encoding="utf-8")
+
+            self.assertEqual(external_case_summary(source), (1, len("contenido original")))
+            case = copy_external_case(study, source, 'Gómez: c/ "Empresa"')
+
+            self.assertEqual(case.name, "Gómez- c- -Empresa")
+            self.assertEqual(
+                (case.path / "Documental" / "DNI.txt").read_text(encoding="utf-8"),
+                "contenido original",
+            )
+            self.assertTrue(original.is_file())
+            self.assertEqual(original.read_text(encoding="utf-8"), "contenido original")
+
+    def test_external_case_rejects_sources_inside_or_above_the_study(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            existing = study / "Caso existente"
+            existing.mkdir(parents=True)
+
+            with self.assertRaises(ValueError):
+                copy_external_case(study, existing)
+            with self.assertRaises(ValueError):
+                copy_external_case(study, root)
 
     def test_names_and_limits(self):
         self.assertEqual(safe_name('Gómez: c/ "SIJAM"'), "Gómez- c- -SIJAM")
