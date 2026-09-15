@@ -29,6 +29,7 @@ class ActivityItem:
     task_id: str = ""
     completed: bool = False
     urgency: str = ""
+    reminder: bool = False
 
 
 def activity_task_key(source: str, external_id: str, kind: str, title: str) -> str:
@@ -131,7 +132,7 @@ def build_case_activity(
             ActivityItem(
                 kind="Posible recepción" if matched_path else "Documentación",
                 title=title,
-                detail=(f"{pending_urgency.upper()} · " if pending_urgency else "") + (
+                detail=(f"RECORDATORIO · {pending_urgency.upper()} · " if pending_due else "") + (
                     f"Revisar archivo compatible · {matched_path}"
                     if matched_path
                     else (
@@ -147,6 +148,7 @@ def build_case_activity(
                 file_path=matched_path,
                 due_at=pending_due,
                 urgency=pending_urgency,
+                reminder=pending_due is not None,
             )
         )
 

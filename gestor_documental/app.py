@@ -2191,7 +2191,9 @@ class MainWindow(QMainWindow):
         decorate_button(pending_add, "plus")
         pending_add.clicked.connect(self.add_pending_document)
         self.pending_rename_button = icon_button("edit", "Renombrar pendiente", self.rename_pending_document)
-        self.pending_due_button = icon_button("bell", "Definir fecha objetivo", self.set_pending_document_due_date)
+        self.pending_due_button = icon_button(
+            "bell", "Definir fecha objetivo y recordatorio", self.set_pending_document_due_date
+        )
         self.pending_delete_button = icon_button("trash", "Borrar pendientes seleccionados", self.delete_pending_documents)
         self.pending_clear_button = icon_button("clear", "Vaciar la lista de pendientes", self.clear_pending_documents)
         self.pending_up_button = icon_button("arrow-up", "Subir en el orden", lambda: self.move_pending_document(-1))
@@ -3389,12 +3391,17 @@ class MainWindow(QMainWindow):
                     "task_id": activity.task_id,
                     "completed": activity.completed,
                     "urgency": activity.urgency,
+                    "reminder": activity.reminder,
                 },
             )
             item.setToolTip(
-                "Tarea ya confirmada · doble clic para abrir el origen"
-                if activity.confirmed
-                else "Doble clic para abrir el origen"
+                "Recordatorio confirmado por el profesional · doble clic para abrir el origen"
+                if activity.reminder
+                else (
+                    "Tarea ya confirmada · doble clic para abrir el origen"
+                    if activity.confirmed
+                    else "Doble clic para abrir el origen"
+                )
             )
             if activity.priority <= 1:
                 font = QFont(item.font())
@@ -3782,7 +3789,10 @@ class MainWindow(QMainWindow):
             due_at = due_dates.get(value.casefold())
             item.setData(PENDING_DUE_ROLE, due_at.isoformat() if due_at else "")
             if due_at:
-                item.setToolTip(item.toolTip() + f" · fecha objetivo {due_at.strftime('%d/%m/%Y')}")
+                item.setToolTip(
+                    item.toolTip()
+                    + f" · recordatorio para el {due_at.strftime('%d/%m/%Y')}"
+                )
             self.pending_documents_list.addItem(item)
         self._loading_pending = False
         pending_count = sum(value not in received for value in values)
@@ -3918,8 +3928,8 @@ class MainWindow(QMainWindow):
         initial = datetime.fromisoformat(current).strftime("%d/%m/%Y") if current else ""
         raw, accepted = QInputDialog.getText(
             self,
-            "Fecha de documentación",
-            "Fecha objetivo (dd/mm/aaaa; vacío para quitar):",
+            "Recordatorio de documentación",
+            "Recordar en esta fecha (dd/mm/aaaa; vacío para quitar):",
             text=initial,
         )
         if not accepted:

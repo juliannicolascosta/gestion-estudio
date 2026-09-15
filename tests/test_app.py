@@ -486,7 +486,10 @@ class AppSmokeTests(unittest.TestCase):
                 "2026-09-18T00:00:00",
                 read_case_metadata(case)["Fechas de documentación pendiente"],
             )
-            self.assertIn("18/09/2026", window.pending_documents_list.item(1).toolTip())
+            self.assertIn(
+                "recordatorio para el 18/09/2026",
+                window.pending_documents_list.item(1).toolTip(),
+            )
 
             window.pending_documents_list.setCurrentRow(0)
             window.complete_pending_documents()

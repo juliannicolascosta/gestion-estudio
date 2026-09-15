@@ -66,7 +66,15 @@ class ActivityCenterTests(unittest.TestCase):
             now=datetime(2026, 9, 14, 8),
         )[0]
         self.assertEqual(item.urgency, "Hoy")
-        self.assertIn("HOY", item.detail)
+        self.assertTrue(item.reminder)
+        self.assertIn("RECORDATORIO · HOY", item.detail)
+
+    def test_pending_document_without_due_date_is_not_a_reminder(self):
+        item = build_case_activity(
+            [], ["Historia clínica"], [], now=datetime(2026, 9, 14, 8)
+        )[0]
+        self.assertFalse(item.reminder)
+        self.assertNotIn("RECORDATORIO", item.detail)
 
     def test_does_not_show_received_or_unrelated_information(self):
         unrelated = Movimiento(id="m1", expediente_id="e1", title="Escrito presentado", source="sisfe")

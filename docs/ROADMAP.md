@@ -87,7 +87,7 @@
 - [x] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.
 - [x] Confirmar la recepción sugerida desde Actividad manteniendo el historial del checklist.
 - [x] Fecha objetivo opcional para cada documento pendiente, integrada con Actividad.
-- [ ] Recordatorios confirmados por el profesional para documentación todavía pendiente.
+- [x] Recordatorios locales confirmados por el profesional para documentación todavía pendiente.
 
 ## Robustez
 
