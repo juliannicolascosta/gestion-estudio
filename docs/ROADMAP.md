@@ -76,17 +76,14 @@
 
 ## Próxima iteración
 
-- [ ] Completar la separación de `app.py` en paneles y controladores; los componentes y tareas en segundo plano de compilación, extracción y respaldo, los paneles de archivos/acceso rápido y los diálogos de configuración y SISFE ya fueron extraídos sin cambiar el flujo probado.
+- [x] Separación suficiente de `app.py` para esta etapa: componentes y tareas en segundo plano de compilación, extracción y respaldo, paneles de archivos/acceso rápido y diálogos de configuración y SISFE extraídos sin cambiar el flujo probado.
 - [x] Automatizar la acción oficial de descarga dentro del navegador SISFE y vincular cada archivo con su movimiento.
 - [x] Ejecutar las descargas SISFE en una cola oculta y reflejar check, error y reintento en el Portal.
 - [ ] Retirar el transporte HTTP SISFE heredado cuando existan pruebas de aceptación suficientes del flujo de navegador.
-- [ ] Pantalla completa de configuración: profesionales, modelos y firmador.
+- [x] Pantalla completa de configuración: profesionales, modelos y firmador.
 - [ ] Vincular carpeta externa como caso mediante copia normalizada y vista previa.
 - [ ] Reglas avanzadas configurables de nomenclatura para quienes no usen el formato recomendado.
 - [ ] Detección configurable de la carpeta de salida del firmador para recuperar automáticamente el PDF firmado.
-- [ ] Generación automática del oficio y formulario RAEO desde la ficha validada.
-- [ ] Definir con el profesional una regla asistida para monto reclamado sin reemplazar la edición manual.
-- [ ] Sellado de tiempo y validación de largo plazo PAdES-LT/LTA, si los organismos receptores lo requieren.
 - [x] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.
 - [x] Confirmar la recepción sugerida desde Actividad manteniendo el historial del checklist.
 - [x] Fecha objetivo opcional para cada documento pendiente, integrada con Actividad.
@@ -96,7 +93,6 @@
 
 - [x] Cancelación segura de conversiones en segundo plano.
 - [x] Compresión que preserve texto vectorial cuando sea posible.
-- [ ] Vista previa de páginas y validación visual.
 - [x] Conservación del armado vigente por expediente.
 - [ ] Historial versionado de compilaciones anteriores y repetición de un armado histórico.
 - [ ] Instalador firmado y actualización controlada.
@@ -105,3 +101,7 @@
 
 - Carga automática en SRT, SISFE o portales de Provincia.
 - Agenda y gestión jurídica integral.
+- Oficio y formulario RAEO mediante un flujo automático fijo; se generarán desde modelos editables.
+- Regla asistida para monto reclamado, postergada hasta definir el criterio profesional.
+- Sellado de tiempo y validación PAdES-LT/LTA, no necesarios en esta etapa.
+- Vista previa visual de páginas, descartada para el alcance actual.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -8,6 +9,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -47,6 +49,94 @@ def _heading(title: str, subtitle: str) -> QVBoxLayout:
     description.setWordWrap(True)
     layout.addWidget(description)
     return layout
+
+
+class ApplicationSettingsDialog(QDialog):
+    """Centro único para las preferencias cotidianas de la aplicación."""
+
+    actionRequested = pyqtSignal(str)
+
+    def __init__(self, summary: dict[str, object], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Configuración")
+        self.setMinimumSize(680, 520)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.addLayout(_heading(
+            "Configuración del Gestor",
+            "Profesionales, modelos de escritos y firma reunidos en un solo lugar.",
+        ))
+        self.tabs = QTabWidget()
+        self.professional_summary = QLabel()
+        self.models_summary = QLabel()
+        self.signer_summary = QLabel()
+        self.tabs.addTab(
+            self._action_tab(
+                self.professional_summary,
+                (
+                    ("Añadir profesional", "add_professional"),
+                    ("Editar perfil actual", "edit_professional"),
+                    ("Acceso MEV", "configure_mev"),
+                    ("Acceso SISFE", "configure_sisfe"),
+                ),
+            ),
+            "Profesionales",
+        )
+        self.tabs.addTab(
+            self._action_tab(
+                self.models_summary,
+                (
+                    ("Agregar modelo Word", "add_model"),
+                    ("Abrir carpeta de modelos", "open_models"),
+                    ("Modificar modelo base", "open_base_template"),
+                    ("Ver campos automáticos", "show_template_variables"),
+                ),
+            ),
+            "Modelos",
+        )
+        self.tabs.addTab(
+            self._action_tab(
+                self.signer_summary,
+                (("Elegir aplicación de firma", "configure_signer"),),
+            ),
+            "Firmador",
+        )
+        layout.addWidget(self.tabs, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.refresh_summary(summary)
+
+    def _action_tab(self, summary: QLabel, actions: tuple[tuple[str, str], ...]) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(18, 18, 18, 18)
+        summary.setWordWrap(True)
+        summary.setObjectName("settingsSummary")
+        layout.addWidget(summary)
+        layout.addSpacing(10)
+        for label, action_name in actions:
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda _checked=False, name=action_name: self.actionRequested.emit(name)
+            )
+            layout.addWidget(button)
+        layout.addStretch()
+        return tab
+
+    def refresh_summary(self, summary: dict[str, object]):
+        professional = str(summary.get("professional") or "Sin profesional seleccionado")
+        profile_fields = int(summary.get("profile_fields") or 0)
+        self.professional_summary.setText(
+            f"Profesional actual: {professional}\nDatos completos: {profile_fields} campos."
+        )
+        models_count = int(summary.get("models_count") or 0)
+        models_path = str(summary.get("models_path") or "")
+        self.models_summary.setText(
+            f"Modelos disponibles: {models_count}\nCarpeta: {models_path}"
+        )
+        signer = str(summary.get("signer") or "Sin aplicación externa configurada")
+        self.signer_summary.setText(f"Firmador externo: {signer}")
 
 
 class ActivitySettingsDialog(QDialog):

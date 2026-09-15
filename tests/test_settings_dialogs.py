@@ -3,10 +3,11 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QPushButton
 
 from gestor_documental.ui.settings_dialogs import (
     ActivitySettingsDialog,
+    ApplicationSettingsDialog,
     ProfessionalProfileDialog,
     SisfeAccessDialog,
 )
@@ -28,6 +29,31 @@ class SettingsDialogTests(unittest.TestCase):
         self.assertEqual(values["yellow_days"], 45)
         self.assertEqual(values["red_days"], 46)
         self.assertTrue(values["green_color"].startswith("#"))
+        dialog.close()
+
+    def test_application_settings_groups_actions_and_refreshes_summaries(self):
+        dialog = ApplicationSettingsDialog(
+            {
+                "professional": "Ana Pérez",
+                "profile_fields": 8,
+                "models_count": 3,
+                "models_path": "C:/Modelos",
+                "signer": "XolidoSign.exe",
+            }
+        )
+        requested = []
+        dialog.actionRequested.connect(requested.append)
+
+        self.assertEqual(
+            [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
+            ["Profesionales", "Modelos", "Firmador"],
+        )
+        self.assertIn("Ana Pérez", dialog.professional_summary.text())
+        self.assertIn("3", dialog.models_summary.text())
+        self.assertIn("XolidoSign.exe", dialog.signer_summary.text())
+        professional_buttons = dialog.tabs.widget(0).findChildren(QPushButton)
+        professional_buttons[0].click()
+        self.assertEqual(requested, ["add_professional"])
         dialog.close()
 
     def test_professional_profile_trims_values_and_omits_empty_fields(self):

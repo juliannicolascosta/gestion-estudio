@@ -68,6 +68,7 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertFalse(window.professional_settings_button.icon().isNull())
             settings_actions = [action.text() for action in window.professional_settings_button.menu().actions()]
+            self.assertIn("Configuración general…", settings_actions)
             self.assertIn("Crear respaldo del Estudio…", settings_actions)
             self.assertIn("Restaurar respaldo del Estudio…", settings_actions)
             self.assertEqual(window.work_tabs.count(), 4)

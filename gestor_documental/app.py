@@ -154,7 +154,12 @@ from .ui.compilation import CompilationList
 from .ui.case_files import CaseFilesList, QuickAccessList
 from .ui.operation_status import OperationState, OperationStatusIndicator
 from .ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE, PATH_ROLE, PENDING_DUE_ROLE, ROOT_ROLE, TYPE_ROLE
-from .ui.settings_dialogs import ActivitySettingsDialog, ProfessionalProfileDialog, SisfeAccessDialog
+from .ui.settings_dialogs import (
+    ActivitySettingsDialog,
+    ApplicationSettingsDialog,
+    ProfessionalProfileDialog,
+    SisfeAccessDialog,
+)
 from .ui.sisfe import SisfeCaseBrowserDialog, SisfeLoginDialog
 
 
@@ -1684,13 +1689,7 @@ class MainWindow(QMainWindow):
             color="#173F37",
         )
         professional_menu = QMenu(self.professional_settings_button)
-        professional_menu.addAction("Añadir profesional…", self.add_professional)
-        professional_menu.addAction("Editar perfil actual…", self.edit_current_professional)
-        professional_menu.addAction("Configurar acceso MEV…", self.configure_mev_profile)
-        professional_menu.addAction("Configurar acceso SISFE…", self.configure_sisfe_profile)
-        professional_menu.addSeparator()
-        professional_menu.addAction("Configurar firmador externo…", self.configure_signer)
-        professional_menu.addAction("Abrir modelos de escritos", self.open_models_folder)
+        professional_menu.addAction("Configuración general…", self.configure_application)
         professional_menu.addAction("Configurar semáforo de casos…", self.configure_case_activity)
         professional_menu.addSeparator()
         professional_menu.addAction("Crear respaldo del Estudio…", self.create_active_study_backup)
@@ -2481,6 +2480,43 @@ class MainWindow(QMainWindow):
             self.models_button,
         ):
             widget.setVisible(content_visible)
+
+    def application_settings_summary(self) -> dict[str, object]:
+        professional = self.professional_combo.currentText().strip()
+        if professional == ADD_PROFESSIONAL_LABEL:
+            professional = ""
+        profile = self.store.settings.professional_profiles.get(professional, {})
+        signer = self.store.settings.signer_path
+        return {
+            "professional": professional,
+            "profile_fields": sum(bool(str(value).strip()) for value in profile.values()),
+            "models_count": len(list_models(self.store.models_dir)),
+            "models_path": self.store.models_dir,
+            "signer": signer.name if signer else "",
+        }
+
+    def configure_application(self):
+        dialog = ApplicationSettingsDialog(self.application_settings_summary(), self)
+        actions = {
+            "add_professional": self.add_professional,
+            "edit_professional": self.edit_current_professional,
+            "configure_mev": self.configure_mev_profile,
+            "configure_sisfe": self.configure_sisfe_profile,
+            "add_model": self.add_writing_model,
+            "open_models": self.open_models_folder,
+            "open_base_template": self.open_base_template,
+            "show_template_variables": self.show_template_variables,
+            "configure_signer": self.configure_signer,
+        }
+
+        def run_action(name: str):
+            action = actions.get(name)
+            if action is not None:
+                action()
+                dialog.refresh_summary(self.application_settings_summary())
+
+        dialog.actionRequested.connect(run_action)
+        dialog.exec()
 
     def reload_professionals(self):
         self.professional_combo.blockSignals(True)
