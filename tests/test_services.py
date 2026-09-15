@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import json
+import os
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -29,6 +30,7 @@ from gestor_documental.services import (
     ensure_default_writing_template,
     external_case_summary,
     find_unresolved_placeholders,
+    find_recent_signer_output,
     ensure_bundled_writing_models,
     import_file,
     import_directory,
@@ -255,6 +257,9 @@ class ServiceTests(unittest.TestCase):
                 {"yellow_days": 30, "red_days": 75, "show_archived": False}
             )
             store.set_naming_pattern("{fecha}-{actor}-{titulo}")
+            signer_output = Path(directory) / "Firmados"
+            signer_output.mkdir()
+            store.set_signer_output_dir(signer_output)
             store.set_sisfe_profile("Dra. Ana Pérez", "ana.perez", "clave de prueba")
             reloaded = SettingsStore(app_dir)
             self.assertEqual(reloaded.settings.study_root, study)
@@ -269,6 +274,7 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(reloaded.settings.activity_settings["yellow_days"], 30)
             self.assertFalse(reloaded.settings.activity_settings["show_archived"])
             self.assertEqual(reloaded.settings.naming_pattern, "{fecha}-{actor}-{titulo}")
+            self.assertEqual(reloaded.settings.signer_output_dir, signer_output)
             self.assertEqual(
                 reloaded.settings.sisfe_profiles["Dra. Ana Pérez"],
                 {"user": "ana.perez", "password": "clave de prueba"},
@@ -292,6 +298,17 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(reloaded.settings.study_root, local)
             self.assertTrue(local.is_dir())
             self.assertTrue(shared.is_dir())
+
+    def test_finds_only_a_recent_pdf_from_the_signer_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "PEREZ_DEMANDA.pdf"
+            source.write_bytes(b"original")
+            output = root / "PEREZ_DEMANDA_firmado.pdf"
+            output.write_bytes(b"signed")
+            os.utime(output, (200, 200))
+            self.assertEqual(find_recent_signer_output(source, root, 199), output)
+            self.assertIsNone(find_recent_signer_output(source, root, 300))
 
     def test_old_single_study_setting_migrates_to_locations(self):
         with tempfile.TemporaryDirectory() as directory:

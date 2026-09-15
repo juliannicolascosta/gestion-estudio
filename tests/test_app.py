@@ -1467,6 +1467,37 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.sign_options_button.accessibleName(), "Otras opciones de firma")
             window.close()
 
+    def test_external_signer_output_is_recovered_into_the_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            output_dir = root / "Firmados"
+            output_dir.mkdir()
+            source = case.path / "PEREZ_DEMANDA.pdf"
+            signed = output_dir / "PEREZ_DEMANDA_firmado.pdf"
+            for path in (source, signed):
+                writer = PdfWriter()
+                writer.add_blank_page(width=595, height=842)
+                with path.open("wb") as stream:
+                    writer.write(stream)
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            store.set_signer_output_dir(output_dir)
+            window = MainWindow(store)
+            window.set_case(case)
+            window._external_sign_source = source
+            window._external_sign_started_at = time.time() - 1
+
+            with patch("gestor_documental.app.QMessageBox.information"):
+                window.check_external_signer_output()
+                window.check_external_signer_output()
+
+            recovered = case.path / signed.name
+            self.assertTrue(recovered.is_file())
+            self.assertEqual(window.last_signed, recovered)
+            window.close()
+
     def test_close_cancels_background_compilation_and_then_closes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

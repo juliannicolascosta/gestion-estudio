@@ -42,6 +42,7 @@ class SettingsDialogTests(unittest.TestCase):
                 "models_count": 3,
                 "models_path": "C:/Modelos",
                 "signer": "XolidoSign.exe",
+                "signer_output": "C:/Firmados",
                 "naming_pattern": "{fecha}_{titulo}",
             }
         )
@@ -56,6 +57,7 @@ class SettingsDialogTests(unittest.TestCase):
         self.assertIn("3", dialog.models_summary.text())
         self.assertIn("{fecha}_{titulo}", dialog.models_summary.text())
         self.assertIn("XolidoSign.exe", dialog.signer_summary.text())
+        self.assertIn("C:/Firmados", dialog.signer_summary.text())
         professional_buttons = dialog.tabs.widget(0).findChildren(QPushButton)
         professional_buttons[0].click()
         self.assertEqual(requested, ["add_professional"])

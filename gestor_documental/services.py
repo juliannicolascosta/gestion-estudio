@@ -264,6 +264,7 @@ class SettingsStore:
         if active not in roots:
             active = roots[0] if roots else None
         signer = payload.get("signer_path")
+        signer_output = payload.get("signer_output_dir")
         raw_layout = payload.get("layout_state", {})
         layout_state = dict(raw_layout) if isinstance(raw_layout, dict) else {}
         try:
@@ -279,6 +280,7 @@ class SettingsStore:
             professional_profiles=professional_profiles,
             current_professional=current,
             signer_path=Path(signer) if signer else None,
+            signer_output_dir=Path(signer_output) if signer_output else None,
             mev_profiles={
                 str(name): {"user": str(data.get("user", "")), "department": str(data.get("department", ""))}
                 for name, data in (payload.get("mev_profiles", {}) or {}).items()
@@ -312,6 +314,9 @@ class SettingsStore:
             "professional_profiles": self.settings.professional_profiles,
             "current_professional": self.settings.current_professional,
             "signer_path": str(self.settings.signer_path) if self.settings.signer_path else None,
+            "signer_output_dir": (
+                str(self.settings.signer_output_dir) if self.settings.signer_output_dir else None
+            ),
             "mev_profiles": self.settings.mev_profiles,
             "sisfe_profiles": self.settings.sisfe_profiles,
             "layout_state": self.settings.layout_state,
@@ -404,6 +409,10 @@ class SettingsStore:
 
     def set_signer(self, path: Path | None):
         self.settings.signer_path = path
+        self.save()
+
+    def set_signer_output_dir(self, path: Path | None):
+        self.settings.signer_output_dir = Path(path) if path else None
         self.save()
 
     def set_layout_state(self, state: dict[str, object]):
@@ -1525,6 +1534,31 @@ def focus_or_launch_signer(executable: Path):
             user32.SetForegroundWindow(found[0])
             return
     subprocess.Popen([str(executable)])
+
+
+def find_recent_signer_output(source: Path, directory: Path, started_at: float) -> Path | None:
+    """Find a PDF created by the active external-signing operation."""
+    if not directory.is_dir():
+        return None
+    candidates = []
+    for path in directory.glob("*.pdf"):
+        try:
+            if path.resolve() == source.resolve() or path.stat().st_mtime < started_at - 2:
+                continue
+            candidates.append(path)
+        except OSError:
+            continue
+    if not candidates:
+        return None
+    source_stem = filename_component(source.stem, 120).casefold()
+    related = [
+        path
+        for path in candidates
+        if source_stem in filename_component(path.stem, 160).casefold()
+        or filename_component(path.stem, 160).casefold() in source_stem
+    ]
+    pool = related or (candidates if len(candidates) == 1 else [])
+    return max(pool, key=lambda path: path.stat().st_mtime) if pool else None
 
 
 

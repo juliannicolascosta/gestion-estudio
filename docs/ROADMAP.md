@@ -83,7 +83,7 @@
 - [x] Pantalla completa de configuración: profesionales, modelos y firmador.
 - [x] Vincular carpeta externa como caso mediante copia normalizada y vista previa.
 - [x] Reglas configurables de nomenclatura para quienes no usen el formato recomendado.
-- [ ] Detección configurable de la carpeta de salida del firmador para recuperar automáticamente el PDF firmado.
+- [x] Detección configurable de la carpeta de salida del firmador para recuperar automáticamente el PDF firmado.
 - [x] Sugerir recepción cuando ingrese un archivo que coincida con documentación pendiente.
 - [x] Confirmar la recepción sugerida desde Actividad manteniendo el historial del checklist.
 - [x] Fecha objetivo opcional para cada documento pendiente, integrada con Actividad.

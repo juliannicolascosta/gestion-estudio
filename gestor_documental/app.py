@@ -129,6 +129,7 @@ from .services import (
     ensure_default_writing_template,
     external_case_summary,
     find_unresolved_placeholders,
+    find_recent_signer_output,
     focus_or_launch_signer,
     human_size,
     import_file,
@@ -1617,6 +1618,9 @@ class MainWindow(QMainWindow):
         self._compile_cancelling = False
         self._close_after_compile = False
         self._signer_dialog: SignerDropDialog | None = None
+        self._external_sign_source: Path | None = None
+        self._external_sign_started_at = 0.0
+        self._external_sign_candidate: tuple[Path, int] | None = None
         self._sisfe_login_dialog: SisfeLoginDialog | None = None
         self._sisfe_case_dialog: SisfeCaseBrowserDialog | None = None
         self._sisfe_download_request: tuple[str, dict] | None = None
@@ -1639,6 +1643,9 @@ class MainWindow(QMainWindow):
         self._file_refresh_timer.timeout.connect(self.reload_case_files)
         self._file_watcher = QFileSystemWatcher(self)
         self._file_watcher.directoryChanged.connect(self.schedule_case_files_refresh)
+        self._signer_output_timer = QTimer(self)
+        self._signer_output_timer.setInterval(1500)
+        self._signer_output_timer.timeout.connect(self.check_external_signer_output)
         self.setWindowTitle("Gestor de documental")
         self.setMinimumSize(1120, 700)
         self.resize(1450, 880)
@@ -2499,12 +2506,14 @@ class MainWindow(QMainWindow):
             professional = ""
         profile = self.store.settings.professional_profiles.get(professional, {})
         signer = self.store.settings.signer_path
+        signer_output = self.store.settings.signer_output_dir
         return {
             "professional": professional,
             "profile_fields": sum(bool(str(value).strip()) for value in profile.values()),
             "models_count": len(list_models(self.store.models_dir)),
             "models_path": self.store.models_dir,
             "signer": signer.name if signer else "",
+            "signer_output": signer_output if signer_output else "",
             "naming_pattern": self.store.settings.naming_pattern,
         }
 
@@ -2521,6 +2530,7 @@ class MainWindow(QMainWindow):
             "show_template_variables": self.show_template_variables,
             "configure_naming": self.configure_naming_pattern,
             "configure_signer": self.configure_signer,
+            "configure_signer_output": self.configure_signer_output,
         }
 
         def run_action(name: str):
@@ -6100,6 +6110,7 @@ class MainWindow(QMainWindow):
             return
         self._layout_save_timer.stop()
         self._file_refresh_timer.stop()
+        self._signer_output_timer.stop()
         watched = self._file_watcher.directories()
         if watched:
             self._file_watcher.removePaths(watched)
@@ -6266,15 +6277,83 @@ class MainWindow(QMainWindow):
             self.store.set_signer(Path(path))
             self.statusBar().showMessage(f"Firmador configurado: {Path(path).stem}", 4500)
 
+    def configure_signer_output(self):
+        current = self.store.settings.signer_output_dir
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Carpeta donde el firmador guarda los PDF",
+            str(current or ""),
+        )
+        if directory:
+            self.store.set_signer_output_dir(Path(directory))
+            self.statusBar().showMessage("Carpeta de archivos firmados configurada", 4500)
+
     def send_to_signer(self, signer: Path, pdf: Path):
         try:
             focus_or_launch_signer(signer)
+            output_dir = self.store.settings.signer_output_dir
+            if output_dir and output_dir.is_dir():
+                self._external_sign_source = pdf.resolve()
+                self._external_sign_started_at = datetime.now().timestamp()
+                self._external_sign_candidate = None
+                self._signer_output_timer.start()
+                self.statusBar().showMessage(
+                    "Esperando el PDF firmado para incorporarlo al expediente…", 6000
+                )
             self._signer_dialog = SignerDropDialog(pdf, self)
             self._signer_dialog.show()
             self._signer_dialog.raise_()
             self._signer_dialog.activateWindow()
         except Exception as error:
             QMessageBox.critical(self, "No pudimos abrir el firmador", str(error))
+
+    def check_external_signer_output(self):
+        source = self._external_sign_source
+        output_dir = self.store.settings.signer_output_dir
+        if not source or not output_dir or not self.case:
+            self._signer_output_timer.stop()
+            return
+        if datetime.now().timestamp() - self._external_sign_started_at > 600:
+            self._signer_output_timer.stop()
+            self.statusBar().showMessage("No se detectó un nuevo PDF firmado", 5000)
+            return
+        candidate = find_recent_signer_output(
+            source, output_dir, self._external_sign_started_at
+        )
+        if candidate is None:
+            return
+        try:
+            size = candidate.stat().st_size
+        except OSError:
+            return
+        marker = (candidate, size)
+        if size <= 0 or marker != self._external_sign_candidate:
+            self._external_sign_candidate = marker
+            return
+        try:
+            candidate.resolve().relative_to(self.case.path.resolve())
+            recovered = candidate
+        except ValueError:
+            try:
+                recovered = import_file(self.case, candidate, candidate.name)
+            except (OSError, ValueError):
+                return
+        self._signer_output_timer.stop()
+        self._external_sign_source = None
+        self.last_signed = recovered
+        self.case_directory = recovered.parent
+        self.reload_case_files(recovered)
+        self.last_output.setText(
+            f"{recovered.name}\nRECUPERADO DEL FIRMADOR · {human_size(recovered.stat().st_size)}"
+        )
+        self.save_compilation_draft()
+        if self._signer_dialog:
+            self._signer_dialog.close()
+        QMessageBox.information(
+            self,
+            "PDF recuperado",
+            f"Se incorporó {recovered.name} al expediente.",
+        )
 
 
 def main():

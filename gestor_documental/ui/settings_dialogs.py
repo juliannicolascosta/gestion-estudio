@@ -99,7 +99,10 @@ class ApplicationSettingsDialog(QDialog):
         self.tabs.addTab(
             self._action_tab(
                 self.signer_summary,
-                (("Elegir aplicación de firma", "configure_signer"),),
+                (
+                    ("Elegir aplicación de firma", "configure_signer"),
+                    ("Elegir carpeta de archivos firmados", "configure_signer_output"),
+                ),
             ),
             "Firmador",
         )
@@ -139,7 +142,10 @@ class ApplicationSettingsDialog(QDialog):
             f"Nombres: {summary.get('naming_pattern') or DEFAULT_NAMING_PATTERN}"
         )
         signer = str(summary.get("signer") or "Sin aplicación externa configurada")
-        self.signer_summary.setText(f"Firmador externo: {signer}")
+        signer_output = str(summary.get("signer_output") or "Sin carpeta de salida configurada")
+        self.signer_summary.setText(
+            f"Firmador externo: {signer}\nArchivos firmados: {signer_output}"
+        )
 
 
 class ActivitySettingsDialog(QDialog):
