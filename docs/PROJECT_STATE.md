@@ -31,6 +31,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 ## Implementado
 
 - Paneles de archivos del expediente y acceso rápido extraídos de la ventana principal, conservando arrastre, teclado y comportamiento probado mientras continúa la separación incremental de `app.py`.
+- Diálogos de configuración de actividad, perfiles profesionales y acceso SISFE separados de la ventana principal, con validación de sus valores cubierta de forma independiente.
 - Varias Ubicaciones del Estudio configurables, con migración automática de la configuración anterior de una sola carpeta.
 - Árbol con una raíz azul por ubicación y buscador inteligente que consulta todos los casos en conjunto.
 - Selección del árbol sin el bloque azul nativo de Windows e iconografía vectorial coherente con la paleta del producto.
