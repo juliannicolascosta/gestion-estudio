@@ -1485,7 +1485,7 @@ class AppSmokeTests(unittest.TestCase):
                 raise CompilationCancelled()
 
             with (
-                patch("gestor_documental.app.compile_documents", side_effect=waits_for_cancel),
+                patch("gestor_documental.background_workers.compile_documents", side_effect=waits_for_cancel),
                 patch.object(
                     window,
                     "prompt_compilation_name",

@@ -7,9 +7,8 @@ import shutil
 import json
 from datetime import date, datetime
 from pathlib import Path
-from threading import Event
 
-from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -48,6 +47,7 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from . import __version__
+from .background_workers import CedulaExtractionWorker, CompileWorker, StudyBackupWorker
 from .case_documents import rename_document_entry
 from .activity_center import build_case_activity
 from .ui.document_recovery import DocumentRecoveryWorker
@@ -118,13 +118,11 @@ from .signing import (
 )
 from .services import (
     SettingsStore,
-    CompilationCancelled,
     IMAGE_EXTENSIONS,
     PDF_EXTENSIONS,
     add_model,
     can_convert_to_pdf,
     case_matches,
-    compile_documents,
     create_case,
     create_writing,
     ensure_default_writing_template,
@@ -150,8 +148,7 @@ from .services import (
     study_library_path,
     unique_path,
 )
-from .sisfe_extractor import extract_cedula_text
-from .study_backup import BackupResult, RestoreResult, create_study_backup, restore_study_backup
+from .study_backup import BackupResult, RestoreResult
 from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationList
 from .ui.case_files import CaseFilesList, QuickAccessList
@@ -1269,89 +1266,6 @@ class CompileNameDialog(QDialog):
     def replace_existing(self) -> bool:
         name = self.file_name
         return bool(name and (self.case.path / name).exists() and self.existing_options.currentData())
-
-
-class CompileWorker(QObject):
-    progress = pyqtSignal(str)
-    finished = pyqtSignal(object)
-    failed = pyqtSignal(str)
-    cancelled = pyqtSignal()
-
-    def __init__(
-        self,
-        case: Case,
-        paths: list[Path],
-        limit: int,
-        output_name: str,
-        replace_existing: bool = False,
-    ):
-        super().__init__()
-        self.case = case
-        self.paths = paths
-        self.limit = limit
-        self.output_name = output_name
-        self.replace_existing = replace_existing
-        self.cancel_event = Event()
-
-    def cancel(self):
-        self.cancel_event.set()
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            result = compile_documents(
-                self.case,
-                self.paths,
-                self.limit,
-                self.output_name,
-                self.progress.emit,
-                self.cancel_event.is_set,
-                self.replace_existing,
-            )
-            self.finished.emit(result)
-        except CompilationCancelled:
-            self.cancelled.emit()
-        except Exception as error:
-            self.failed.emit(str(error))
-
-
-class CedulaExtractionWorker(QObject):
-    finished = pyqtSignal(object)
-    failed = pyqtSignal(str)
-
-    def __init__(self, pdf: Path):
-        super().__init__()
-        self.pdf = pdf
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            self.finished.emit(extract_cedula_text(self.pdf))
-        except Exception as error:
-            self.failed.emit(str(error))
-
-
-class StudyBackupWorker(QObject):
-    progress = pyqtSignal(int, int, str)
-    completed = pyqtSignal(object)
-    failed = pyqtSignal(str)
-
-    def __init__(self, operation: str, source: Path, destination: Path):
-        super().__init__()
-        self.operation = operation
-        self.source = source
-        self.destination = destination
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            if self.operation == "backup":
-                result = create_study_backup(self.source, self.destination, self.progress.emit)
-            else:
-                result = restore_study_backup(self.source, self.destination, self.progress.emit)
-            self.completed.emit(result)
-        except Exception as error:
-            self.failed.emit(str(error))
 
 
 class StudyActivityDialog(QDialog):
