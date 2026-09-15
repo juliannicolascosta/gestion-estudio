@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import Event
 
 from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QAction, QColor, QDrag, QFont, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
+from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -156,6 +156,7 @@ from .sisfe_extractor import extract_cedula_text
 from .study_backup import BackupResult, RestoreResult, create_study_backup, restore_study_backup
 from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationList
+from .ui.case_files import CaseFilesList, QuickAccessList
 from .ui.operation_status import OperationState, OperationStatusIndicator
 from .ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE, PATH_ROLE, PENDING_DUE_ROLE, ROOT_ROLE, TYPE_ROLE
 from .ui.sisfe import SisfeCaseBrowserDialog, SisfeLoginDialog
@@ -1441,114 +1442,6 @@ class CompileNameDialog(QDialog):
     def replace_existing(self) -> bool:
         name = self.file_name
         return bool(name and (self.case.path / name).exists() and self.existing_options.currentData())
-
-
-class CaseFilesList(QListWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setDragEnabled(True)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            paths = [Path(url.toLocalFile()) for url in event.mimeData().urls()]
-            self.window().import_paths(paths)
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-
-    def startDrag(self, supported_actions):
-        paths = [Path(item.data(PATH_ROLE)) for item in self.selectedItems()]
-        if not paths:
-            return
-        mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(str(path)) for path in paths])
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-        drag.exec(Qt.DropAction.CopyAction)
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self.count():
-            return
-        painter = QPainter(self.viewport())
-        painter.setPen(QColor("#7A8984"))
-        painter.drawText(
-            self.viewport().rect().adjusted(24, 24, -24, -24),
-            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Arrastrá archivos acá\nSe guardarán directamente en la carpeta del caso",
-        )
-
-    def keyPressEvent(self, event):
-        if event.matches(QKeySequence.StandardKey.Copy):
-            self.window().copy_selected_case_files()
-            event.accept()
-            return
-        if event.matches(QKeySequence.StandardKey.Cut):
-            self.window().cut_selected_case_files()
-            event.accept()
-            return
-        if event.matches(QKeySequence.StandardKey.Paste):
-            self.window().paste_case_files()
-            event.accept()
-            return
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.window().open_selected_file()
-            event.accept()
-            return
-        if event.key() == Qt.Key.Key_Delete:
-            self.window().remove_selected_case_files()
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-
-class QuickAccessList(CaseFilesList):
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            paths = [Path(url.toLocalFile()) for url in event.mimeData().urls()]
-            self.window().import_quick_access_paths(paths)
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-
-    def paintEvent(self, event):
-        QListWidget.paintEvent(self, event)
-        if self.count():
-            return
-        painter = QPainter(self.viewport())
-        painter.setPen(QColor("#7A8984"))
-        painter.drawText(
-            self.viewport().rect().adjusted(16, 16, -16, -16),
-            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Arrastrá DNI, matrícula, CBU u otros archivos de uso cotidiano",
-        )
-
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.window().open_selected_quick_file()
-            event.accept()
-            return
-        if event.key() == Qt.Key.Key_Delete:
-            self.window().remove_selected_quick_files()
-            event.accept()
-            return
-        QListWidget.keyPressEvent(self, event)
 
 
 class CompileWorker(QObject):

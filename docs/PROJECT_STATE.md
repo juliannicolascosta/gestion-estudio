@@ -16,7 +16,7 @@ Renombrar un archivo o una carpeta interna desde Archivos actualiza las rutas SQ
 
 ## Consolidación de operaciones por expediente
 
-Las consultas SISFE conservan el expediente de origen aunque cambie la selección. Las descargas y sus reintentos conservan también el profesional y sus variables para generar cédulas. Una descarga activa no se reemplaza por un segundo pedido; el cierre espera a que terminen descargas o extracción. La cédula se guarda en el caso de origen sin incorporarse al armado de otro caso seleccionado. La cola de múltiples descargas sigue pendiente. Estas garantías se verifican con pruebas de navegación durante operaciones y cierre.
+Las consultas SISFE conservan el expediente de origen aunque cambie la selección. Las descargas y sus reintentos conservan también el profesional y sus variables para generar cédulas. Los pedidos simultáneos se resuelven mediante una cola secuencial; el cierre espera a que terminen descargas o extracción. La cédula se guarda en el caso de origen sin incorporarse al armado de otro caso seleccionado. Estas garantías se verifican con pruebas de navegación durante operaciones y cierre.
 
 Actualizado: 14 de septiembre de 2026
 
@@ -30,6 +30,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 
 ## Implementado
 
+- Paneles de archivos del expediente y acceso rápido extraídos de la ventana principal, conservando arrastre, teclado y comportamiento probado mientras continúa la separación incremental de `app.py`.
 - Varias Ubicaciones del Estudio configurables, con migración automática de la configuración anterior de una sola carpeta.
 - Árbol con una raíz azul por ubicación y buscador inteligente que consulta todos los casos en conjunto.
 - Selección del árbol sin el bloque azul nativo de Windows e iconografía vectorial coherente con la paleta del producto.

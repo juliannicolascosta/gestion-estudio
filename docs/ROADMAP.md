@@ -76,7 +76,7 @@
 
 ## Próxima iteración
 
-- [ ] Completar la separación de `app.py` en paneles y controladores; los componentes de compilación y los diálogos SISFE ya fueron extraídos sin cambiar el flujo probado.
+- [ ] Completar la separación de `app.py` en paneles y controladores; los componentes de compilación, los paneles de archivos/acceso rápido y los diálogos SISFE ya fueron extraídos sin cambiar el flujo probado.
 - [x] Automatizar la acción oficial de descarga dentro del navegador SISFE y vincular cada archivo con su movimiento.
 - [x] Ejecutar las descargas SISFE en una cola oculta y reflejar check, error y reintento en el Portal.
 - [ ] Retirar el transporte HTTP SISFE heredado cuando existan pruebas de aceptación suficientes del flujo de navegador.

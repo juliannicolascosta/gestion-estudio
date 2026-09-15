@@ -110,6 +110,8 @@ class AppSmokeTests(unittest.TestCase):
             self.assertGreaterEqual(len(icon_controls), 6)
             self.assertTrue(all(button.accessibleName() for button in icon_controls))
             self.assertTrue(window.quick_access.isEnabled())
+            self.assertEqual(window.quick_access.__class__.__module__, "gestor_documental.ui.case_files")
+            self.assertEqual(window.case_files.__class__.__module__, "gestor_documental.ui.case_files")
             self.assertFalse(window.quick_access.isHidden())
             window.toggle_quick_access()
             self.assertTrue(window.quick_access.isHidden())
