@@ -1,16 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from gestor_documental.services import create_case
 from gestor_documental.sisfe_import import SisfeCaseSnapshot
 from gestor_documental.sisfe_session import ManualSisfeSession
-from gestor_documental.sisfe_sync import (
-    SisfeSessionRequired,
-    SisfeSnapshotProviderMissing,
-    SisfeSyncCoordinator,
-)
+from gestor_documental.sisfe_sync import SisfePortalService, SisfeSessionRequired
 
 
 class SisfeSessionTests(unittest.TestCase):
@@ -28,20 +24,23 @@ class SisfeSessionTests(unittest.TestCase):
         self.assertFalse(session.active)
         self.assertNotIn("http_session", vars(session))
 
-    def test_sync_requires_manual_session_and_explicit_provider(self):
+    def test_portal_import_requires_the_manual_browser_session(self):
         with tempfile.TemporaryDirectory() as directory:
             case = create_case(Path(directory) / "Estudio", "Caso")
             session = ManualSisfeSession()
-            coordinator = SisfeSyncCoordinator(session)
+            importer = MagicMock()
+            expected = object()
+            importer.import_snapshot.return_value = expected
+            portal = SisfePortalService(session, importer)
+            snapshot = SisfeCaseSnapshot(cuij="")
             with self.assertRaises(SisfeSessionRequired):
-                coordinator.synchronize(case, case.path / "SISFE")
+                portal.import_snapshot(case, snapshot, case.path / "SISFE")
 
             with patch("gestor_documental.sisfe_session.webbrowser.open", return_value=True):
                 session.open_portal()
             session.confirm_manual_login()
-            with self.assertRaises(SisfeSnapshotProviderMissing):
-                coordinator.synchronize(case, case.path / "SISFE")
-
-            active = SisfeSyncCoordinator(session, snapshot_provider=lambda _: SisfeCaseSnapshot(cuij=""))
-            result = active.synchronize(case, case.path / "SISFE")
-            self.assertEqual(result.movements_registered, 0)
+            result = portal.import_snapshot(case, snapshot, case.path / "SISFE")
+            self.assertIs(result, expected)
+            importer.import_snapshot.assert_called_once_with(
+                case, snapshot, case.path / "SISFE"
+            )

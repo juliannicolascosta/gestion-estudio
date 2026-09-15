@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 from .models import Case
@@ -11,10 +10,6 @@ from .sisfe_session import ManualSisfeSession
 
 
 class SisfeSessionRequired(RuntimeError):
-    pass
-
-
-class SisfeSnapshotProviderMissing(RuntimeError):
     pass
 
 
@@ -46,24 +41,3 @@ class SisfePortalService:
     ) -> SisfeImportResult:
         self.require_active_session()
         return self.importer.import_snapshot(case, snapshot, document_directory)
-
-
-class SisfeSyncCoordinator(SisfePortalService):
-    """Compatibility adapter for injected, non-UI snapshot providers."""
-
-    def __init__(
-        self,
-        session: ManualSisfeSession,
-        snapshot_provider: Callable[[Case], SisfeCaseSnapshot] | None = None,
-        importer: SisfeImportService | None = None,
-    ):
-        super().__init__(session, importer)
-        self.snapshot_provider = snapshot_provider
-
-    def synchronize(self, case: Case, document_directory: Path) -> SisfeImportResult:
-        self.require_active_session()
-        if not self.snapshot_provider:
-            raise SisfeSnapshotProviderMissing(
-                "Esta compilación aún no tiene un transporte SISFE configurado."
-            )
-        return self.import_snapshot(case, self.snapshot_provider(case), document_directory)

@@ -102,7 +102,7 @@ Esta decisión responde al objetivo de reducir navegación sin desconocer estruc
 - Vista transversal de Actividad del Estudio, calculada bajo demanda sobre todas las ubicaciones y navegable al expediente de origen.
 - Indicador visual reutilizable para estados del Portal: espera, proceso, resultado correcto y error; será alimentado por el gestor de descargas en segundo plano.
 - La bandeja del Portal muestra todos los movimientos guardados; ya no recorta silenciosamente la vista a los últimos veinte.
-- El flujo operativo de SISFE entra por un único servicio de aplicación y usa el navegador autenticado; el antiguo transporte HTTP queda fuera de la selección normal.
+- El flujo operativo de SISFE entra por un único servicio de aplicación y usa exclusivamente el navegador autenticado; el antiguo transporte HTTP y su dependencia `requests` fueron retirados.
 - El detalle de una novedad ofrece descarga automática mediante los controles renderizados por SISFE: selecciona la página oficial, acciona el documento principal y recorre los adjuntos adicionales sin copiar credenciales ni reproducir los endpoints de descarga.
 - El encabezado operativo del expediente usa la ubicación actual o trámite interno informado por SISFE y su vigencia. Los movimientos tienen una primera interpretación determinística para audiencias, traslados y vencimientos explícitos, mostrando fecha extraída, texto de origen y advertencias sin crear eventos automáticamente.
 - El núcleo fuente estable de Extractor SISFE (`90e3de3`) fue integrado como módulo interno `gestor_documental.extractor_core`, junto con su catálogo público. La generación de cédulas importa este módulo directamente; no modifica `sys.path`, no ejecuta otro programa y se verifica dentro del instalador autocontenido.
