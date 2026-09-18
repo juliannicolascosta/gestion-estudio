@@ -9,8 +9,13 @@ from datetime import datetime
 from pathlib import Path
 
 
-LOG_DIR = Path(os.getenv("LOCALAPPDATA", Path.home())) / "GestorDocumental"
-LOG_FILE = LOG_DIR / "gestor-documental.log"
+_PORTABLE_DIR = os.getenv("FORO_DATA_DIR", "").strip()
+LOG_DIR = (
+    Path(_PORTABLE_DIR)
+    if _PORTABLE_DIR
+    else Path(os.getenv("LOCALAPPDATA", Path.home())) / "GestorDocumental"
+)
+LOG_FILE = LOG_DIR / "foro.log"
 
 
 def install_error_log():

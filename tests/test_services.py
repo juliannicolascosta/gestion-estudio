@@ -569,6 +569,17 @@ class ServiceTests(unittest.TestCase):
             self.assertFalse(result.exceeds_limit)
             self.assertTrue(result.output.is_file())
 
+    def test_portable_mode_keeps_its_data_beside_the_program(self):
+        with tempfile.TemporaryDirectory() as directory:
+            portable = Path(directory) / "FORO portable" / "Datos"
+            with patch.dict(os.environ, {"FORO_DATA_DIR": str(portable)}):
+                self.assertEqual(services.portable_data_dir(), portable)
+            with patch.dict(os.environ, {"FORO_DATA_DIR": "   "}):
+                self.assertIsNone(services.portable_data_dir())
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORO_DATA_DIR", None)
+                self.assertIsNone(services.portable_data_dir())
+
     def test_compile_can_be_cancelled_without_creating_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

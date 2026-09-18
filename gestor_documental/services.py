@@ -32,8 +32,25 @@ from .models import (
 )
 
 
-APP_DIR = Path(os.getenv("APPDATA", Path.home())) / "GestorDocumental"
-OFFICE_CACHE_DIR = Path(os.getenv("LOCALAPPDATA", APP_DIR)) / "GestorDocumental" / "conversion-cache"
+def portable_data_dir() -> Path | None:
+    """Carpeta de datos elegida por el modo portable, si la hay.
+
+    El ejecutable portable define ``FORO_DATA_DIR`` junto a sí mismo para que
+    configuración, modelos y caché viajen con el programa y no queden en la
+    computadora ajena donde se lo probó. Sin esa variable, la instalación
+    normal conserva exactamente las rutas de siempre.
+    """
+    value = os.getenv("FORO_DATA_DIR", "").strip()
+    return Path(value) if value else None
+
+
+_PORTABLE_DIR = portable_data_dir()
+APP_DIR = _PORTABLE_DIR or Path(os.getenv("APPDATA", Path.home())) / "GestorDocumental"
+OFFICE_CACHE_DIR = (
+    _PORTABLE_DIR / "conversion-cache"
+    if _PORTABLE_DIR
+    else Path(os.getenv("LOCALAPPDATA", APP_DIR)) / "GestorDocumental" / "conversion-cache"
+)
 CONFIG_NAME = "config.json"
 CASE_METADATA = ".gestor-caso.json"
 STUDY_LIBRARY_NAME = "00 - ACCESO RÁPIDO"

@@ -21,6 +21,21 @@ class PackagingTests(unittest.TestCase):
         self.assertRegex(gestor_documental.__version__, r"^\d+\.\d+\.\d+$")
         self.assertFalse((ROOT / "gestor_documental" / "version_info.txt").exists())
 
+    def test_portable_build_is_self_contained_and_shares_the_version(self):
+        portable = (ROOT / "packaging" / "build_portable.ps1").read_text(encoding="utf-8-sig")
+        launcher = (ROOT / "packaging" / "portable_launcher.cs").read_text(encoding="utf-8-sig")
+        smoke = (ROOT / "packaging" / "smoke_portable.py").read_text(encoding="utf-8")
+        self.assertIn("gestor_documental\\__init__.py", portable)
+        self.assertIn("FORO.exe", portable)
+        self.assertIn("foro.ico", portable)
+        self.assertIn("smoke_portable.py", portable)
+        # El portable no instala ni deja rastros fuera de su carpeta.
+        self.assertNotIn("Registry", portable)
+        self.assertNotIn("StartMenu", portable)
+        self.assertIn('EnvironmentVariables["FORO_DATA_DIR"]', launcher)
+        self.assertIn('@@ASSEMBLY_VERSION@@', launcher)
+        self.assertIn('window.windowTitle() == "FORO"', smoke)
+
     def test_installer_does_not_delete_application_data(self):
         install = (ROOT / "packaging" / "install.ps1").read_text(encoding="utf-8-sig")
         uninstall = (ROOT / "packaging" / "uninstall.ps1").read_text(encoding="utf-8-sig")

@@ -30,8 +30,9 @@ app = QApplication.instance() or QApplication([])
 with tempfile.TemporaryDirectory(prefix="gestor-instalador-") as directory:
     window = MainWindow(SettingsStore(Path(directory) / "appdata"))
     app.processEvents()
-    assert window.windowTitle() == "Gestor de documental"
-    assert window.limit_combo.count() == 4
+    assert window.windowTitle() == "FORO"
+    assert len(window.limit_buttons) == 4
+    assert window.sisfe_indicator is not None
     assert SisfeExtractorService.__module__.startswith("gestor_documental.extractor_core")
     catalog = PROJECT_ROOT / "gestor_documental" / "extractor_core" / "data" / "courts_catalog.json"
     assert catalog.is_file()

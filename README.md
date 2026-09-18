@@ -91,14 +91,28 @@ py -m venv .venv
 
 Microsoft Word o LibreOffice es necesario para convertir documentos Word. La integración opcional más directa con Word se instala con `pywin32`.
 
+## Versión portable
+
+Para entregar FORO a otra persona sin instalarlo, se construye desde Windows, con el entorno `.venv` ya preparado:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_portable.ps1
+```
+
+El script deja `dist\FORO-<versión>-portable.zip`. Quien lo reciba descomprime la carpeta completa y abre `FORO.exe`: no instala nada, no pide permisos de administrador y no escribe en el registro ni en el menú Inicio. Configuración, modelos de escritos, caché de conversión y registro de errores quedan en la subcarpeta `Datos`, junto al programa, de modo que borrar la carpeta lo desinstala por completo.
+
+Los casos no viajan dentro del portable: al abrirlo por primera vez hay que elegir la Ubicación del Estudio. El ejecutable no está firmado, así que Windows puede mostrar el aviso de SmartScreen la primera vez.
+
+`packaging\build_installer.ps1` sigue generando, por separado, el instalador tradicional con acceso directo y entrada en Aplicaciones instaladas.
+
 ## Primer uso
 
 1. Pulsá **Agregar ubicación** y elegí la carpeta que contiene tus casos. Podés repetirlo para sumar una ubicación local, de red o sincronizada por Google Drive.
 2. Elegí una carpeta existente del árbol o creá **Nuevo caso**.
 3. Arrastrá a **Documentos frecuentes** los documentos que usás en distintos casos o correos.
-4. Pulsá **Editar datos**, completá lo necesario y guardá. **Más datos** abre las pestañas de ficha general, entrevista y RAEO.
-5. Creá o elegí un escrito y, desde **Archivos**, enviá la documental a **Compilación**.
-6. Ordená los elementos en el panel derecho **Compilación**, elegí el límite y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.
+4. Activá la edición rápida en el encabezado, completá lo necesario y guardá. **Datos del caso** abre las pestañas de ficha general, entrevista y RAEO.
+5. Creá o elegí un escrito y, desde **Archivos**, enviá la documental a **Presentación** con la flecha.
+6. Ordená los elementos en el panel derecho **Presentación**, elegí el límite (1, 3, 6 o 20 MB; sin límite elegido se compila al tamaño natural) y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.
 7. Pulsá **Firmar → Firmar dentro del Gestor**. La primera firma de la sesión solicita el PIN del token; las siguientes reutilizan la sesión. También podés continuar usando Xólido.
 
 Atajos: `Ctrl+Shift+N` crea un caso, `Ctrl+N` abre las opciones de escrito, `Ctrl+O` agrega archivos, `Ctrl+P` compila, `F2` renombra, `Enter` abre y `Supr` envía a la Papelera (o quita de la compilación, según el panel activo).
