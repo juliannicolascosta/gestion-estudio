@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\Gestor de documental"),
     [switch]$NoShortcuts,
     [switch]$NoRegistry,
@@ -82,7 +82,7 @@ function New-GestorShortcut([string]$ShortcutPath) {
     $shortcut.TargetPath = $ShortcutTarget
     $shortcut.Arguments = '"' + $ShortcutScript + '"'
     $shortcut.WorkingDirectory = $ShortcutWorkDir
-    $shortcut.IconLocation = ([IO.Path]::GetFullPath((Join-Path $InstallDir "app\gestor_documental\gestor-documental.ico"))) + ",0"
+    $shortcut.IconLocation = ([IO.Path]::GetFullPath((Join-Path $InstallDir "app\gestor_documental\foro.ico"))) + ",0"
     $shortcut.Description = "Casos, archivos y presentaciones en un mismo flujo"
     $shortcut.Save()
     $created = $shell.CreateShortcut($ShortcutPath)
@@ -145,7 +145,7 @@ try {
         New-ItemProperty -Path $UninstallKey -Name DisplayVersion -Value $Version -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name Publisher -Value "Gestor de documental" -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name InstallLocation -Value $InstallDir -PropertyType String -Force | Out-Null
-        New-ItemProperty -Path $UninstallKey -Name DisplayIcon -Value (Join-Path $InstallDir "app\gestor_documental\gestor-documental.ico") -PropertyType String -Force | Out-Null
+        New-ItemProperty -Path $UninstallKey -Name DisplayIcon -Value (Join-Path $InstallDir "app\gestor_documental\foro.ico") -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name UninstallString -Value $UninstallCommand -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name QuietUninstallString -Value $QuietCommand -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name InstallDate -Value (Get-Date -Format "yyyyMMdd") -PropertyType String -Force | Out-Null

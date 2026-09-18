@@ -556,6 +556,19 @@ class ServiceTests(unittest.TestCase):
                 self.assertIn("word/media/image1.jpeg", package.namelist())
             self.assertEqual(spanish_long_date(date(2026, 8, 13)), "13 de agosto de 2026")
 
+    def test_without_a_selected_limit_the_presentation_is_not_compressed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            case = create_case(root, "Caso")
+            source = case.path / "documental.pdf"
+            make_pdf(source)
+            with patch.object(services, "compress_pdf") as compressor:
+                result = compile_documents(case, [source], 0, "Presentación natural")
+            compressor.assert_not_called()
+            self.assertFalse(result.compressed)
+            self.assertFalse(result.exceeds_limit)
+            self.assertTrue(result.output.is_file())
+
     def test_compile_can_be_cancelled_without_creating_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

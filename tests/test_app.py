@@ -52,8 +52,20 @@ class AppSmokeTests(unittest.TestCase):
             store.set_study_root(study)
             window = MainWindow(store)
             self.app.processEvents()
-            self.assertEqual(window.windowTitle(), "Gestor de documental")
-            self.assertEqual(window.limit_combo.count(), 4)
+            self.assertEqual(window.windowTitle(), "FORO")
+            self.assertEqual(
+                [button.text() for button in window.limit_buttons.values()],
+                ["1 MB", "3 MB", "6 MB", "20 MB"],
+            )
+            # El límite habitual se conserva; volver a tocarlo deja la
+            # presentación sin compresión, al tamaño natural.
+            self.assertTrue(window.limit_buttons[3 * 1024 * 1024].isChecked())
+            window.choose_presentation_limit(3 * 1024 * 1024)
+            self.assertEqual(window.selected_presentation_limit(), 0)
+            self.assertFalse(
+                any(button.isChecked() for button in window.limit_buttons.values())
+            )
+            window.choose_presentation_limit(3 * 1024 * 1024)
             self.assertEqual(
                 window.metadata_edits["CUIJ"].placeholderText(),
                 "Número de expediente",
@@ -80,7 +92,7 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertEqual(
                 window.work_tabs.tabText(window.portal_tab_index),
-                "Portal · 0",
+                "Expediente · 0",
             )
             self.assertEqual(
                 window.work_tabs.tabText(window.pending_tab_index),
@@ -88,8 +100,8 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertIs(window.compilation_card.parentWidget(), window.presentation_column)
             self.assertIs(window.presentation_column.parentWidget(), window.workspace_splitter)
-            self.assertIs(window.workspace_splitter.widget(0), window.information_column)
-            self.assertEqual(window.presentation_column.minimumWidth(), 240)
+            self.assertIs(window.workspace_splitter.widget(0), window.work_tabs)
+            self.assertEqual(window.presentation_column.minimumWidth(), 250)
             self.assertLess(window._visible_workspace_sizes[1], 350)
             self.assertEqual(window.compilation_count.text(), "0 elementos")
             self.assertEqual(window.sisfe_status.state, OperationState.IDLE)
@@ -114,17 +126,12 @@ class AppSmokeTests(unittest.TestCase):
             self.assertTrue(window.quick_access.isEnabled())
             self.assertEqual(window.quick_access.__class__.__module__, "gestor_documental.ui.case_files")
             self.assertEqual(window.case_files.__class__.__module__, "gestor_documental.ui.case_files")
-            self.assertFalse(window.quick_access.isHidden())
+            # Documentos frecuentes vive en un panel flotante y pequeño.
+            self.assertFalse(window.quick_panel.isVisible())
             window.toggle_quick_access()
-            self.assertTrue(window.quick_access.isHidden())
+            self.assertTrue(window.quick_panel.isVisible())
             window.toggle_quick_access()
-            self.assertFalse(window.quick_access.isHidden())
-            window.toggle_directory_expanded()
-            self.assertTrue(window.quick_label.isHidden())
-            self.assertTrue(window.quick_access.isHidden())
-            window.toggle_directory_expanded()
-            self.assertFalse(window.quick_label.isHidden())
-            self.assertFalse(window.quick_access.isHidden())
+            self.assertFalse(window.quick_panel.isVisible())
             self.assertTrue(study_library_path(study).is_dir())
             window.reload_cases(case.path)
             self.assertEqual(window.case_title.text(), case.name)
@@ -381,10 +388,10 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIn("Se fija audiencia", window.novedades_list.item(0).text())
             self.assertIn("DETECCIÓN · Audiencia: 15/09/2026 09:30", window.novedades_list.item(0).text())
             self.assertEqual(window.novedades_count.text(), "1 novedad")
-            self.assertGreaterEqual(window.novedades_list.minimumHeight(), 220)
+            self.assertGreaterEqual(window.novedades_list.minimumHeight(), 200)
             self.assertEqual(
                 window.work_tabs.tabText(window.portal_tab_index),
-                "Portal · 1",
+                "Expediente · 1",
             )
             self.assertFalse(window.novedad_detail_button.isEnabled())
             window.novedades_list.setCurrentRow(0)
@@ -404,7 +411,6 @@ class AppSmokeTests(unittest.TestCase):
             self.app.processEvents()
             window.body_splitter.setSizes([225, 1225])
             window.workspace_splitter.setSizes([1000, 300])
-            window.information_column.setSizes([175, 700])
             window.presentation_column.setSizes([500, 260])
             window.set_compilation_panel_visible(False)
             window.save_layout_state()
@@ -412,6 +418,12 @@ class AppSmokeTests(unittest.TestCase):
             self.assertTrue(window.presentation_column.isHidden())
             self.assertFalse(store.settings.layout_state["compilation_visible"])
             self.assertEqual(len(store.settings.layout_state["body"]), 2)
+            self.assertEqual(
+                store.settings.layout_state["sidebar_by_professional"][
+                    store.settings.current_professional
+                ],
+                window.body_splitter.sizes()[0],
+            )
             window.close()
 
             reopened_store = SettingsStore(root / "appdata")
@@ -444,7 +456,7 @@ class AppSmokeTests(unittest.TestCase):
             window.reload_cases(case.path)
 
             self.assertEqual(window.novedades_list.count(), 25)
-            self.assertEqual(window.work_tabs.tabText(window.portal_tab_index), "Portal · 25")
+            self.assertEqual(window.work_tabs.tabText(window.portal_tab_index), "Expediente · 25")
             window.close()
 
     def test_pending_documents_have_an_operational_case_tab(self):
@@ -1040,6 +1052,158 @@ class AppSmokeTests(unittest.TestCase):
                 for index in range(window.case_files.count())
             }
             self.assertIn(external_change.name, names)
+            window.close()
+
+    def test_case_folder_icon_is_the_traffic_light_without_separate_dots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            recent = create_case(study, "Caso al dia")
+            stale = create_case(study, "Caso atrasado")
+            (recent.path / "nota.txt").write_text("hoy", encoding="utf-8")
+            old_file = stale.path / "nota.txt"
+            old_file.write_text("viejo", encoding="utf-8")
+            old = time.time() - 400 * 24 * 3600
+            os.utime(old_file, (old, old))
+            os.utime(stale.path, (old, old))
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            self.app.processEvents()
+
+            location = window.case_tree.topLevelItem(0)
+            items = [location.child(index) for index in range(location.childCount())]
+            by_name = {item.text(0): item for item in items}
+            # El nombre del caso no lleva ningún punto ni círculo de estado:
+            # el color vive en el propio ícono de carpeta.
+            self.assertEqual(set(by_name), {"Caso al dia", "Caso atrasado"})
+            self.assertNotEqual(
+                by_name["Caso al dia"].icon(0).cacheKey(),
+                by_name["Caso atrasado"].icon(0).cacheKey(),
+            )
+            self.assertNotIn("●", by_name["Caso atrasado"].text(0))
+            window.close()
+
+    def test_case_header_shows_caption_five_fields_and_explicit_case_data_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Carpeta interna")
+            save_case_metadata(
+                case,
+                {
+                    "Actor": "Juarez, Maria Jose",
+                    "Demandado": "Prevención ART S.A.",
+                    "Causa": "Accidente de trabajo",
+                    "CUIJ": "21-27299634-9",
+                    "Radicación": "Juzgado Laboral de Villa Constitución",
+                },
+            )
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            self.assertIn("JUAREZ, MARIA JOSE", window.case_title.text())
+            self.assertIn("PREVENCIÓN ART S.A.", window.case_title.text())
+            # La ruta física no compite con la información jurídica.
+            self.assertNotIn(str(case.path), window.case_title.text())
+            self.assertEqual(window.more_metadata_button.text().split(" ·")[0], "Datos del caso")
+            self.assertTrue(window.metadata_edits["Actor"].isReadOnly())
+            window.begin_metadata_edit()
+            self.assertFalse(window.metadata_edits["Actor"].isReadOnly())
+            # TAB recorre los cinco campos en su orden natural de lectura.
+            edits = list(window.metadata_edits.values())
+            widget = window.metadata_edits["Actor"]
+            for _ in range(12):
+                widget = widget.nextInFocusChain()
+                if widget in edits:
+                    break
+            self.assertIs(widget, window.metadata_edits["Demandado"])
+            self.assertIsNotNone(window.metadata_edits["Radicación"].completer())
+            window.cancel_metadata_edit()
+            window.close()
+
+    def test_files_tab_sorts_by_column_header_and_filters_without_touching_disk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            small = case.path / "alfa.txt"
+            big = case.path / "zeta.txt"
+            small.write_text("a", encoding="utf-8")
+            big.write_text("b" * 500, encoding="utf-8")
+            before = {path.name: path.read_bytes() for path in (small, big)}
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            window.sort_case_files_by("size")
+            self.assertEqual(window.files_sort_combo.currentData(), "size_desc")
+            self.assertEqual(
+                [
+                    Path(window.case_files.item(index).data(PATH_ROLE)).name
+                    for index in range(window.case_files.count())
+                ],
+                ["zeta.txt", "alfa.txt"],
+            )
+            window.sort_case_files_by("size")
+            self.assertEqual(window.files_sort_combo.currentData(), "size_asc")
+
+            window.files_search.setText("zeta")
+            self.app.processEvents()
+            self.assertEqual(
+                [
+                    Path(window.case_files.item(index).data(PATH_ROLE)).name
+                    for index in range(window.case_files.count())
+                ],
+                ["zeta.txt"],
+            )
+            self.assertEqual({path.name: path.read_bytes() for path in (small, big)}, before)
+            window.close()
+
+    def test_presentation_limit_can_be_cleared_and_is_remembered_per_professional(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+
+            window.choose_presentation_limit(20 * 1024 * 1024)
+            self.assertEqual(window.selected_presentation_limit(), 20 * 1024 * 1024)
+            self.assertTrue(window.limit_buttons[20 * 1024 * 1024].isChecked())
+            window.choose_presentation_limit(20 * 1024 * 1024)
+            self.assertEqual(window.selected_presentation_limit(), 0)
+            self.assertIn("natural", window.limit_hint.text().casefold())
+            window.choose_presentation_limit(1 * 1024 * 1024)
+            window.close()
+
+            reopened = MainWindow(SettingsStore(root / "appdata"))
+            self.assertEqual(reopened.selected_presentation_limit(), 1 * 1024 * 1024)
+            reopened.close()
+
+    def test_status_bar_reports_sisfe_validation_and_expediente_synchronisation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            self.assertEqual(window.sisfe_status.state, OperationState.IDLE)
+            self.assertIn("sin validar", window.sisfe_indicator.toolTip().casefold())
+            self.assertEqual(window.case_sync_label.text(), "Sin sincronizar")
+            window.update_sisfe_indicator(OperationState.SUCCESS, "Sesión SISFE validada")
+            self.assertEqual(window.sisfe_status.state, OperationState.SUCCESS)
+            self.assertIn("validada", window.sisfe_indicator.toolTip())
+            window.update_case_sync_label("Sincronizando…")
+            self.assertEqual(window.case_sync_label.text(), "Sincronizando…")
             window.close()
 
     def test_sisfe_movement_shows_its_existing_local_document_without_copying_it(self):

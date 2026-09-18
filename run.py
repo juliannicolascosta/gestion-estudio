@@ -41,7 +41,7 @@ def install_error_log():
             if QApplication.instance():
                 QMessageBox.critical(
                     None,
-                    "Gestor de documental encontró un problema",
+                    "FORO encontró un problema",
                     "La aplicación evitó un cierre silencioso.\n\n"
                     f"Detalle: {exception}\n\n"
                     f"Registro: {log_file}",

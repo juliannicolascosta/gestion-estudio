@@ -301,6 +301,11 @@ class SettingsStore:
                 else {}
             ),
             naming_pattern=naming_pattern,
+            case_sync_state={
+                str(folder): str(moment)
+                for folder, moment in (payload.get("case_sync_state", {}) or {}).items()
+                if isinstance(folder, str)
+            },
         )
 
     def save(self):
@@ -322,6 +327,7 @@ class SettingsStore:
             "layout_state": self.settings.layout_state,
             "activity_settings": self.settings.activity_settings,
             "naming_pattern": self.settings.naming_pattern,
+            "case_sync_state": self.settings.case_sync_state,
         }
         self.config.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
@@ -430,6 +436,11 @@ class SettingsStore:
 
     def set_activity_settings(self, settings: dict[str, object]):
         self.settings.activity_settings = dict(settings)
+        self.save()
+
+    def set_case_sync_state(self, folder: Path, moment: str):
+        """Cada expediente conserva su propio estado de sincronización."""
+        self.settings.case_sync_state[str(folder)] = moment
         self.save()
 
     def set_naming_pattern(self, pattern: str):
@@ -610,11 +621,18 @@ def save_case_metadata(case: Case, metadata: dict[str, str]):
 def _search_text(value: str) -> str:
     expanded = value.casefold().replace("nº", "numero").replace("n°", "numero")
     normalized = unicodedata.normalize("NFKD", expanded)
-    return "".join(char for char in normalized if not unicodedata.combining(char))
+    without_accents = "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    )
+    # Los signos separan: así "21-04182107-5" encuentra "21 04182107 5" y
+    # "Gómez, Luis" encuentra "gomez luis" sin depender de la puntuación.
+    return "".join(
+        char if char.isalnum() or char.isspace() else " " for char in without_accents
+    )
 
 
 def case_matches(case: Case, query: str) -> bool:
-    tokens = [_search_text(token) for token in query.split() if token.strip()]
+    tokens = _search_text(query).split()
     if not tokens:
         return True
     metadata = read_case_metadata(case)
@@ -1412,7 +1430,9 @@ def compile_documents(
         merge_pdfs(converted, merged, cancelled)
         selected = merged
         compressed = False
-        if merged.stat().st_size > limit:
+        # Un límite no positivo significa "sin límite elegido": la presentación
+        # se compila al tamaño natural, sin degradar la calidad del documento.
+        if limit > 0 and merged.stat().st_size > limit:
             progress("Reduciendo el tamaño del PDF…")
             compressed_path = temporary / "compilado-comprimido.pdf"
             compress_pdf(merged, compressed_path, limit, progress, cancelled)
@@ -1439,7 +1459,7 @@ def compile_documents(
             output=target,
             limit=limit,
             compressed=compressed,
-            exceeds_limit=target.stat().st_size > limit,
+            exceeds_limit=limit > 0 and target.stat().st_size > limit,
         )
 
 

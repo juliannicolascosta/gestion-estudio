@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from PyQt6.QtCore import QByteArray, Qt
 from PyQt6.QtGui import QIcon, QPainter, QPixmap
@@ -39,6 +40,17 @@ _SHAPES = {
     "edit": '<path class="soft" d="M5 19h4l10-10-4-4L5 15Z"/><path d="m13.5 6.5 4 4M5 19h14"/>',
     "check": '<path d="m5 12 4 4L19 6"/>',
     "refresh": '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.5 12a7 7 0 0 0-12-4.5L4 10M5.5 12a7 7 0 0 0 12 4.5L20 14"/>',
+    "search": '<circle cx="11" cy="11" r="6"/><path d="m15.5 15.5 4.5 4.5"/>',
+    "dot": '<circle class="solid" cx="12" cy="12" r="5.5" stroke="none"/>',
+    "books": (
+        '<path class="soft" d="M4 5.5h3.6v13H4Z"/><path d="M4 5.5h3.6v13H4Z"/>'
+        '<path class="soft" d="M9.4 5.5H13v13H9.4Z"/><path d="M9.4 5.5H13v13H9.4Z"/>'
+        '<path class="soft" d="m16.1 6.6 3.4.9-3 11.1-3.4-.9Z"/>'
+        '<path d="m16.1 6.6 3.4.9-3 11.1-3.4-.9Z"/><path d="M3 21h18"/>'
+    ),
+    "history": '<path d="M4 12a8 8 0 1 0 2.4-5.7M4 5v4h4"/><path d="M12 8v4.5l3 1.8"/>',
+    "person": '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
+    "bell": '<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 19a2 2 0 0 0 4 0"/>',
 }
 
 
@@ -49,7 +61,7 @@ def ui_icon(name: str, color: str = "#2B7564", size: int = 24) -> QIcon:
     svg = f"""
     <svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24"
          fill="none" stroke="{color}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <style>.soft {{ fill: {color}; fill-opacity: .12; }}</style>
+      <style>.soft {{ fill: {color}; fill-opacity: .12; }} .solid {{ fill: {color}; }}</style>
       {shape}
     </svg>
     """.encode("utf-8")
@@ -62,6 +74,45 @@ def ui_icon(name: str, color: str = "#2B7564", size: int = 24) -> QIcon:
     painter.end()
     pixmap.setDevicePixelRatio(scale)
     return QIcon(pixmap)
+
+
+FORO_ISOTYPE = Path(__file__).with_name("foro-isotipo.svg")
+
+
+def _render_svg(svg: bytes, size: int) -> QIcon:
+    scale = 2
+    pixmap = QPixmap(size * scale, size * scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    renderer = QSvgRenderer(QByteArray(svg))
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    pixmap.setDevicePixelRatio(scale)
+    return QIcon(pixmap)
+
+
+@lru_cache(maxsize=8)
+def foro_mark(size: int = 26, color: str = "#F9F4E9", accent: str = "#698D05") -> QIcon:
+    """Isotipo FORO sin fondo: biblioteca dinámica, dos lomos rectos y uno inclinado."""
+    svg = f"""
+    <svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 1024 1024">
+      <rect x="268" y="742" width="488" height="38" rx="19" fill="{color}" opacity=".45"/>
+      <rect x="300" y="286" width="118" height="456" rx="28" fill="{color}"/>
+      <rect x="444" y="286" width="118" height="456" rx="28" fill="{color}"/>
+      <rect x="596" y="286" width="118" height="456" rx="28" fill="{accent}"
+            transform="rotate(14 655 742)"/>
+    </svg>
+    """.encode("utf-8")
+    return _render_svg(svg, size)
+
+
+@lru_cache(maxsize=4)
+def foro_application_icon(size: int = 64) -> QIcon:
+    """Icono de aplicación: el isotipo sobre el color principal del producto."""
+    try:
+        return _render_svg(FORO_ISOTYPE.read_bytes(), size)
+    except OSError:
+        return foro_mark(size)
 
 
 def file_icon_name(extension: str) -> tuple[str, str]:

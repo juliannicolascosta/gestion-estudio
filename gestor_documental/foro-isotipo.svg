@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>FORO · biblioteca dinámica</title>
+  <rect width="1024" height="1024" rx="228" fill="#2B5748"/>
+  <rect x="268" y="742" width="488" height="38" rx="19" fill="#F9F4E9" opacity=".45"/>
+  <rect x="300" y="286" width="118" height="456" rx="28" fill="#F9F4E9"/>
+  <rect x="444" y="286" width="118" height="456" rx="28" fill="#F9F4E9"/>
+  <rect x="596" y="286" width="118" height="456" rx="28" fill="#698D05"
+        transform="rotate(14 655 742)"/>
+</svg>

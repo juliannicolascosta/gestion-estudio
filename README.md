@@ -1,6 +1,6 @@
-# Gestor de documental
+# FORO
 
-Aplicación de escritorio para organizar los casos de un estudio, trabajar sus archivos y compilar presentaciones judiciales con la menor navegación posible.
+Aplicación de escritorio para organizar los casos de un estudio, trabajar sus archivos y compilar presentaciones judiciales con la menor navegación posible. El nombre interno del repositorio sigue siendo `gestion-estudio`; el producto visible es **FORO**.
 
 ## Modelo de trabajo
 
@@ -9,13 +9,13 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 ## Funciones actuales
 
 - Buscador conjunto en todas las Ubicaciones del Estudio por nombre, actor, demandado, causa, número de expediente, radicación, abogado o contraparte.
-- Árbol con una carpeta raíz azul por ubicación, todos sus casos e iconos de tipo; permite renombrar los casos desde el menú contextual.
+- Árbol con la ubicación como mueble/archivo y cada caso como carpeta cuyo propio color es el semáforo (verde al día, amarillo requiere atención, rojo prioridad, gris inactivo); permite renombrar o incorporar casos desde el menú contextual.
 - Iconografía vectorial moderna para ubicaciones, casos, tipos de archivo y acciones; los comandos secundarios repetitivos usan iconos con ayuda emergente y las acciones principales conservan su nombre.
-- Ubicación activa seleccionable: determina dónde se crea el próximo caso y qué biblioteca de Acceso rápido se muestra.
+- Ubicación activa seleccionable: determina dónde se crea el próximo caso y qué Documentos frecuentes se muestran.
 - Respaldo verificable de una Ubicación completa desde el engranaje: incluye expedientes, documentos, metadatos y una instantánea coherente de la base operativa. Cada archivo se controla por tamaño y SHA-256; la restauración sólo admite una carpeta nueva o vacía y agrega automáticamente la ubicación recuperada al Gestor.
 - Las ubicaciones temporalmente desconectadas permanecen visibles como **Ubicación no disponible** y pueden quitarse del Gestor sin borrar sus archivos.
-- **Acceso rápido** disponible para DNI, matrícula, CBU, constancias y documental reutilizable, con controles para contraer la biblioteca o ampliar temporalmente el Directorio.
-- Cada ubicación tiene su propia biblioteca en `00 - ACCESO RÁPIDO`, pero esa carpeta no aparece como si fuera un caso.
+- **Documentos frecuentes** (antes Biblioteca / Acceso rápido) en un panel flotante para DNI, matrícula, CBU, constancias y documental reutilizable, arrastrable hacia un caso, un correo o la Presentación.
+- Cada ubicación guarda sus Documentos frecuentes en `00 - ACCESO RÁPIDO`, pero esa carpeta no aparece como si fuera un caso.
 - Creación de casos vacíos, sin subcarpetas automáticas; reconocimiento, importación y renombrado de carpetas creadas por el usuario.
 - Datos del caso protegidos contra cambios involuntarios: se muestran en modo lectura y sólo se modifican mediante **Editar datos**, con Guardar/Cancelar y aviso si se intenta cambiar de caso con cambios pendientes.
 - Datos procesales con portal asociado, radicaciones de ambas instancias y domicilios de las partes, sin duplicar la identidad principal del expediente.
@@ -79,7 +79,7 @@ El usuario puede definir una o varias **Ubicaciones del Estudio**. Cada carpeta 
 
 ## Iniciar
 
-En esta instalación local, hacé doble clic en `Iniciar Gestor de documental.cmd`.
+En esta instalación local, hacé doble clic en `Iniciar FORO.cmd`.
 
 Para preparar el entorno desde cero:
 
@@ -95,7 +95,7 @@ Microsoft Word o LibreOffice es necesario para convertir documentos Word. La int
 
 1. Pulsá **Agregar ubicación** y elegí la carpeta que contiene tus casos. Podés repetirlo para sumar una ubicación local, de red o sincronizada por Google Drive.
 2. Elegí una carpeta existente del árbol o creá **Nuevo caso**.
-3. Arrastrá a **Acceso rápido** los documentos que usás en distintos casos o correos.
+3. Arrastrá a **Documentos frecuentes** los documentos que usás en distintos casos o correos.
 4. Pulsá **Editar datos**, completá lo necesario y guardá. **Más datos** abre las pestañas de ficha general, entrevista y RAEO.
 5. Creá o elegí un escrito y, desde **Archivos**, enviá la documental a **Compilación**.
 6. Ordená los elementos en el panel derecho **Compilación**, elegí el límite y pulsá **Compilar PDF**. Confirmá el nombre sugerido para reconocerlo fácilmente después de firmarlo.

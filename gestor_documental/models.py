@@ -9,12 +9,28 @@ SISFE_COMMON_LIMIT = 3 * 1024 * 1024
 SISFE_SPECIAL_LIMIT = 6 * 1024 * 1024
 BUENOS_AIRES_LIMIT = 20 * 1024 * 1024
 
+NO_LIMIT = 0
+NO_LIMIT_PROFILE = "Sin límite · tamaño natural"
+
 PRESENTATION_PROFILES = {
     "SRT · 1 MB": SRT_LIMIT,
     "SISFE común · 3 MB": SISFE_COMMON_LIMIT,
     "SISFE demanda/contestación · 6 MB": SISFE_SPECIAL_LIMIT,
     "Provincia de Buenos Aires · 20 MB": BUENOS_AIRES_LIMIT,
+    # Sin selección de límite la presentación se compila al tamaño natural.
+    # No se ofrece como opción visible: es la ausencia de límite elegido.
+    NO_LIMIT_PROFILE: NO_LIMIT,
 }
+
+# Etiquetas breves de los límites que el profesional elige en Presentación.
+PRESENTATION_LIMITS = (
+    ("1 MB", SRT_LIMIT),
+    ("3 MB", SISFE_COMMON_LIMIT),
+    ("6 MB", SISFE_SPECIAL_LIMIT),
+    ("20 MB", BUENOS_AIRES_LIMIT),
+)
+
+PROFILE_FOR_LIMIT = {value: label for label, value in PRESENTATION_PROFILES.items()}
 
 DEFAULT_PROFILE = "SISFE común · 3 MB"
 DEFAULT_NAMING_PATTERN = "{actor}_{fecha}_{titulo}"
@@ -153,6 +169,8 @@ class AppSettings:
     sisfe_profiles: dict[str, dict[str, str]] = field(default_factory=dict)
     layout_state: dict[str, object] = field(default_factory=dict)
     activity_settings: dict[str, object] = field(default_factory=dict)
+    # Fecha/hora de la última sincronización de cada expediente, por carpeta.
+    case_sync_state: dict[str, str] = field(default_factory=dict)
     naming_pattern: str = DEFAULT_NAMING_PATTERN
 
     @property

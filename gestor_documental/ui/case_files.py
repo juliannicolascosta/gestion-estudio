@@ -4,9 +4,76 @@ from pathlib import Path
 
 from PyQt6.QtCore import QMimeData, Qt, QUrl
 from PyQt6.QtGui import QColor, QDrag, QKeySequence, QPainter
-from PyQt6.QtWidgets import QAbstractItemView, QListWidget
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QListWidget,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+)
 
-from .roles import PATH_ROLE
+from .roles import MODIFIED_ROLE, PATH_ROLE, SIZE_ROLE
+
+
+DATE_COLUMN_WIDTH = 148
+SIZE_COLUMN_WIDTH = 92
+
+
+class ExplorerColumnsDelegate(QStyledItemDelegate):
+    """Dibuja Nombre, Fecha de modificación y Tamaño como en el Explorador.
+
+    La vista sigue siendo una lista: el modelo, el arrastre, el renombrado y
+    la selección múltiple no cambian.  Sólo se reparte el ancho de cada fila
+    en tres columnas alineadas con sus encabezados.
+    """
+
+    def paint(self, painter, option, index):
+        modified = str(index.data(MODIFIED_ROLE) or "")
+        size = str(index.data(SIZE_ROLE) or "")
+        if not modified and not size:
+            super().paint(painter, option, index)
+            return
+
+        view_option = QStyleOptionViewItem(option)
+        self.initStyleOption(view_option, index)
+        label = view_option.text
+        view_option.text = ""
+        widget = view_option.widget
+        style = widget.style() if widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, view_option, painter, widget)
+
+        text_rect = style.subElementRect(
+            QStyle.SubElement.SE_ItemViewItemText, view_option, widget
+        )
+        reserved = DATE_COLUMN_WIDTH + SIZE_COLUMN_WIDTH
+        name_rect = text_rect.adjusted(0, 0, -reserved, 0)
+        selected = bool(view_option.state & QStyle.StateFlag.State_Selected)
+
+        painter.save()
+        metrics = painter.fontMetrics()
+        painter.setPen(QColor("#1F4034" if selected else "#2A332B"))
+        painter.drawText(
+            name_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            metrics.elidedText(label, Qt.TextElideMode.ElideMiddle, max(name_rect.width(), 0)),
+        )
+        painter.setPen(QColor("#6B7A6E" if not selected else "#3E5A4B"))
+        date_rect = text_rect.adjusted(
+            max(name_rect.width(), 0), 0, -SIZE_COLUMN_WIDTH, 0
+        )
+        painter.drawText(
+            date_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            modified,
+        )
+        size_rect = text_rect.adjusted(max(name_rect.width(), 0) + DATE_COLUMN_WIDTH, 0, 0, 0)
+        painter.drawText(
+            size_rect,
+            int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+            size,
+        )
+        painter.restore()
 
 
 class CaseFilesList(QListWidget):
@@ -19,6 +86,8 @@ class CaseFilesList(QListWidget):
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setUniformItemSizes(True)
+        self.setItemDelegate(ExplorerColumnsDelegate(self))
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -59,7 +128,7 @@ class CaseFilesList(QListWidget):
         painter.drawText(
             self.viewport().rect().adjusted(24, 24, -24, -24),
             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Arrastrá archivos acá\nSe guardarán directamente en la carpeta del caso",
+            "Arrastrá archivos acá\nSe guardan en la carpeta del caso",
         )
 
     def keyPressEvent(self, event):

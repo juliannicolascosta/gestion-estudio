@@ -4,17 +4,30 @@ import sys
 import re
 import sqlite3
 import shutil
+import unicodedata
 import json
 from datetime import date, datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QFileSystemWatcher, QMimeData, QObject, QSize, QThread, QTimer, Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import (
+    QFileSystemWatcher,
+    QMimeData,
+    QObject,
+    QSize,
+    QStringListModel,
+    QThread,
+    QTimer,
+    Qt,
+    QUrl,
+    pyqtSignal,
+)
 from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -56,7 +69,11 @@ from .models import (
     CASE_FIELDS,
     CASE_FIELD_LABELS,
     DEFAULT_PROFILE,
+    NO_LIMIT,
+    NO_LIMIT_PROFILE,
+    PRESENTATION_LIMITS,
     PRESENTATION_PROFILES,
+    PROFILE_FOR_LIMIT,
     VISIBLE_CASE_FIELDS,
     Case,
 )
@@ -106,7 +123,7 @@ from .compilation_draft import (
 )
 from .sisfe_session import ManualSisfeSession
 from .sisfe_sync import SisfePortalService
-from .icons import file_icon_name, ui_icon
+from .icons import file_icon_name, foro_application_icon, foro_mark, ui_icon
 from .signing import (
     DigitalSignatureSession,
     SigningCertificate,
@@ -147,9 +164,11 @@ from .services import (
     rename_case,
     rename_case_entry,
     rename_case_file,
+    safe_name,
     save_case_metadata,
     suggested_presentation_name,
     template_variable_name,
+    to_pdf,
     split_pdf,
     study_library_path,
     unique_path,
@@ -157,10 +176,24 @@ from .services import (
 from .study_backup import BackupResult, RestoreResult
 from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationHistoryDialog, CompilationList
-from .ui.case_files import CaseFilesList, QuickAccessList
+from .ui.case_files import (
+    DATE_COLUMN_WIDTH,
+    SIZE_COLUMN_WIDTH,
+    CaseFilesList,
+    QuickAccessList,
+)
 from .ui.case_import import ExternalCaseImportDialog
 from .ui.operation_status import OperationState, OperationStatusIndicator
-from .ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE, PATH_ROLE, PENDING_DUE_ROLE, ROOT_ROLE, TYPE_ROLE
+from .ui.roles import (
+    ACTIVITY_ROLE,
+    MODIFIED_ROLE,
+    MOVEMENT_ROLE,
+    PATH_ROLE,
+    PENDING_DUE_ROLE,
+    ROOT_ROLE,
+    SIZE_ROLE,
+    TYPE_ROLE,
+)
 from .ui.settings_dialogs import (
     ActivitySettingsDialog,
     ApplicationSettingsDialog,
@@ -190,6 +223,15 @@ def _format_sisfe_date(value: object) -> str:
     return text
 
 
+def _comparable_text(value: str) -> str:
+    """Clave estable para no duplicar valores por mayúsculas, acentos o espacios."""
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    without_accents = "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    )
+    return " ".join(without_accents.split())
+
+
 def _interpretation_summary(text: str) -> str:
     rows = []
     for result in interpret_movement(text):
@@ -203,68 +245,79 @@ def _interpretation_summary(text: str) -> str:
     return "\n".join(rows)
 
 APP_STYLE = """
-QMainWindow, QWidget#appRoot { background: #F4F5F3; color: #17211F; }
+QMainWindow, QWidget#appRoot { background: #F1EEE4; color: #2A332B; }
 QWidget { font-family: "Segoe UI Variable Text", "Segoe UI"; font-size: 13px; }
-QFrame#topBar { background: #163C35; border: 0; }
-QLabel#brand { color: #FFFFFF; font-size: 20px; font-weight: 700; }
-QLabel#brandVersion { color: #BDD0CA; font-size: 11px; font-weight: 600; padding-bottom: 1px; }
-QLabel#brandSub { color: #BDD0CA; font-size: 11px; }
-QLabel#professionalLabel { color: #BDD0CA; font-size: 10px; font-weight: 700; }
-QFrame#sidebar { background: #E9EDE9; border-right: 1px solid #D4DCD7; }
-QFrame#card { background: #FFFFFF; border: 1px solid #DDE3DF; border-radius: 14px; }
-QFrame#softCard { background: #EEF5F1; border: 1px solid #D6E6DD; border-radius: 12px; }
-QFrame#actionCard { background: #173F37; border: 0; border-radius: 14px; }
-QLabel#eyebrow { color: #6D7E78; font-size: 10px; font-weight: 700; }
-QLabel#sectionTitle { color: #17211F; font-size: 15px; font-weight: 700; }
-QLabel#caseTitle { color: #17211F; font-size: 24px; font-weight: 700; }
-QLabel#muted { color: #71817C; font-size: 11px; }
-QLabel#actionTitle { color: white; font-size: 15px; font-weight: 700; }
-QLabel#actionMuted { color: #BCD0C9; font-size: 11px; }
-QLabel#caseBadge { background: #E9F2EE; color: #286454; border-radius: 8px; padding: 4px 8px; font-size: 10px; font-weight: 700; }
-QLabel#caseBadge[pending="true"] { background: #FFF0D7; color: #8A5B12; }
-QLabel#warning { background: #FFF0D7; color: #7B5316; border-radius: 8px; padding: 8px 10px; }
-QLineEdit, QComboBox { background: #FFFFFF; border: 1px solid #C9D3CE; border-radius: 8px; padding: 8px 10px; min-height: 18px; }
-QLineEdit:focus, QComboBox:focus { border: 1px solid #2C7767; }
-QLineEdit:read-only { background: #F5F7F5; color: #4F5E59; border-color: #E0E5E2; }
-QComboBox#professional { background: #234E46; color: white; border: 1px solid #557A72; min-width: 210px; }
-QPushButton { background: #FFFFFF; color: #25332F; border: 1px solid #C7D1CC; border-radius: 8px; padding: 9px 13px; font-weight: 600; }
-QPushButton:hover { background: #F7F9F7; border-color: #8FA29B; }
-QPushButton#primary { background: #CB5A36; color: white; border-color: #CB5A36; padding: 10px 16px; }
-QPushButton#primary:hover { background: #B94B2B; border-color: #B94B2B; }
-QPushButton#green { background: #2B7564; color: white; border-color: #2B7564; }
-QPushButton#green:hover { background: #236353; border-color: #236353; }
-QPushButton#onDark { background: #FFFFFF; color: #173F37; border: 0; padding: 11px 14px; }
-QPushButton#onDark:hover { background: #ECF3F0; }
-QPushButton#quiet { background: transparent; border: 0; color: #61716C; padding: 6px 8px; }
-QPushButton#quiet:hover { background: #E8EEEA; color: #17211F; }
-QPushButton#iconOnly { min-width: 38px; max-width: 38px; min-height: 38px; max-height: 38px; padding: 0; border-radius: 10px; }
-QPushButton#iconQuiet { min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; padding: 0; border: 0; background: transparent; }
-QPushButton#iconQuiet:hover { background: #E8EEEA; }
+QToolTip { background: #3A4735; color: #F9F4E9; border: 0; padding: 6px 8px; }
+QFrame#topBar { background: #2B5748; border: 0; }
+QLabel#brand { color: #F9F4E9; font-size: 19px; font-weight: 700; letter-spacing: 2px; }
+QLabel#brandVersion { color: #A6BEB0; font-size: 10px; font-weight: 600; padding-bottom: 3px; }
+QLabel#professionalLabel { color: #7C8B7E; font-size: 10px; font-weight: 700; letter-spacing: .6px; }
+QFrame#sidebar { background: #F7F3E9; border-right: 1px solid #E2DDCC; }
+QFrame#card, QFrame#caseHeader, QFrame#actionCard { background: #FFFFFF; border: 1px solid #E3DED0; border-radius: 10px; }
+QFrame#softCard { background: #F4F1E5; border: 1px solid #E3DED0; border-radius: 8px; }
+QLabel#eyebrow { color: #7C8B7E; font-size: 10px; font-weight: 700; letter-spacing: .8px; }
+QLabel#fieldLabel { color: #8A9789; font-size: 9px; font-weight: 700; letter-spacing: .8px; }
+QLabel#sectionTitle { color: #2A332B; font-size: 15px; font-weight: 700; }
+QLabel#caseTitle { color: #2B5748; font-size: 19px; font-weight: 700; }
+QLabel#muted { color: #7C8B7E; font-size: 11px; }
+QLabel#actionTitle { color: #2A332B; font-size: 14px; font-weight: 700; }
+QLabel#actionMuted { color: #7C8B7E; font-size: 11px; }
+QLabel#caseBadge { background: #EDF1E7; color: #3A4735; border-radius: 6px; padding: 3px 8px; font-size: 10px; font-weight: 700; }
+QLabel#caseBadge[pending="true"] { background: #F6EEDC; color: #8A5B12; }
+QLabel#warning { background: #F6EEDC; color: #7B5316; border-radius: 8px; padding: 8px 10px; }
+QLineEdit, QComboBox { background: #FFFFFF; border: 1px solid #D5D0C0; border-radius: 6px; padding: 7px 9px; min-height: 17px; }
+QLineEdit:focus, QComboBox:focus { border: 1px solid #698D05; }
+QLineEdit:read-only { background: #FBF9F3; color: #3A4735; border-color: #EAE5D8; }
+QLineEdit#metaValue { background: transparent; border: 0; border-bottom: 1px solid #EDE8DB; border-radius: 0; padding: 2px 0 3px 0; color: #2A332B; font-weight: 600; }
+QLineEdit#metaValue:focus { border-bottom: 1px solid #698D05; }
+QComboBox#professional { background: #23483C; color: #F9F4E9; border: 1px solid #3F6455; min-width: 180px; padding: 6px 9px; }
+QComboBox#professional::drop-down { border: 0; width: 18px; }
+QPushButton { background: #FFFFFF; color: #2A332B; border: 1px solid #D5D0C0; border-radius: 6px; padding: 8px 12px; font-weight: 600; }
+QPushButton:hover { background: #FBF9F3; border-color: #B6AF9A; }
+QPushButton:disabled { color: #A6AFA4; border-color: #E6E1D3; }
+QPushButton#primary { background: #2B5748; color: #F9F4E9; border-color: #2B5748; padding: 9px 14px; }
+QPushButton#primary:hover { background: #23483C; border-color: #23483C; }
+QPushButton#primary:disabled { background: #B7C4BB; border-color: #B7C4BB; color: #F1EEE4; }
+QPushButton#green { background: #618765; color: #FFFFFF; border-color: #618765; }
+QPushButton#green:hover { background: #527356; border-color: #527356; }
+QPushButton#onDark { background: #2B5748; color: #F9F4E9; border-color: #2B5748; padding: 9px 14px; }
+QPushButton#onDark:hover { background: #23483C; border-color: #23483C; }
+QPushButton#quiet { background: transparent; border: 0; color: #5D6B5E; padding: 6px 8px; text-align: left; }
+QPushButton#quiet:hover { background: #EDEAE0; color: #2A332B; }
+QPushButton#iconOnly { min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; padding: 0; border-radius: 6px; }
+QPushButton#iconQuiet { min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0; border: 0; background: transparent; }
+QPushButton#iconQuiet:hover { background: #EDEAE0; }
+QPushButton#topIcon { min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; padding: 0; border: 0; background: transparent; }
+QPushButton#topIcon:hover { background: #3A6455; }
+QPushButton#limit { padding: 6px 2px; color: #3A4735; font-weight: 600; }
+QPushButton#limit:checked { background: #2B5748; color: #F9F4E9; border-color: #2B5748; }
+QPushButton#columnHeaderButton { background: transparent; border: 0; border-bottom: 1px solid #EDE8DB; border-radius: 0; color: #7C8B7E; font-size: 10px; font-weight: 700; padding: 4px 2px; text-align: left; }
+QPushButton#columnHeaderButton:hover { color: #2B5748; background: #F7F5EC; }
 QTreeWidget, QListWidget { background: transparent; border: 0; outline: 0; }
 QTreeWidget#caseTree { show-decoration-selected: 0; }
 QTreeView::branch:selected, QTreeWidget::branch:selected { background: transparent; border: 0; }
-QTreeWidget::item, QListWidget::item { border-radius: 7px; padding: 7px 7px; margin: 1px 0; }
-QTreeWidget::item:hover, QListWidget::item:hover { background: #EDF2EF; }
-QTreeWidget::item:selected, QListWidget::item:selected { background: #DCEAE4; color: #164D41; }
-QListWidget#modelList { background: #F7F9F7; border: 1px solid #DDE3DF; border-radius: 10px; padding: 5px; }
+QTreeWidget::item, QListWidget::item { border-radius: 6px; padding: 6px 6px; margin: 1px 0; }
+QTreeWidget::item:hover, QListWidget::item:hover { background: #EFEDE3; }
+QTreeWidget::item:selected, QListWidget::item:selected { background: #E2EBDC; color: #1F4034; }
+QListWidget#modelList { background: #FBF9F3; border: 1px solid #E3DED0; border-radius: 8px; padding: 5px; }
 QListWidget#modelList::item { background: #FFFFFF; border: 1px solid transparent; padding: 11px; margin: 2px; }
-QListWidget#modelList::item:hover { background: #EDF4F1; color: #173F37; border-color: #C8DED5; }
-QListWidget#modelList::item:selected { background: #2B7564; color: #FFFFFF; border-color: #236353; }
-QListWidget#modelList::item:selected:hover { background: #236353; color: #FFFFFF; border-color: #173F37; }
-QFrame#actionCard QComboBox, QFrame#actionCard QLineEdit { background: #FFFFFF; color: #17211F; border: 0; }
-QSplitter::handle { background: #E2E8E4; width: 7px; height: 7px; }
-QSplitter::handle:hover { background: #BDD4C9; }
+QListWidget#modelList::item:hover { background: #F2F5EE; color: #2B5748; border-color: #D8E2D2; }
+QListWidget#modelList::item:selected { background: #2B5748; color: #F9F4E9; border-color: #23483C; }
+QListWidget#modelList::item:selected:hover { background: #23483C; color: #F9F4E9; border-color: #1B3A30; }
+QSplitter::handle { background: #E4DFD0; width: 6px; height: 6px; }
+QSplitter::handle:hover { background: #698D05; }
 QScrollArea { border: 0; background: transparent; }
 QTabWidget::pane { border: 0; background: transparent; top: -1px; }
-QTabBar::tab { background: #E7ECE9; color: #53635E; border: 0; border-radius: 8px; padding: 9px 14px; margin: 0 5px 7px 0; font-weight: 600; }
-QTabBar::tab:hover { background: #DDE7E2; color: #173F37; }
-QTabBar::tab:selected { background: #2B7564; color: white; }
-QPlainTextEdit { background: #FFFFFF; border: 1px solid #C9D3CE; border-radius: 8px; padding: 8px 10px; }
-QPlainTextEdit:focus { border: 1px solid #2C7767; }
-QMenu { background: white; border: 1px solid #D6DDD9; padding: 5px; }
-QMenu::item { padding: 8px 24px 8px 10px; border-radius: 6px; }
-QMenu::item:selected { background: #DCEAE4; color: #164D41; }
-QStatusBar { background: white; color: #61716C; border-top: 1px solid #DDE3DF; }
+QTabBar::tab { background: transparent; color: #6C7A6D; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; margin: 0 8px 6px 0; font-weight: 600; }
+QTabBar::tab:hover { color: #2B5748; }
+QTabBar::tab:selected { color: #2B5748; border-bottom: 2px solid #698D05; }
+QPlainTextEdit { background: #FFFFFF; border: 1px solid #D5D0C0; border-radius: 6px; padding: 8px 10px; }
+QPlainTextEdit:focus { border: 1px solid #698D05; }
+QMenu { background: white; border: 1px solid #E3DED0; padding: 4px; }
+QMenu::item { padding: 7px 24px 7px 10px; border-radius: 5px; }
+QMenu::item:selected { background: #E2EBDC; color: #1F4034; }
+QStatusBar { background: #FBF9F3; color: #6C7A6D; border-top: 1px solid #E3DED0; }
+QStatusBar::item { border: 0; }
 """
 
 
@@ -291,7 +344,7 @@ def section_heading(title: str, subtitle: str = "") -> QVBoxLayout:
     return layout
 
 
-def decorate_button(button: QPushButton, icon_name: str, color: str = "#2B7564") -> QPushButton:
+def decorate_button(button: QPushButton, icon_name: str, color: str = "#2B5748") -> QPushButton:
     button.setIcon(ui_icon(icon_name, color))
     button.setIconSize(QSize(19, 19))
     return button
@@ -303,7 +356,7 @@ def icon_button(
     slot,
     *,
     bordered: bool = False,
-    color: str = "#2B7564",
+    color: str = "#2B5748",
 ) -> QPushButton:
     button = QPushButton()
     button.setObjectName("iconOnly" if bordered else "iconQuiet")
@@ -1631,10 +1684,10 @@ class MainWindow(QMainWindow):
         self._sisfe_download_states: dict[tuple[str, str], tuple[str, str]] = {}
         self._sisfe_download_active = False
         self._cut_paths: list[Path] = []
-        self._directory_expanded = False
-        self._quick_access_collapsed = False
         self._restoring_layout = True
-        self._visible_workspace_sizes = [930, 285]
+        self._sync_all_queue: list[Case] = []
+        self._sync_all_active = False
+        self._visible_workspace_sizes = [920, 300]
         self._layout_save_timer = QTimer(self)
         self._layout_save_timer.setSingleShot(True)
         self._layout_save_timer.setInterval(350)
@@ -1648,7 +1701,7 @@ class MainWindow(QMainWindow):
         self._signer_output_timer = QTimer(self)
         self._signer_output_timer.setInterval(1500)
         self._signer_output_timer.timeout.connect(self.check_external_signer_output)
-        self.setWindowTitle("Gestor de documental")
+        self.setWindowTitle("FORO")
         self.setMinimumSize(1120, 700)
         self.resize(1450, 880)
         self._build()
@@ -1662,160 +1715,209 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+        outer.addWidget(self._build_top_bar())
 
+        self.body_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.body_splitter.setObjectName("bodySplitter")
+        self.body_splitter.setChildrenCollapsible(False)
+        self.body_splitter.setHandleWidth(6)
+        self.body_splitter.addWidget(self._build_sidebar())
+        self.body_splitter.addWidget(self._build_workspace())
+        self.body_splitter.setStretchFactor(0, 0)
+        self.body_splitter.setStretchFactor(1, 1)
+        self.body_splitter.setSizes([250, 1200])
+        outer.addWidget(self.body_splitter, 1)
+
+        self.setCentralWidget(root)
+        self._build_status_bar()
+        self.restore_layout()
+        for splitter in (
+            self.body_splitter,
+            self.workspace_splitter,
+            self.presentation_column,
+        ):
+            splitter.splitterMoved.connect(self.schedule_layout_save)
+        self._restoring_layout = False
+
+    # ------------------------------------------------------------------
+    # Barra superior: identidad, profesional activo y opciones
+    # ------------------------------------------------------------------
+    def _build_top_bar(self) -> QFrame:
         top = QFrame()
         top.setObjectName("topBar")
-        top_layout = QHBoxLayout(top)
-        top_layout.setContentsMargins(24, 12, 24, 12)
-        brand_stack = QVBoxLayout()
-        brand_stack.setSpacing(0)
-        brand_row = QHBoxLayout()
-        brand_row.setSpacing(8)
-        brand = QLabel("Gestor de documental")
+        layout = QHBoxLayout(top)
+        layout.setContentsMargins(18, 9, 12, 9)
+        layout.setSpacing(9)
+
+        mark = QLabel()
+        mark.setObjectName("brandMark")
+        mark.setPixmap(foro_mark(24).pixmap(QSize(24, 24)))
+        mark.setFixedSize(24, 24)
+        layout.addWidget(mark, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        brand = QLabel("FORO")
         brand.setObjectName("brand")
+        layout.addWidget(brand, 0, Qt.AlignmentFlag.AlignVCenter)
+
         version = QLabel(f"v{__version__}")
         version.setObjectName("brandVersion")
-        version.setToolTip("Versión ejecutada del Gestor")
-        brand_row.addWidget(brand)
-        brand_row.addWidget(version, 0, Qt.AlignmentFlag.AlignBottom)
-        brand_row.addStretch()
-        sub = QLabel("Casos, archivos y presentaciones en un mismo flujo")
-        sub.setObjectName("brandSub")
-        brand_stack.addLayout(brand_row)
-        brand_stack.addWidget(sub)
-        top_layout.addLayout(brand_stack)
-        top_layout.addStretch()
-        professional_stack = QVBoxLayout()
-        professional_stack.setSpacing(2)
-        professional_label = QLabel("PROFESIONAL")
-        professional_label.setObjectName("professionalLabel")
+        version.setToolTip("Versión instalada de FORO")
+        layout.addWidget(version, 0, Qt.AlignmentFlag.AlignBottom)
+        layout.addStretch()
+
         self.professional_combo = QComboBox()
         self.professional_combo.setObjectName("professional")
+        self.professional_combo.setToolTip(
+            "Profesional activo. Define ubicaciones, perfil y accesos a los portales."
+        )
         self.professional_combo.currentTextChanged.connect(self.professional_changed)
-        professional_stack.addWidget(professional_label)
-        professional_stack.addWidget(self.professional_combo)
-        top_layout.addLayout(professional_stack)
+        layout.addWidget(self.professional_combo, 0, Qt.AlignmentFlag.AlignVCenter)
+
         self.professional_settings_button = icon_button(
             "settings",
             "Opciones del profesional y del sistema",
             lambda: None,
-            bordered=True,
-            color="#173F37",
+            color="#F9F4E9",
         )
+        self.professional_settings_button.setObjectName("topIcon")
         professional_menu = QMenu(self.professional_settings_button)
         professional_menu.addAction("Configuración general…", self.configure_application)
         professional_menu.addAction("Configurar semáforo de casos…", self.configure_case_activity)
+        professional_menu.addSeparator()
+        professional_menu.addAction(
+            "Sincronizar todos los expedientes…", self.sync_all_expedientes
+        )
         professional_menu.addSeparator()
         professional_menu.addAction("Crear respaldo del Estudio…", self.create_active_study_backup)
         professional_menu.addAction("Restaurar respaldo del Estudio…", self.restore_study_from_backup)
         professional_menu.addSeparator()
         professional_menu.addAction("Restablecer distribución", self.reset_layout)
         self.professional_settings_button.setMenu(professional_menu)
-        top_layout.addWidget(
-            self.professional_settings_button,
-            0,
-            Qt.AlignmentFlag.AlignBottom,
-        )
-        outer.addWidget(top)
+        layout.addWidget(self.professional_settings_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        return top
 
-        self.body_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.body_splitter.setObjectName("bodySplitter")
-        self.body_splitter.setChildrenCollapsible(False)
-
+    # ------------------------------------------------------------------
+    # Panel lateral: búsqueda universal, Nuevo caso, ubicaciones y casos
+    # ------------------------------------------------------------------
+    def _build_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setMinimumWidth(205)
-        sidebar.setMaximumWidth(380)
-        side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(16, 18, 16, 16)
-        side_layout.setSpacing(10)
-        study_label = QLabel("UBICACIONES DEL ESTUDIO")
-        study_label.setObjectName("eyebrow")
-        side_layout.addWidget(study_label)
-        self.study_name = QLabel("Sin carpeta definida")
-        self.study_name.setObjectName("sectionTitle")
-        self.study_name.setWordWrap(True)
-        side_layout.addWidget(self.study_name)
-        self.study_path = QLabel("Elegí dónde están las carpetas de tus casos")
-        self.study_path.setObjectName("muted")
-        self.study_path.setWordWrap(True)
-        side_layout.addWidget(self.study_path)
-        choose_study = QPushButton("Agregar ubicación")
-        decorate_button(choose_study, "location-plus")
-        choose_study.setToolTip("Agregar una carpeta local, de red o sincronizada")
-        choose_study.clicked.connect(self.choose_study_root)
-        side_layout.addWidget(choose_study)
-        side_layout.addSpacing(6)
+        sidebar.setMinimumWidth(215)
+        sidebar.setMaximumWidth(460)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(13, 13, 13, 11)
+        layout.setSpacing(9)
+
         self.search = QLineEdit()
+        self.search.setObjectName("search")
         self.search.setPlaceholderText("Buscar caso, parte, expediente…")
         self.search.setClearButtonEnabled(True)
+        self.search.addAction(
+            ui_icon("search", "#7C8B7E"), QLineEdit.ActionPosition.LeadingPosition
+        )
+        self.search.setToolTip(
+            "Busca en todos los casos: nombre, actor, demandado, carátula, "
+            "expediente, causa y radicación."
+        )
         self.search.textChanged.connect(self.reload_cases)
-        side_layout.addWidget(self.search)
-        study_activity = QPushButton("Actividad del Estudio")
-        decorate_button(study_activity, "bell")
-        study_activity.clicked.connect(self.open_study_activity)
-        side_layout.addWidget(study_activity)
+        layout.addWidget(self.search)
+
         new_case = QPushButton("Nuevo caso")
         new_case.setObjectName("primary")
-        decorate_button(new_case, "folder-plus", "#FFFFFF")
+        decorate_button(new_case, "folder-plus", "#F9F4E9")
+        new_case.setToolTip("Crear un caso en la ubicación activa (Ctrl+Shift+N)")
         new_case.clicked.connect(self.new_case)
-        side_layout.addWidget(new_case)
-        import_case = QPushButton("Incorporar carpeta como caso")
-        decorate_button(import_case, "folder-plus")
-        import_case.setToolTip("Copiar una carpeta externa completa después de revisar el destino")
-        import_case.clicked.connect(self.import_external_case)
-        side_layout.addWidget(import_case)
+        layout.addWidget(new_case)
+
+        locations_header = QHBoxLayout()
+        locations_header.setSpacing(2)
+        locations_label = QLabel("CASOS")
+        locations_label.setObjectName("eyebrow")
+        locations_header.addWidget(locations_label)
+        locations_header.addStretch()
+        self.add_location_button = icon_button(
+            "plus",
+            "Agregar una ubicación del Estudio (carpeta local, de red o sincronizada)",
+            self.choose_study_root,
+        )
+        locations_header.addWidget(self.add_location_button)
+        layout.addLayout(locations_header)
+
+        # El resumen del Estudio se conserva como fuente de los tooltips del
+        # árbol: la ruta física no compite con la información jurídica.
+        self.study_name = QLabel("Sin ubicaciones", sidebar)
+        self.study_name.setObjectName("sectionTitle")
+        self.study_name.setVisible(False)
+        self.study_path = QLabel("", sidebar)
+        self.study_path.setObjectName("muted")
+        self.study_path.setVisible(False)
+
         self.case_tree = QTreeWidget()
         self.case_tree.setObjectName("caseTree")
         self.case_tree.setHeaderHidden(True)
-        self.case_tree.setIndentation(18)
+        self.case_tree.setIndentation(16)
         tree_palette = self.case_tree.palette()
         tree_palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 0, 0, 0))
-        tree_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#164D41"))
+        tree_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#1F4034"))
         self.case_tree.setPalette(tree_palette)
         self.case_tree.itemSelectionChanged.connect(self.case_tree_changed)
         self.case_tree.itemDoubleClicked.connect(self.open_tree_case)
         self.case_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.case_tree.customContextMenuRequested.connect(self.show_case_menu)
-        side_layout.addWidget(self.case_tree, 2)
+        layout.addWidget(self.case_tree, 1)
 
-        self.directory_expand_button = icon_button(
-            "arrow-down",
-            "Expandir directorio y ocultar temporalmente la biblioteca",
-            self.toggle_directory_expanded,
-        )
-        side_layout.addWidget(
-            self.directory_expand_button,
-            0,
-            Qt.AlignmentFlag.AlignHCenter,
-        )
+        self.models_button = QPushButton("Modelos")
+        self.models_button.setObjectName("quiet")
+        decorate_button(self.models_button, "template")
+        self.models_button.setToolTip("Modelos de escritos del Estudio")
+        self.models_button.clicked.connect(self.open_models_folder)
+        layout.addWidget(self.models_button)
 
-        quick_header = QHBoxLayout()
-        self.quick_label = QLabel("ACCESO RÁPIDO")
+        self.frequent_documents_button = QPushButton("Documentos frecuentes")
+        self.frequent_documents_button.setObjectName("quiet")
+        decorate_button(self.frequent_documents_button, "books")
+        self.frequent_documents_button.setToolTip(
+            "Matrícula, ARCA, CBU y archivos recurrentes, listos para arrastrar"
+        )
+        self.frequent_documents_button.clicked.connect(self.toggle_quick_access)
+        layout.addWidget(self.frequent_documents_button)
+
+        self._build_frequent_documents_panel()
+        return sidebar
+
+    def _build_frequent_documents_panel(self):
+        """Panel pequeño y flotante; reemplaza a la antigua Biblioteca fija."""
+        self.quick_panel = QDialog(self)
+        self.quick_panel.setWindowTitle("Documentos frecuentes")
+        self.quick_panel.setWindowFlag(Qt.WindowType.Tool, True)
+        self.quick_panel.resize(380, 440)
+        panel_layout = QVBoxLayout(self.quick_panel)
+        panel_layout.setContentsMargins(14, 12, 14, 12)
+        panel_layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        self.quick_label = QLabel("DOCUMENTOS FRECUENTES")
         self.quick_label.setObjectName("eyebrow")
-        quick_header.addWidget(self.quick_label)
-        quick_header.addStretch()
+        header.addWidget(self.quick_label)
+        header.addStretch()
         self.quick_count = QLabel("0")
         self.quick_count.setObjectName("muted")
-        quick_header.addWidget(self.quick_count)
-        self.quick_toggle_button = icon_button(
-            "arrow-up",
-            "Contraer biblioteca",
-            self.toggle_quick_access,
+        header.addWidget(self.quick_count)
+        panel_layout.addLayout(header)
+
+        self.quick_note = QLabel(
+            "Arrastrá estos archivos a un caso, a la presentación, a un correo o a WhatsApp."
         )
-        quick_header.addWidget(self.quick_toggle_button)
-        side_layout.addLayout(quick_header)
-        self.quick_note = QLabel("Biblioteca siempre disponible para adjuntar o reutilizar")
         self.quick_note.setObjectName("muted")
         self.quick_note.setWordWrap(True)
-        side_layout.addWidget(self.quick_note)
+        panel_layout.addWidget(self.quick_note)
+
         self.quick_access = QuickAccessList()
-        self.quick_access.setMinimumHeight(130)
-        self.quick_access.setMaximumHeight(210)
         self.quick_access.itemDoubleClicked.connect(lambda _: self.open_selected_quick_file())
         self.quick_access.itemChanged.connect(self.finish_quick_rename)
         self.quick_access.customContextMenuRequested.connect(self.show_quick_menu)
-        side_layout.addWidget(self.quick_access, 1)
+        panel_layout.addWidget(self.quick_access, 1)
+
         self.quick_actions_widget = QWidget()
         quick_actions = QHBoxLayout(self.quick_actions_widget)
         quick_actions.setContentsMargins(0, 0, 0, 0)
@@ -1824,369 +1926,411 @@ class MainWindow(QMainWindow):
         quick_add.clicked.connect(self.pick_quick_files)
         quick_folder = icon_button(
             "folder-open",
-            "Abrir carpeta de Acceso rápido",
+            "Abrir la carpeta de Documentos frecuentes",
             self.open_quick_folder,
             bordered=True,
         )
         quick_actions.addWidget(quick_add)
+        quick_actions.addStretch()
         quick_actions.addWidget(quick_folder)
-        side_layout.addWidget(self.quick_actions_widget)
-        self.models_button = QPushButton("Modelos de escritos")
-        self.models_button.setObjectName("quiet")
-        decorate_button(self.models_button, "template")
-        self.models_button.clicked.connect(self.open_models_folder)
-        side_layout.addWidget(self.models_button)
-        self.body_splitter.addWidget(sidebar)
+        panel_layout.addWidget(self.quick_actions_widget)
 
-        workspace_wrap = QWidget()
-        workspace_outer = QVBoxLayout(workspace_wrap)
-        workspace_outer.setContentsMargins(20, 10, 20, 12)
-        workspace_outer.setSpacing(8)
+    # ------------------------------------------------------------------
+    # Zona de trabajo
+    # ------------------------------------------------------------------
+    def _build_workspace(self) -> QWidget:
+        wrap = QWidget()
+        wrap_layout = QVBoxLayout(wrap)
+        wrap_layout.setContentsMargins(16, 12, 16, 10)
+        wrap_layout.setSpacing(0)
 
-        case_header = QHBoxLayout()
-        current_label = QLabel("CASO ACTUAL")
-        current_label.setObjectName("eyebrow")
-        case_header.addWidget(current_label)
+        self.workspace = QWidget()
+        workspace_layout = QVBoxLayout(self.workspace)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(10)
+        workspace_layout.addWidget(self._build_case_header())
+
+        self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.workspace_splitter.setObjectName("workspaceSplitter")
+        self.workspace_splitter.setChildrenCollapsible(False)
+        self.workspace_splitter.setHandleWidth(6)
+
+        self.work_tabs = QTabWidget()
+        self.work_tabs.setDocumentMode(True)
+        self.files_tab_index = self.work_tabs.addTab(
+            self._build_files_tab(), ui_icon("folder-open", "#2B5748"), "Archivos"
+        )
+        self.portal_tab_index = self.work_tabs.addTab(
+            self._build_expediente_tab(), ui_icon("file-text", "#2B5748"), "Expediente · 0"
+        )
+        self.pending_tab_index = self.work_tabs.addTab(
+            self._build_pending_tab(), ui_icon("check", "#2B5748"), "Pendientes · 0"
+        )
+        self.activity_tab_index = self.work_tabs.addTab(
+            self._build_activity_tab(), ui_icon("bell", "#8A5B12"), "Actividad · 0"
+        )
+        self.workspace_splitter.addWidget(self.work_tabs)
+        self.workspace_splitter.addWidget(self._build_presentation_panel())
+        self.workspace_splitter.setStretchFactor(0, 1)
+        self.workspace_splitter.setStretchFactor(1, 0)
+        self.workspace_splitter.setSizes(self._visible_workspace_sizes)
+        workspace_layout.addWidget(self.workspace_splitter, 1)
+
+        wrap_layout.addWidget(self.workspace, 1)
+        return wrap
+
+    # ------------------------------------------------------------------
+    # Encabezado del caso abierto: carátula y cinco datos
+    # ------------------------------------------------------------------
+    def _build_case_header(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("caseHeader")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 12, 14, 12)
+        layout.setSpacing(9)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
         self.case_title = QLabel("Elegí un caso")
         self.case_title.setObjectName("caseTitle")
-        case_header.addWidget(self.case_title)
+        self.case_title.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        title_row.addWidget(self.case_title, 1)
+
         self.case_badge = QLabel()
         self.case_badge.setObjectName("caseBadge")
         self.case_badge.hide()
-        case_header.addWidget(self.case_badge)
+        title_row.addWidget(self.case_badge)
+
         self.client_cases_button = QPushButton()
         self.client_cases_button.setObjectName("quiet")
         decorate_button(self.client_cases_button, "person")
         self.client_cases_button.setToolTip("Ver otros casos de este cliente")
         self.client_cases_button.clicked.connect(self.show_client_cases)
         self.client_cases_button.hide()
-        case_header.addWidget(self.client_cases_button)
-        case_header.addStretch()
-        self.open_case_button = QPushButton("Abrir carpeta")
-        decorate_button(self.open_case_button, "folder-open")
-        self.open_case_button.clicked.connect(self.open_case_folder)
-        case_header.addWidget(self.open_case_button)
+        title_row.addWidget(self.client_cases_button)
+
+        self.open_case_button = icon_button(
+            "folder-open",
+            "Abrir la carpeta del caso en el Explorador",
+            self.open_case_folder,
+        )
         self.open_case_button.hide()
-        self.compilation_toggle_button = icon_button(
-            "arrow-right",
-            "Ocultar panel de compilación",
-            self.toggle_compilation_panel,
+        title_row.addWidget(self.open_case_button)
+
+        self.edit_metadata_button = icon_button(
+            "edit",
+            "Editar los datos visibles del caso",
+            self.begin_metadata_edit,
             bordered=True,
         )
-        case_header.addWidget(self.compilation_toggle_button)
-        workspace_outer.addLayout(case_header)
+        title_row.addWidget(self.edit_metadata_button)
 
-        self.workspace = QWidget()
-        workspace_layout = QHBoxLayout(self.workspace)
-        workspace_layout.setContentsMargins(0, 0, 0, 0)
-        workspace_layout.setSpacing(0)
-        self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.workspace_splitter.setObjectName("workspaceSplitter")
-        self.workspace_splitter.setChildrenCollapsible(False)
-        workspace_layout.addWidget(self.workspace_splitter)
+        self.cancel_metadata_button = QPushButton("Cancelar")
+        self.cancel_metadata_button.clicked.connect(self.cancel_metadata_edit)
+        self.cancel_metadata_button.hide()
+        title_row.addWidget(self.cancel_metadata_button)
 
-        self.information_column = QSplitter(Qt.Orientation.Vertical)
-        self.information_column.setObjectName("informationColumn")
-        self.information_column.setChildrenCollapsible(False)
-
-        metadata_card, metadata_layout = make_card()
-        metadata_layout.addLayout(section_heading("Datos del caso", "Se guardan como metadatos de esta carpeta"))
-        fields_widget = QWidget()
-        fields_grid = QGridLayout(fields_widget)
-        fields_grid.setContentsMargins(0, 4, 0, 0)
-        fields_grid.setHorizontalSpacing(10)
-        fields_grid.setVerticalSpacing(4)
-        self.metadata_edits: dict[str, QLineEdit] = {}
-        for index, field in enumerate(VISIBLE_CASE_FIELDS):
-            group = index // 5
-            row = group * 2
-            column = index % 5
-            display_name = CASE_FIELD_LABELS.get(field, field)
-            label = QLabel(display_name)
-            label.setObjectName("muted")
-            edit = QLineEdit()
-            edit.setPlaceholderText(display_name)
-            edit.setReadOnly(True)
-            edit.textChanged.connect(self.metadata_changed)
-            self.metadata_edits[field] = edit
-            fields_grid.addWidget(label, row, column)
-            fields_grid.addWidget(edit, row + 1, column)
-        for column in range(5):
-            fields_grid.setColumnStretch(column, 1)
-        metadata_layout.addWidget(fields_widget)
-        metadata_actions = QHBoxLayout()
-        metadata_actions.setSpacing(7)
-        self.edit_metadata_button = QPushButton("Editar datos")
-        decorate_button(self.edit_metadata_button, "edit")
-        self.edit_metadata_button.clicked.connect(self.begin_metadata_edit)
-        self.more_metadata_button = QPushButton("Más datos")
-        decorate_button(self.more_metadata_button, "plus")
-        self.more_metadata_button.clicked.connect(self.open_extended_metadata)
         self.save_metadata_button = QPushButton("Guardar")
         self.save_metadata_button.setObjectName("green")
         decorate_button(self.save_metadata_button, "check", "#FFFFFF")
         self.save_metadata_button.clicked.connect(self.commit_metadata)
         self.save_metadata_button.hide()
-        self.cancel_metadata_button = QPushButton("Cancelar")
-        self.cancel_metadata_button.clicked.connect(self.cancel_metadata_edit)
-        self.cancel_metadata_button.hide()
-        metadata_actions.addWidget(self.edit_metadata_button)
-        metadata_actions.addWidget(self.more_metadata_button)
-        metadata_actions.addStretch()
-        metadata_actions.addWidget(self.cancel_metadata_button)
-        metadata_actions.addWidget(self.save_metadata_button)
-        metadata_layout.addLayout(metadata_actions)
-        self.information_column.addWidget(metadata_card)
+        title_row.addWidget(self.save_metadata_button)
 
-        novedades_card, novedades_layout = make_card()
-        novedades_header = QHBoxLayout()
-        novedades_header.addLayout(
-            section_heading("Novedades", "Movimientos recibidos por SISFE y otras fuentes")
+        self.more_metadata_button = QPushButton("Datos del caso")
+        decorate_button(self.more_metadata_button, "file-text")
+        self.more_metadata_button.setToolTip(
+            "Ficha estructural del caso: alimenta búsquedas y generación de escritos"
         )
-        novedades_header.addStretch()
-        self.novedades_count = QLabel("Sin novedades")
-        self.novedades_count.setObjectName("muted")
-        novedades_header.addWidget(self.novedades_count)
-        novedades_layout.addLayout(novedades_header)
-        self.portal_case_status = QLabel("Trámite interno / ubicación actual: todavía no sincronizado")
-        self.portal_case_status.setObjectName("caseBadge")
-        self.portal_case_status.setWordWrap(True)
-        novedades_layout.addWidget(self.portal_case_status)
-        self.novedades_list = QListWidget()
-        self.novedades_list.setObjectName("novedadesList")
-        self.novedades_list.setMinimumHeight(220)
-        self.novedades_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.novedades_list.itemSelectionChanged.connect(self.update_novedad_actions)
-        self.novedades_list.itemDoubleClicked.connect(lambda _: self.show_selected_novedad())
-        self.novedades_list.customContextMenuRequested.connect(self.show_novedad_menu)
-        novedades_layout.addWidget(self.novedades_list, 1)
-        novedades_actions = QHBoxLayout()
-        self.sisfe_status = OperationStatusIndicator("SISFE sin iniciar")
-        self.sisfe_status.setToolTip("Estado de la sesión y de la última consulta a SISFE")
-        novedades_actions.addWidget(self.sisfe_status, 1)
-        self.sisfe_connect_button = QPushButton("Abrir SISFE")
-        decorate_button(self.sisfe_connect_button, "external")
-        self.sisfe_connect_button.clicked.connect(self.open_sisfe_session)
-        novedades_actions.addWidget(self.sisfe_connect_button)
-        self.sisfe_sync_button = QPushButton("Sincronizar")
-        self.sisfe_sync_button.setObjectName("green")
-        decorate_button(self.sisfe_sync_button, "refresh", "#FFFFFF")
-        self.sisfe_sync_button.clicked.connect(self.sync_sisfe)
-        novedades_actions.addWidget(self.sisfe_sync_button)
-        self.sisfe_retry_button = icon_button(
-            "refresh", "Reintentar la última descarga SISFE", self.retry_sisfe_download,
+        self.more_metadata_button.clicked.connect(self.open_extended_metadata)
+        title_row.addWidget(self.more_metadata_button)
+
+        self.compilation_toggle_button = icon_button(
+            "arrow-right",
+            "Ocultar el panel Presentación",
+            self.toggle_compilation_panel,
             bordered=True,
         )
-        self.sisfe_retry_button.setVisible(False)
-        novedades_actions.addWidget(self.sisfe_retry_button)
-        self.sisfe_show_download_button = icon_button(
-            "external", "Abrir SISFE para resolver la descarga", self.show_sisfe_download,
-            bordered=True,
+        title_row.addWidget(self.compilation_toggle_button)
+        layout.addLayout(title_row)
+
+        fields_widget = QWidget()
+        fields_grid = QGridLayout(fields_widget)
+        fields_grid.setContentsMargins(0, 0, 0, 0)
+        fields_grid.setHorizontalSpacing(18)
+        fields_grid.setVerticalSpacing(2)
+        self.metadata_edits: dict[str, QLineEdit] = {}
+        stretch_by_field = {
+            "Actor": 3,
+            "Demandado": 3,
+            "Causa": 3,
+            "CUIJ": 2,
+            "Radicación": 3,
+        }
+        previous_edit: QLineEdit | None = None
+        for column, field in enumerate(VISIBLE_CASE_FIELDS):
+            display_name = CASE_FIELD_LABELS.get(field, field)
+            label = QLabel(display_name.upper())
+            label.setObjectName("fieldLabel")
+            edit = QLineEdit()
+            edit.setObjectName("metaValue")
+            edit.setPlaceholderText(display_name)
+            edit.setReadOnly(True)
+            edit.textChanged.connect(self.metadata_changed)
+            self.metadata_edits[field] = edit
+            fields_grid.addWidget(label, 0, column)
+            fields_grid.addWidget(edit, 1, column)
+            fields_grid.setColumnStretch(column, stretch_by_field.get(field, 2))
+            if previous_edit is not None:
+                QWidget.setTabOrder(previous_edit, edit)
+            previous_edit = edit
+        layout.addWidget(fields_widget)
+
+        # Radicación: texto libre que además se autocompleta con los valores
+        # que el propio Estudio viene usando.
+        self.radicacion_completer = QCompleter([], self)
+        self.radicacion_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.radicacion_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.radicacion_completer.setCompletionMode(
+            QCompleter.CompletionMode.PopupCompletion
         )
-        self.sisfe_show_download_button.setVisible(False)
-        novedades_actions.addWidget(self.sisfe_show_download_button)
-        self.novedad_detail_button = icon_button(
-            "external",
-            "Ver detalle de la novedad seleccionada",
-            self.show_selected_novedad,
-            bordered=True,
+        self.metadata_edits["Radicación"].setCompleter(self.radicacion_completer)
+        return card
+
+    # ------------------------------------------------------------------
+    # Pestaña Archivos: lógica de Explorador
+    # ------------------------------------------------------------------
+    def _build_files_tab(self) -> QFrame:
+        card, layout = make_card()
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        self.files_search = QLineEdit()
+        self.files_search.setPlaceholderText("Buscar archivos en este caso…")
+        self.files_search.setClearButtonEnabled(True)
+        self.files_search.addAction(
+            ui_icon("search", "#7C8B7E"), QLineEdit.ActionPosition.LeadingPosition
         )
-        self.novedad_detail_button.setEnabled(False)
-        novedades_actions.addWidget(self.novedad_detail_button)
-        novedades_layout.addLayout(novedades_actions)
-        files_card, files_layout = make_card()
-        files_header = QHBoxLayout()
-        files_header.addLayout(section_heading("Archivos del caso", "Archivos y carpetas · arrastrá hacia adentro o afuera"))
-        files_header.addStretch()
-        self.files_sort_combo = QComboBox()
-        self.files_sort_combo.setToolTip("Cambia solamente el orden visual de esta lista")
-        self.files_sort_combo.addItem("Nombre · A → Z", "name_asc")
-        self.files_sort_combo.addItem("Nombre · Z → A", "name_desc")
-        self.files_sort_combo.addItem("Fecha · reciente", "modified_desc")
-        self.files_sort_combo.addItem("Fecha · antigua", "modified_asc")
-        self.files_sort_combo.currentIndexChanged.connect(self.change_files_sort)
-        files_header.addWidget(self.files_sort_combo)
+        self.files_search.textChanged.connect(lambda _: self.reload_case_files())
+        header.addWidget(self.files_search, 1)
         self.files_location = QLabel("Inicio")
         self.files_location.setObjectName("muted")
-        files_header.addWidget(self.files_location)
-        self.files_count = QLabel("0 archivos")
+        header.addWidget(self.files_location)
+        self.files_count = QLabel("0 elementos")
         self.files_count.setObjectName("muted")
-        files_header.addWidget(self.files_count)
-        files_layout.addLayout(files_header)
+        header.addWidget(self.files_count)
+        layout.addLayout(header)
+
+        # El orden se gobierna desde los encabezados de columna; el combo se
+        # conserva oculto porque es el estado que persiste la distribución.
+        self.files_sort_combo = QComboBox()
+        self.files_sort_combo.setToolTip("Cambia solamente el orden visual de esta lista")
+        for label, value in (
+            ("Nombre · A → Z", "name_asc"),
+            ("Nombre · Z → A", "name_desc"),
+            ("Fecha · reciente", "modified_desc"),
+            ("Fecha · antigua", "modified_asc"),
+            ("Tamaño · mayor", "size_desc"),
+            ("Tamaño · menor", "size_asc"),
+        ):
+            self.files_sort_combo.addItem(label, value)
+        self.files_sort_combo.currentIndexChanged.connect(self.change_files_sort)
+        self.files_sort_combo.hide()
+        layout.addWidget(self.files_sort_combo)
+
+        columns = QWidget()
+        columns_layout = QHBoxLayout(columns)
+        columns_layout.setContentsMargins(34, 0, 8, 0)
+        columns_layout.setSpacing(0)
+        self.files_column_buttons: dict[str, QPushButton] = {}
+        for key, text, width in (
+            ("name", "Nombre", 0),
+            ("modified", "Fecha de modificación", DATE_COLUMN_WIDTH),
+            ("size", "Tamaño", SIZE_COLUMN_WIDTH),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("columnHeaderButton")
+            button.setToolTip(f"Ordenar por {text.lower()}")
+            button.setAccessibleName(f"Ordenar por {text.lower()}")
+            if width:
+                button.setFixedWidth(width)
+                columns_layout.addWidget(button, 0)
+            else:
+                columns_layout.addWidget(button, 1)
+            button.clicked.connect(
+                lambda _checked=False, column=key: self.sort_case_files_by(column)
+            )
+            self.files_column_buttons[key] = button
+        layout.addWidget(columns)
+
         self.case_files = CaseFilesList()
         self.case_files.itemDoubleClicked.connect(lambda _: self.open_selected_file())
         self.case_files.itemChanged.connect(self.finish_file_rename)
         self.case_files.customContextMenuRequested.connect(self.show_file_menu)
-        files_layout.addWidget(self.case_files, 1)
-        files_actions = QHBoxLayout()
+        layout.addWidget(self.case_files, 1)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
         self.files_back = icon_button(
             "arrow-left",
             "Volver a la carpeta anterior",
             self.go_up_case_folder,
             bordered=True,
         )
-        add_files = QPushButton("Agregar archivos")
+        add_files = QPushButton("Agregar archivo")
         decorate_button(add_files, "paperclip")
+        add_files.setToolTip("Copiar archivos a la carpeta del caso (Ctrl+O)")
         add_files.clicked.connect(self.pick_case_files)
-        add_folder = QPushButton("Agregar carpeta")
-        decorate_button(add_folder, "folder-plus")
-        add_folder.clicked.connect(self.pick_case_folder)
-        open_selected = icon_button(
+        self.add_to_presentation_button = QPushButton("Agregar a presentación")
+        self.add_to_presentation_button.setObjectName("green")
+        decorate_button(self.add_to_presentation_button, "arrow-right", "#FFFFFF")
+        self.add_to_presentation_button.setToolTip(
+            "Llevar la selección al panel Presentación"
+        )
+        self.add_to_presentation_button.clicked.connect(self.add_selected_to_compilation)
+        actions.addWidget(self.files_back)
+        actions.addWidget(add_files)
+        actions.addStretch()
+        actions.addWidget(self.add_to_presentation_button)
+        layout.addLayout(actions)
+        return card
+
+    # ------------------------------------------------------------------
+    # Pestaña Expediente: movimientos judiciales
+    # ------------------------------------------------------------------
+    def _build_expediente_tab(self) -> QFrame:
+        card, layout = make_card()
+        header = QHBoxLayout()
+        header.addLayout(
+            section_heading("Expediente", "Movimientos del portal, en orden cronológico")
+        )
+        header.addStretch()
+        self.novedades_count = QLabel("Sin movimientos")
+        self.novedades_count.setObjectName("muted")
+        header.addWidget(self.novedades_count)
+        layout.addLayout(header)
+
+        self.portal_case_status = QLabel("Trámite interno / ubicación actual: todavía no sincronizado")
+        self.portal_case_status.setObjectName("caseBadge")
+        self.portal_case_status.setWordWrap(True)
+        layout.addWidget(self.portal_case_status)
+
+        self.novedades_list = QListWidget()
+        self.novedades_list.setObjectName("novedadesList")
+        self.novedades_list.setMinimumHeight(200)
+        self.novedades_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.novedades_list.itemSelectionChanged.connect(self.update_novedad_actions)
+        self.novedades_list.itemDoubleClicked.connect(lambda _: self.open_selected_novedad())
+        self.novedades_list.customContextMenuRequested.connect(self.show_novedad_menu)
+        layout.addWidget(self.novedades_list, 1)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
+        self.sisfe_status = OperationStatusIndicator("SISFE sin validar")
+        self.sisfe_status.hide()
+        self.sisfe_connect_button = QPushButton("Validar sesión SISFE")
+        decorate_button(self.sisfe_connect_button, "external")
+        self.sisfe_connect_button.setToolTip(
+            "La sesión del portal es del profesional, no de un expediente en particular"
+        )
+        self.sisfe_connect_button.clicked.connect(self.open_sisfe_session)
+        actions.addWidget(self.sisfe_connect_button)
+        self.sisfe_sync_button = QPushButton("Sincronizar este expediente")
+        self.sisfe_sync_button.setObjectName("green")
+        decorate_button(self.sisfe_sync_button, "refresh", "#FFFFFF")
+        self.sisfe_sync_button.clicked.connect(self.sync_sisfe)
+        actions.addWidget(self.sisfe_sync_button)
+        actions.addStretch()
+        self.sisfe_retry_button = icon_button(
+            "refresh", "Reintentar la última descarga SISFE", self.retry_sisfe_download,
+            bordered=True,
+        )
+        self.sisfe_retry_button.setVisible(False)
+        actions.addWidget(self.sisfe_retry_button)
+        self.sisfe_show_download_button = icon_button(
+            "external", "Abrir SISFE para resolver la descarga", self.show_sisfe_download,
+            bordered=True,
+        )
+        self.sisfe_show_download_button.setVisible(False)
+        actions.addWidget(self.sisfe_show_download_button)
+        self.novedad_detail_button = icon_button(
             "external",
-            "Abrir archivo o carpeta seleccionada",
-            self.open_selected_file,
+            "Ver el detalle del movimiento seleccionado",
+            self.show_selected_novedad,
             bordered=True,
         )
-        open_case_root = icon_button(
-            "folder-open",
-            "Abrir la carpeta principal del caso",
-            self.open_case_folder,
-            bordered=True,
-        )
-        add_to_compile = QPushButton("A compilación")
-        add_to_compile.setObjectName("green")
-        decorate_button(add_to_compile, "arrow-right", "#FFFFFF")
-        add_to_compile.setToolTip("Agregar la selección a la compilación")
-        add_to_compile.clicked.connect(self.add_selected_to_compilation)
-        self.prepare_documents_button = QPushButton("Preparar documental")
-        decorate_button(self.prepare_documents_button, "layers")
-        self.prepare_documents_button.clicked.connect(self.open_preparation_dialog)
-        files_actions.addWidget(self.files_back)
-        files_actions.addWidget(add_files)
-        files_actions.addWidget(add_folder)
-        files_actions.addWidget(open_selected)
-        files_actions.addWidget(open_case_root)
-        files_actions.addStretch()
-        files_actions.addWidget(add_to_compile)
-        files_actions.addWidget(self.prepare_documents_button)
-        files_layout.addLayout(files_actions)
-        preparation_card, preparation_layout = make_card()
-        prep_header = QHBoxLayout()
-        prep_header.addLayout(
-            section_heading(
-                "Preparación de la presentación",
-                "Escrito principal y anexos, en el orden final del PDF",
-            )
-        )
-        prep_header.addStretch()
-        self.compilation_count = QLabel("0 elementos")
-        self.compilation_count.setObjectName("muted")
-        prep_header.addWidget(self.compilation_count)
-        preparation_layout.addLayout(prep_header)
+        self.novedad_detail_button.setEnabled(False)
+        actions.addWidget(self.novedad_detail_button)
+        layout.addLayout(actions)
+        return card
 
-        writing_bar = QFrame()
-        writing_bar.setObjectName("softCard")
-        writing_bar.setMaximumHeight(64)
-        writing_layout = QHBoxLayout(writing_bar)
-        writing_layout.setContentsMargins(10, 6, 10, 6)
-        writing_stack = QVBoxLayout()
-        writing_stack.setSpacing(1)
-        writing_label = QLabel("ESCRITO EN ELABORACIÓN")
-        writing_label.setObjectName("eyebrow")
-        self.writing_name = QLabel("Todavía no elegiste un escrito")
-        self.writing_name.setWordWrap(True)
-        writing_stack.addWidget(writing_label)
-        writing_stack.addWidget(self.writing_name)
-        writing_layout.addLayout(writing_stack, 1)
-        self.writing_button = QPushButton("+ Escrito")
-        self.writing_button.setObjectName("primary")
-        decorate_button(self.writing_button, "file-plus", "#FFFFFF")
-        self.writing_menu = QMenu(self)
-        self.writing_menu.addAction("Escrito nuevo", self.new_blank_writing)
-        self.writing_menu.addAction("Modificar modelo base en Word", self.open_base_template)
-        self.writing_menu.addAction("Ver campos automáticos…", self.show_template_variables)
-        self.writing_menu.addAction("Abrir guía de modelos", self.open_template_guide)
-        self.writing_menu.addAction("Desde modelo…", self.new_writing_from_model)
-        self.writing_menu.addSeparator()
-        self.writing_menu.addAction("Agregar modelo…", self.add_writing_model)
-        self.writing_menu.addAction("Abrir modelos", self.open_models_folder)
-        self.writing_button.setMenu(self.writing_menu)
-        writing_layout.addWidget(self.writing_button)
-        preparation_layout.addWidget(writing_bar)
-
-        self.compilation = CompilationList()
-        self.compilation.filesDropped.connect(self.handle_compilation_drop)
-        self.compilation.removeRequested.connect(self.remove_from_compilation)
-        self.compilation.openRequested.connect(open_file)
-        self.compilation.orderChanged.connect(self.update_compilation_count)
-        preparation_layout.addWidget(self.compilation, 1)
-        prep_actions = QHBoxLayout()
-        remove = icon_button("trash", "Quitar de la compilación", self.remove_from_compilation)
-        clear = QPushButton("Limpiar preparación")
-        decorate_button(clear, "clear")
-        clear.setToolTip("Quita sólo las referencias de esta bandeja; conserva todos los archivos")
-        clear.clicked.connect(self.clear_compilation)
-        history = QPushButton("Historial")
-        decorate_button(history, "history")
-        history.setToolTip("Recuperar el orden y los archivos de una compilación anterior")
-        history.clicked.connect(self.open_compilation_history)
-        move_up = icon_button("arrow-up", "Subir en el orden", lambda: self.move_compilation_item(-1))
-        move_down = icon_button("arrow-down", "Bajar en el orden", lambda: self.move_compilation_item(1))
-        prep_actions.addWidget(remove)
-        prep_actions.addWidget(clear)
-        prep_actions.addWidget(history)
-        prep_actions.addWidget(move_up)
-        prep_actions.addWidget(move_down)
-        prep_actions.addStretch()
-        preparation_layout.addLayout(prep_actions)
-
-        activity_card, activity_layout = make_card()
-        activity_header = QHBoxLayout()
-        activity_header.addLayout(
+    # ------------------------------------------------------------------
+    # Pestaña Actividad (sin rediseño en esta etapa)
+    # ------------------------------------------------------------------
+    def _build_activity_tab(self) -> QFrame:
+        card, layout = make_card()
+        header = QHBoxLayout()
+        header.addLayout(
             section_heading(
                 "Actividad del expediente",
                 "Lo que requiere atención, reunido desde Portal y Pendientes",
             )
         )
-        activity_header.addStretch()
+        header.addStretch()
         self.activity_count = QLabel("Sin acciones")
         self.activity_count.setObjectName("muted")
-        activity_header.addWidget(self.activity_count)
+        header.addWidget(self.activity_count)
         self.show_completed_tasks = QCheckBox("Ver completadas")
         self.show_completed_tasks.toggled.connect(self.reload_activity)
-        activity_header.addWidget(self.show_completed_tasks)
-        activity_layout.addLayout(activity_header)
+        header.addWidget(self.show_completed_tasks)
+        layout.addLayout(header)
         self.activity_list = QListWidget()
         self.activity_list.setObjectName("activityList")
         self.activity_list.itemSelectionChanged.connect(self.update_activity_actions)
         self.activity_list.itemDoubleClicked.connect(lambda _: self.open_selected_activity())
-        activity_layout.addWidget(self.activity_list, 1)
-        activity_actions = QHBoxLayout()
-        activity_hint = QLabel(
+        layout.addWidget(self.activity_list, 1)
+        actions = QHBoxLayout()
+        hint = QLabel(
             "Doble clic para ir al movimiento o documento pendiente que originó la acción."
         )
-        activity_hint.setObjectName("muted")
-        activity_actions.addWidget(activity_hint, 1)
+        hint.setObjectName("muted")
+        actions.addWidget(hint, 1)
         new_activity_task = QPushButton("Nueva tarea")
         decorate_button(new_activity_task, "plus")
         new_activity_task.clicked.connect(self.create_manual_activity_task)
-        activity_actions.addWidget(new_activity_task)
+        actions.addWidget(new_activity_task)
         self.edit_activity_task_button = QPushButton("Editar tarea")
         decorate_button(self.edit_activity_task_button, "edit")
         self.edit_activity_task_button.clicked.connect(self.edit_manual_activity_task)
         self.edit_activity_task_button.setEnabled(False)
-        activity_actions.addWidget(self.edit_activity_task_button)
+        actions.addWidget(self.edit_activity_task_button)
         self.confirm_activity_button = QPushButton("Confirmar como tarea")
         self.confirm_activity_button.setObjectName("green")
         decorate_button(self.confirm_activity_button, "check", "#FFFFFF")
         self.confirm_activity_button.clicked.connect(self.confirm_selected_activity)
         self.confirm_activity_button.setEnabled(False)
-        activity_actions.addWidget(self.confirm_activity_button)
-        activity_layout.addLayout(activity_actions)
+        actions.addWidget(self.confirm_activity_button)
+        layout.addLayout(actions)
+        return card
 
-        pending_card, pending_layout = make_card()
-        pending_header = QHBoxLayout()
-        pending_header.addLayout(
+    # ------------------------------------------------------------------
+    # Pestaña Pendientes (fuera de alcance en esta revisión)
+    # ------------------------------------------------------------------
+    def _build_pending_tab(self) -> QFrame:
+        card, layout = make_card()
+        header = QHBoxLayout()
+        header.addLayout(
             section_heading(
                 "Documentación pendiente",
                 "Checklist de lo solicitado al cliente y todavía no recibido",
             )
         )
-        pending_header.addStretch()
+        header.addStretch()
         self.pending_documents_count = QLabel("Sin pendientes")
         self.pending_documents_count.setObjectName("muted")
-        pending_header.addWidget(self.pending_documents_count)
-        pending_layout.addLayout(pending_header)
+        header.addWidget(self.pending_documents_count)
+        layout.addLayout(header)
         self.pending_documents_list = QListWidget()
         self.pending_documents_list.setObjectName("pendingDocumentsList")
         self.pending_documents_list.setSelectionMode(
@@ -2201,8 +2345,8 @@ class MainWindow(QMainWindow):
             self.update_pending_document_actions
         )
         self.pending_documents_list.itemChanged.connect(self.pending_document_changed)
-        pending_layout.addWidget(self.pending_documents_list, 1)
-        pending_actions = QHBoxLayout()
+        layout.addWidget(self.pending_documents_list, 1)
+        actions = QHBoxLayout()
         pending_add = QPushButton("Agregar pendiente")
         decorate_button(pending_add, "plus")
         pending_add.clicked.connect(self.add_pending_document)
@@ -2219,99 +2363,163 @@ class MainWindow(QMainWindow):
         decorate_button(self.pending_received_button, "check", "#FFFFFF")
         self.pending_received_button.clicked.connect(self.complete_pending_documents)
         self.pending_received_button.setEnabled(False)
-        pending_actions.addWidget(pending_add)
-        pending_actions.addWidget(self.pending_rename_button)
-        pending_actions.addWidget(self.pending_due_button)
-        pending_actions.addWidget(self.pending_delete_button)
-        pending_actions.addWidget(self.pending_clear_button)
-        pending_actions.addWidget(self.pending_up_button)
-        pending_actions.addWidget(self.pending_down_button)
-        pending_actions.addStretch()
-        pending_actions.addWidget(self.pending_received_button)
-        pending_layout.addLayout(pending_actions)
+        actions.addWidget(pending_add)
+        actions.addWidget(self.pending_rename_button)
+        actions.addWidget(self.pending_due_button)
+        actions.addWidget(self.pending_delete_button)
+        actions.addWidget(self.pending_clear_button)
+        actions.addWidget(self.pending_up_button)
+        actions.addWidget(self.pending_down_button)
+        actions.addStretch()
+        actions.addWidget(self.pending_received_button)
+        layout.addLayout(actions)
+        return card
 
-        self.work_tabs = QTabWidget()
-        self.work_tabs.setDocumentMode(True)
-        self.files_tab_index = self.work_tabs.addTab(files_card, ui_icon("folder-open", "#2B7564"), "Archivos")
-        self.activity_tab_index = self.work_tabs.addTab(
-            activity_card,
-            ui_icon("bell", "#B36A24"),
-            "Actividad · 0",
-        )
-        self.portal_tab_index = self.work_tabs.addTab(
-            novedades_card,
-            ui_icon("bell", "#2B7564"),
-            "Portal · 0",
-        )
-        self.pending_tab_index = self.work_tabs.addTab(
-            pending_card,
-            ui_icon("check", "#2B7564"),
-            "Pendientes · 0",
-        )
-        self.information_column.addWidget(self.work_tabs)
-        self.information_column.setSizes([155, 760])
-        self.workspace_splitter.addWidget(self.information_column)
+    # ------------------------------------------------------------------
+    # Panel Presentación
+    # ------------------------------------------------------------------
+    def _build_presentation_panel(self) -> QSplitter:
+        preparation_card, preparation_layout = make_card()
+        header = QHBoxLayout()
+        title = QLabel("Presentación")
+        title.setObjectName("sectionTitle")
+        header.addWidget(title)
+        header.addStretch()
+        self.compilation_count = QLabel("0 elementos")
+        self.compilation_count.setObjectName("muted")
+        header.addWidget(self.compilation_count)
+        preparation_layout.addLayout(header)
+
+        writing_row = QHBoxLayout()
+        writing_row.setSpacing(5)
+        self.writing_button = QPushButton("Nuevo escrito")
+        self.writing_button.setObjectName("primary")
+        decorate_button(self.writing_button, "file-plus", "#F9F4E9")
+        self.writing_button.setToolTip("Elegir un modelo y crear el escrito del caso (Ctrl+N)")
+        self.writing_button.clicked.connect(self.new_writing_from_model)
+        writing_row.addWidget(self.writing_button, 1)
+        self.writing_options_button = QPushButton()
+        self.writing_options_button.setObjectName("primary")
+        self.writing_options_button.setIcon(ui_icon("arrow-down", "#F9F4E9"))
+        self.writing_options_button.setMaximumWidth(38)
+        self.writing_options_button.setToolTip("Otras opciones de escritos y modelos")
+        self.writing_options_button.setAccessibleName("Otras opciones de escritos y modelos")
+        self.writing_menu = QMenu(self)
+        self.writing_menu.addAction("Escrito en blanco", self.new_blank_writing)
+        self.writing_menu.addAction("Modificar modelo base en Word", self.open_base_template)
+        self.writing_menu.addAction("Ver campos automáticos…", self.show_template_variables)
+        self.writing_menu.addAction("Abrir guía de modelos", self.open_template_guide)
+        self.writing_menu.addSeparator()
+        self.writing_menu.addAction("Agregar modelo…", self.add_writing_model)
+        self.writing_menu.addAction("Abrir modelos", self.open_models_folder)
+        self.writing_options_button.setMenu(self.writing_menu)
+        writing_row.addWidget(self.writing_options_button)
+        preparation_layout.addLayout(writing_row)
+
+        self.writing_name = QLabel("Todavía no elegiste un escrito")
+        self.writing_name.setObjectName("muted")
+        self.writing_name.setWordWrap(True)
+        preparation_layout.addWidget(self.writing_name)
+
+        files_label = QLabel("ARCHIVOS EN LA PRESENTACIÓN")
+        files_label.setObjectName("eyebrow")
+        preparation_layout.addWidget(files_label)
+
+        self.compilation = CompilationList()
+        self.compilation.filesDropped.connect(self.handle_compilation_drop)
+        self.compilation.removeRequested.connect(self.remove_from_compilation)
+        self.compilation.openRequested.connect(open_file)
+        self.compilation.orderChanged.connect(self.update_compilation_count)
+        preparation_layout.addWidget(self.compilation, 1)
+
+        prep_actions = QHBoxLayout()
+        prep_actions.setSpacing(5)
+        remove = icon_button("trash", "Quitar de la presentación", self.remove_from_compilation)
+        clear = icon_button("clear", "Vaciar la presentación sin borrar archivos", self.clear_compilation)
+        history = icon_button("history", "Recuperar una presentación anterior", self.open_compilation_history)
+        move_up = icon_button("arrow-up", "Subir en el orden", lambda: self.move_compilation_item(-1))
+        move_down = icon_button("arrow-down", "Bajar en el orden", lambda: self.move_compilation_item(1))
+        prep_actions.addWidget(remove)
+        prep_actions.addWidget(clear)
+        prep_actions.addWidget(history)
+        prep_actions.addStretch()
+        prep_actions.addWidget(move_up)
+        prep_actions.addWidget(move_down)
+        preparation_layout.addLayout(prep_actions)
 
         actions_card, actions_layout = make_card("actionCard")
-        actions_title = QLabel("Preparar presentación")
-        actions_title.setObjectName("actionTitle")
-        actions_layout.addWidget(actions_title)
-        actions_note = QLabel("Se crea un único PDF dentro de la carpeta del caso.")
-        actions_note.setObjectName("actionMuted")
-        actions_note.setWordWrap(True)
-        actions_layout.addWidget(actions_note)
-        actions_layout.addSpacing(8)
-        limit_label = QLabel("LÍMITE DEL ARCHIVO")
-        limit_label.setObjectName("professionalLabel")
+        limit_label = QLabel("LÍMITE DE TAMAÑO FINAL")
+        limit_label.setObjectName("eyebrow")
         actions_layout.addWidget(limit_label)
+
+        # El combo es el modelo de datos del límite y conserva el borrador
+        # portable; la elección visible son los cuatro botones del panel.
         self.limit_combo = QComboBox()
-        self.limit_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.limit_combo.setMinimumContentsLength(12)
-        self.limit_combo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         for label, value in PRESENTATION_PROFILES.items():
             self.limit_combo.addItem(label, value)
         self.limit_combo.setCurrentIndex(self.limit_combo.findText(DEFAULT_PROFILE))
         self.limit_combo.currentTextChanged.connect(self.compilation_profile_changed)
+        self.limit_combo.hide()
         actions_layout.addWidget(self.limit_combo)
-        output_label = QLabel("NOMBRE AUTOMÁTICO")
-        output_label.setObjectName("professionalLabel")
-        actions_layout.addWidget(output_label)
+
+        limits_row = QHBoxLayout()
+        limits_row.setSpacing(5)
+        self.limit_buttons: dict[int, QPushButton] = {}
+        for text, value in PRESENTATION_LIMITS:
+            button = QPushButton(text)
+            button.setObjectName("limit")
+            button.setCheckable(True)
+            button.setToolTip(
+                f"Comprimir la presentación hasta {text}. "
+                "Volvé a tocarlo para compilar sin compresión."
+            )
+            button.clicked.connect(
+                lambda _checked=False, limit=value: self.choose_presentation_limit(limit)
+            )
+            limits_row.addWidget(button)
+            self.limit_buttons[value] = button
+        actions_layout.addLayout(limits_row)
+
+        self.limit_hint = QLabel("Sin límite elegido: se compila al tamaño natural.")
+        self.limit_hint.setObjectName("actionMuted")
+        self.limit_hint.setWordWrap(True)
+        actions_layout.addWidget(self.limit_hint)
+
+        # Conservado oculto por compatibilidad con integraciones anteriores.
         self.output_preview = QLabel("Se definirá al compilar")
         self.output_preview.setObjectName("actionMuted")
         self.output_preview.setWordWrap(True)
+        self.output_preview.hide()
         actions_layout.addWidget(self.output_preview)
-        # Conservado oculto por compatibilidad con integraciones anteriores. El
-        # nombre visible se confirma recién al compilar.
         self.output_name = QLineEdit()
         self.output_name.hide()
-        actions_layout.addSpacing(8)
+
+        actions_layout.addSpacing(4)
         self.compile_button = QPushButton("Compilar PDF")
-        self.compile_button.setObjectName("onDark")
-        decorate_button(self.compile_button, "layers", "#173F37")
+        self.compile_button.setObjectName("primary")
+        decorate_button(self.compile_button, "layers", "#F9F4E9")
+        self.compile_button.setToolTip("Unir la presentación en un único PDF (Ctrl+P)")
         self.compile_button.clicked.connect(self.compile_pdf)
         actions_layout.addWidget(self.compile_button)
-        self.sign_button = QPushButton("Firmar")
-        self.sign_button.setObjectName("onDark")
-        decorate_button(self.sign_button, "signature", "#173F37")
-        self.sign_button.setToolTip("Firmar directamente el PDF seleccionado o el último compilado")
-        self.sign_button.clicked.connect(self.sign_current_pdf)
+
         sign_row = QHBoxLayout()
         sign_row.setSpacing(5)
+        self.sign_button = QPushButton("Firmar")
+        decorate_button(self.sign_button, "signature")
+        self.sign_button.setToolTip("Firmar el PDF seleccionado o el último compilado")
+        self.sign_button.clicked.connect(self.sign_current_pdf)
         sign_row.addWidget(self.sign_button, 1)
         self.sign_options_button = QPushButton()
-        self.sign_options_button.setObjectName("onDark")
-        self.sign_options_button.setMaximumWidth(42)
-        self.sign_options_button.setIcon(ui_icon("arrow-down", "#173F37"))
+        self.sign_options_button.setMaximumWidth(38)
+        self.sign_options_button.setIcon(ui_icon("arrow-down", "#2B5748"))
         self.sign_options_button.setToolTip("Otras opciones de firma")
         self.sign_options_button.setAccessibleName("Otras opciones de firma")
         self.sign_options_button.clicked.connect(self.show_sign_menu)
         sign_row.addWidget(self.sign_options_button)
         actions_layout.addLayout(sign_row)
-        actions_layout.addStretch()
+
         last_label = QLabel("ÚLTIMO RESULTADO")
-        last_label.setObjectName("professionalLabel")
+        last_label.setObjectName("eyebrow")
         actions_layout.addWidget(last_label)
         self.last_output = QLabel("Aún no compilaste")
         self.last_output.setObjectName("actionMuted")
@@ -2322,40 +2530,36 @@ class MainWindow(QMainWindow):
         self.presentation_column = QSplitter(Qt.Orientation.Vertical)
         self.presentation_column.setObjectName("presentationColumn")
         self.presentation_column.setChildrenCollapsible(False)
-        self.presentation_column.setMinimumWidth(240)
+        self.presentation_column.setHandleWidth(6)
+        self.presentation_column.setMinimumWidth(250)
         self.presentation_column.setMaximumWidth(560)
         self.presentation_column.addWidget(self.compilation_card)
         self.presentation_column.addWidget(actions_card)
-        self.presentation_column.setSizes([560, 270])
-        self.workspace_splitter.addWidget(self.presentation_column)
-        self.workspace_splitter.setStretchFactor(0, 1)
-        self.workspace_splitter.setStretchFactor(1, 0)
-        self.workspace_splitter.setSizes(self._visible_workspace_sizes)
+        self.presentation_column.setSizes([520, 300])
+        return self.presentation_column
 
-        workspace_outer.addWidget(self.workspace, 1)
-        self.body_splitter.addWidget(workspace_wrap)
-        self.body_splitter.setStretchFactor(0, 0)
-        self.body_splitter.setStretchFactor(1, 1)
-        self.body_splitter.setSizes([235, 1215])
-        outer.addWidget(self.body_splitter, 1)
-        self.setCentralWidget(root)
-        self.setStatusBar(QStatusBar())
+    # ------------------------------------------------------------------
+    # Barra inferior de estado
+    # ------------------------------------------------------------------
+    def _build_status_bar(self):
+        bar = QStatusBar()
+        bar.setSizeGripEnabled(False)
+        self.sisfe_indicator = OperationStatusIndicator("SISFE sin validar", compact=True)
+        self.sisfe_indicator.setToolTip(
+            "SISFE sin validar. Abrí y confirmá la sesión del profesional."
+        )
+        bar.addWidget(self.sisfe_indicator)
+        self.case_sync_label = QLabel("")
+        self.case_sync_label.setObjectName("muted")
+        bar.addPermanentWidget(self.case_sync_label)
+        self.setStatusBar(bar)
         self.statusBar().showMessage("Listo")
-        self.restore_layout()
-        for splitter in (
-            self.body_splitter,
-            self.workspace_splitter,
-            self.information_column,
-            self.presentation_column,
-        ):
-            splitter.splitterMoved.connect(self.schedule_layout_save)
-        self._restoring_layout = False
 
     def _install_shortcuts(self):
         self.new_case_shortcut = QShortcut(QKeySequence("Ctrl+Shift+N"), self)
         self.new_case_shortcut.activated.connect(self.new_case)
         self.new_writing_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
-        self.new_writing_shortcut.activated.connect(self.writing_button.showMenu)
+        self.new_writing_shortcut.activated.connect(self.new_writing_from_model)
         self.add_file_shortcut = QShortcut(QKeySequence("Ctrl+O"), self)
         self.add_file_shortcut.activated.connect(self.pick_case_files)
         self.compile_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
@@ -2373,25 +2577,38 @@ class MainWindow(QMainWindow):
             return list(fallback)
         return sizes if sum(sizes) > 0 else list(fallback)
 
+    def sidebar_widths(self) -> dict[str, int]:
+        raw = self.store.settings.layout_state.get("sidebar_by_professional", {})
+        if not isinstance(raw, dict):
+            return {}
+        widths = {}
+        for name, value in raw.items():
+            try:
+                widths[str(name)] = int(value)
+            except (TypeError, ValueError):
+                continue
+        return widths
+
     def restore_layout(self):
         state = self.store.settings.layout_state
-        body_sizes = self._valid_layout_sizes(state.get("body"), 2, [235, 1215])
+        body_sizes = self._valid_layout_sizes(state.get("body"), 2, [250, 1200])
+        stored_width = self.sidebar_widths().get(self.store.settings.current_professional)
+        if stored_width:
+            total = sum(body_sizes) or 1450
+            body_sizes = [stored_width, max(total - stored_width, 600)]
         workspace_sizes = self._valid_layout_sizes(
             state.get("workspace"), 2, self._visible_workspace_sizes
         )
-        information_sizes = self._valid_layout_sizes(
-            state.get("information"), 2, [155, 760]
-        )
         presentation_sizes = self._valid_layout_sizes(
-            state.get("presentation"), 2, [560, 270]
+            state.get("presentation"), 2, [520, 300]
         )
         self._visible_workspace_sizes = workspace_sizes
         self.body_splitter.setSizes(body_sizes)
-        self.information_column.setSizes(information_sizes)
         self.presentation_column.setSizes(presentation_sizes)
         visible = state.get("compilation_visible", True)
         self.set_compilation_panel_visible(visible if isinstance(visible, bool) else True)
         self.restore_files_sort()
+        self.restore_presentation_limit()
 
     def schedule_layout_save(self, *_args):
         if not self._restoring_layout:
@@ -2403,23 +2620,58 @@ class MainWindow(QMainWindow):
         workspace_sizes = self.workspace_splitter.sizes()
         if not self.presentation_column.isHidden() and len(workspace_sizes) == 2 and workspace_sizes[1] > 0:
             self._visible_workspace_sizes = workspace_sizes
+        body_sizes = self.body_splitter.sizes()
+        sidebar_widths = self.sidebar_widths()
+        professional = self.store.settings.current_professional
+        if professional and body_sizes and body_sizes[0] > 0:
+            sidebar_widths[professional] = int(body_sizes[0])
         self.store.set_layout_state(
             {
-                "body": self.body_splitter.sizes(),
+                **self.store.settings.layout_state,
+                "body": body_sizes,
                 "workspace": self._visible_workspace_sizes,
-                "information": self.information_column.sizes(),
                 "presentation": self.presentation_column.sizes(),
                 "compilation_visible": not self.presentation_column.isHidden(),
                 "files_sort": self.files_sort_combo.currentData(),
+                "sidebar_by_professional": sidebar_widths,
             }
         )
 
     def change_files_sort(self, _index: int):
         """Actualiza sólo la vista: nunca mueve, renombra ni toca archivos."""
+        self.update_files_column_headers()
         if not self._restoring_layout:
             self.save_layout_state()
         if hasattr(self, "case_files"):
             self.reload_case_files()
+
+    def sort_case_files_by(self, column: str):
+        """Orden por encabezado, como en el Explorador: alterna asc/desc."""
+        current = self.files_sort_combo.currentData() or "name_asc"
+        if current.startswith(column):
+            target = f"{column}_desc" if current.endswith("_asc") else f"{column}_asc"
+        else:
+            target = "name_asc" if column == "name" else f"{column}_desc"
+        index = self.files_sort_combo.findData(target)
+        if index >= 0:
+            self.files_sort_combo.setCurrentIndex(index)
+        self.update_files_column_headers()
+
+    def update_files_column_headers(self):
+        if not hasattr(self, "files_column_buttons"):
+            return
+        current = str(self.files_sort_combo.currentData() or "name_asc")
+        labels = {
+            "name": "Nombre",
+            "modified": "Fecha de modificación",
+            "size": "Tamaño",
+        }
+        for key, button in self.files_column_buttons.items():
+            if current.startswith(key):
+                arrow = " ↑" if current.endswith("_asc") else " ↓"
+                button.setText(f"{labels[key]}{arrow}")
+            else:
+                button.setText(labels[key])
 
     def restore_files_sort(self):
         sort_key = self.store.settings.layout_state.get("files_sort", "name_asc")
@@ -2427,6 +2679,7 @@ class MainWindow(QMainWindow):
         self.files_sort_combo.blockSignals(True)
         self.files_sort_combo.setCurrentIndex(index if index >= 0 else 0)
         self.files_sort_combo.blockSignals(False)
+        self.update_files_column_headers()
 
     def set_compilation_panel_visible(self, visible: bool):
         if not visible and not self.presentation_column.isHidden():
@@ -2437,7 +2690,7 @@ class MainWindow(QMainWindow):
         self.compilation_toggle_button.setIcon(
             ui_icon("arrow-right" if visible else "arrow-left")
         )
-        tooltip = "Ocultar panel de compilación" if visible else "Mostrar panel de compilación"
+        tooltip = "Ocultar panel Presentación" if visible else "Mostrar panel Presentación"
         self.compilation_toggle_button.setToolTip(tooltip)
         self.compilation_toggle_button.setAccessibleName(tooltip)
         if visible:
@@ -2448,11 +2701,10 @@ class MainWindow(QMainWindow):
         self.set_compilation_panel_visible(self.presentation_column.isHidden())
 
     def reset_layout(self):
-        self._visible_workspace_sizes = [930, 285]
-        self.body_splitter.setSizes([235, 1215])
+        self._visible_workspace_sizes = [920, 300]
+        self.body_splitter.setSizes([250, 1200])
         self.workspace_splitter.setSizes(self._visible_workspace_sizes)
-        self.information_column.setSizes([155, 760])
-        self.presentation_column.setSizes([560, 270])
+        self.presentation_column.setSizes([520, 300])
         self.set_compilation_panel_visible(True)
         self.save_layout_state()
         self.statusBar().showMessage("Distribución restablecida", 4000)
@@ -2462,50 +2714,15 @@ class MainWindow(QMainWindow):
             self.set_compilation_panel_visible(True)
         self.compilation.setFocus()
 
-    def toggle_directory_expanded(self):
-        self._directory_expanded = not self._directory_expanded
-        header_visible = not self._directory_expanded
-        for widget in (
-            self.quick_label,
-            self.quick_count,
-            self.quick_toggle_button,
-        ):
-            widget.setVisible(header_visible)
-        self.directory_expand_button.setIcon(
-            ui_icon("arrow-up" if self._directory_expanded else "arrow-down")
-        )
-        self.directory_expand_button.setToolTip(
-            "Volver a mostrar la biblioteca"
-            if self._directory_expanded
-            else "Expandir directorio y ocultar temporalmente la biblioteca"
-        )
-        self.directory_expand_button.setAccessibleName(
-            self.directory_expand_button.toolTip()
-        )
-        self.apply_quick_access_visibility()
-
     def toggle_quick_access(self):
-        self._quick_access_collapsed = not self._quick_access_collapsed
-        self.quick_toggle_button.setIcon(
-            ui_icon("arrow-down" if self._quick_access_collapsed else "arrow-up")
-        )
-        self.quick_toggle_button.setToolTip(
-            "Expandir biblioteca"
-            if self._quick_access_collapsed
-            else "Contraer biblioteca"
-        )
-        self.quick_toggle_button.setAccessibleName(self.quick_toggle_button.toolTip())
-        self.apply_quick_access_visibility()
-
-    def apply_quick_access_visibility(self):
-        content_visible = not self._directory_expanded and not self._quick_access_collapsed
-        for widget in (
-            self.quick_note,
-            self.quick_access,
-            self.quick_actions_widget,
-            self.models_button,
-        ):
-            widget.setVisible(content_visible)
+        """Muestra u oculta el panel flotante de Documentos frecuentes."""
+        if self.quick_panel.isVisible():
+            self.quick_panel.hide()
+            return
+        self.reload_quick_access()
+        self.quick_panel.show()
+        self.quick_panel.raise_()
+        self.quick_panel.activateWindow()
 
     def application_settings_summary(self) -> dict[str, object]:
         professional = self.professional_combo.currentText().strip()
@@ -2575,6 +2792,20 @@ class MainWindow(QMainWindow):
             return
         if name:
             self.store.set_professional(name)
+            if not self._restoring_layout:
+                # Cada profesional conserva su ancho de panel y su último límite.
+                self._restoring_layout = True
+                try:
+                    stored_width = self.sidebar_widths().get(name)
+                    if stored_width:
+                        sizes = self.body_splitter.sizes()
+                        total = sum(sizes) or 1450
+                        self.body_splitter.setSizes(
+                            [stored_width, max(total - stored_width, 600)]
+                        )
+                    self.restore_presentation_limit()
+                finally:
+                    self._restoring_layout = False
 
     def add_professional(self):
         dialog = ProfessionalProfileDialog(parent=self)
@@ -2776,6 +3007,7 @@ class MainWindow(QMainWindow):
         query = self.search.text() if hasattr(self, "search") else ""
         selected_item = None
         active_item = None
+        radicaciones: dict[str, str] = {}
         for root_path in roots:
             root_item = QTreeWidgetItem([root_path.name or str(root_path)])
             root_item.setIcon(0, ui_icon("building", "#2774A6"))
@@ -2802,6 +3034,13 @@ class MainWindow(QMainWindow):
                     if activity.status == "green" and not policy["show_recent"]:
                         continue
                     metadata = read_case_metadata(case)
+                    radicacion = str(metadata.get("Radicación", "")).strip()
+                    if radicacion:
+                        # La uniformidad nace del uso real del Estudio: se
+                        # evitan duplicados por mayúsculas, acentos o espacios.
+                        radicaciones.setdefault(
+                            _comparable_text(radicacion), radicacion
+                        )
                     client_label, client_key = self.case_client_identity(metadata)
                     visible_cases.append((case, activity, client_label, client_key))
 
@@ -2865,6 +3104,10 @@ class MainWindow(QMainWindow):
         elif active_item:
             self.case_tree.setCurrentItem(active_item)
         self.case_tree.blockSignals(False)
+        if hasattr(self, "radicacion_completer"):
+            self.radicacion_completer.setModel(
+                QStringListModel(sorted(radicaciones.values()), self)
+            )
         self.reload_quick_access()
         if selected_item:
             self.set_case(Case(Path(selected_item.data(0, PATH_ROLE))))
@@ -2942,6 +3185,11 @@ class MainWindow(QMainWindow):
             open_action.setEnabled(root_path.is_dir())
             menu.addAction("Usar esta ubicación", lambda: self.activate_study_root(root_path))
             menu.addAction("Nuevo caso aquí…", lambda: self.new_case_in_root(root_path))
+            incorporate = menu.addAction(
+                "Incorporar carpeta como caso…",
+                lambda: self.import_external_case(root_path),
+            )
+            incorporate.setEnabled(root_path.is_dir())
             menu.addSeparator()
             menu.addAction(
                 "Quitar del Gestor…",
@@ -3054,8 +3302,10 @@ class MainWindow(QMainWindow):
         self.open_case_button.setEnabled(case is not None)
         self.sisfe_sync_button.setEnabled(case is not None)
         if not case:
-            self.limit_combo.setCurrentIndex(self.limit_combo.findText(DEFAULT_PROFILE))
+            self.restore_presentation_limit()
             self.case_title.setText("Elegí un caso")
+            self.case_title.setToolTip("")
+            self.update_case_sync_label()
             self.load_metadata({})
             self.case_badge.hide()
             self.client_cases_button.hide()
@@ -3069,7 +3319,9 @@ class MainWindow(QMainWindow):
             return
         self.restore_compilation_draft(load_compilation_draft(case))
         self.sync_case_projection()
-        self.case_title.setText(case.name)
+        self.case_title.setText(self.case_caption(case))
+        self.case_title.setToolTip(case.name)
+        self.update_case_sync_label()
         self.refresh_client_cases_button()
         self.load_metadata(read_case_metadata(case))
         self.reload_novedades()
@@ -3204,7 +3456,74 @@ class MainWindow(QMainWindow):
         self.last_output.setText(f"{output.name}\n{signed}{size}")
 
     def compilation_profile_changed(self, _profile: str):
+        self.update_limit_buttons()
+        self.remember_presentation_limit()
         self.save_compilation_draft()
+
+    def selected_presentation_limit(self) -> int:
+        try:
+            return int(self.limit_combo.currentData())
+        except (TypeError, ValueError):
+            return NO_LIMIT
+
+    def set_presentation_limit(self, limit: int):
+        profile = PROFILE_FOR_LIMIT.get(limit, NO_LIMIT_PROFILE)
+        index = self.limit_combo.findText(profile)
+        if index >= 0:
+            self.limit_combo.setCurrentIndex(index)
+        self.update_limit_buttons()
+
+    def choose_presentation_limit(self, limit: int):
+        """Volver a tocar el límite elegido lo desactiva: sin compresión."""
+        if self.selected_presentation_limit() == limit:
+            self.set_presentation_limit(NO_LIMIT)
+        else:
+            self.set_presentation_limit(limit)
+
+    def update_limit_buttons(self):
+        if not hasattr(self, "limit_buttons"):
+            return
+        current = self.selected_presentation_limit()
+        for value, button in self.limit_buttons.items():
+            button.setChecked(value == current)
+        if hasattr(self, "limit_hint"):
+            self.limit_hint.setText(
+                "Sin límite elegido: se compila al tamaño natural."
+                if current == NO_LIMIT
+                else f"Se comprime sólo si supera {PROFILE_FOR_LIMIT[current].split('· ')[-1]}."
+            )
+
+    def presentation_limits_by_professional(self) -> dict[str, int]:
+        raw = self.store.settings.layout_state.get("presentation_limits", {})
+        if not isinstance(raw, dict):
+            return {}
+        limits = {}
+        for name, value in raw.items():
+            try:
+                limits[str(name)] = int(value)
+            except (TypeError, ValueError):
+                continue
+        return limits
+
+    def remember_presentation_limit(self):
+        if self._restoring_layout or self._loading_compilation:
+            return
+        professional = self.store.settings.current_professional
+        if not professional:
+            return
+        limits = self.presentation_limits_by_professional()
+        limits[professional] = self.selected_presentation_limit()
+        self.store.set_layout_state(
+            {**self.store.settings.layout_state, "presentation_limits": limits}
+        )
+
+    def restore_presentation_limit(self):
+        professional = self.store.settings.current_professional
+        stored = self.presentation_limits_by_professional().get(professional)
+        if stored is not None and stored in PROFILE_FOR_LIMIT:
+            self.set_presentation_limit(stored)
+        else:
+            self.update_limit_buttons()
 
     def sync_case_projection(self):
         """Refresh SQLite without making it a prerequisite for file work."""
@@ -3225,12 +3544,12 @@ class MainWindow(QMainWindow):
         dialog = SisfeLoginDialog(self.sisfe_session, self, credentials=credentials)
         if dialog.exec() and self.sisfe_session.active:
             self._sisfe_login_dialog = dialog
-            self.sisfe_status.set_state(
+            self.update_sisfe_indicator(
                 OperationState.RUNNING,
                 "Preparando el área de expedientes SISFE…",
             )
         else:
-            self.sisfe_status.set_state(OperationState.ERROR, "Sesión SISFE sin confirmar")
+            self.update_sisfe_indicator(OperationState.ERROR, "Sesión SISFE sin confirmar")
 
     def sync_sisfe(self):
         if not self.require_case():
@@ -3261,12 +3580,14 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Sincronización SISFE", "El caso necesita CUIJ para sincronizar.")
             return
         self.sisfe_sync_button.setEnabled(False)
-        self.sisfe_status.set_state(OperationState.RUNNING, "Consultando novedades SISFE…")
+        self.update_sisfe_indicator(OperationState.RUNNING, "Consultando novedades SISFE…")
+        self.update_case_sync_label("Sincronizando…")
 
         def completed(snapshot, error):
             self.sisfe_sync_button.setEnabled(True)
             if error:
-                self.sisfe_status.set_state(OperationState.ERROR, "No se pudo sincronizar")
+                self.update_sisfe_indicator(OperationState.ERROR, "No se pudo sincronizar")
+                self.update_case_sync_label()
                 QMessageBox.warning(self, "No pudimos sincronizar SISFE", str(error))
                 return
             try:
@@ -3274,19 +3595,177 @@ class MainWindow(QMainWindow):
                     case, snapshot, case.path / "Documentos SISFE"
                 )
             except Exception as import_error:
-                self.sisfe_status.set_state(OperationState.ERROR, "No se pudo importar")
+                self.update_sisfe_indicator(OperationState.ERROR, "No se pudo importar")
+                self.update_case_sync_label()
                 QMessageBox.warning(self, "No pudimos importar SISFE", str(import_error))
                 return
+            self.record_case_sync(case)
             if self.case == case:
                 self.reload_novedades()
                 self.reload_case_files()
-            self.sisfe_status.set_state(
+            self.update_sisfe_indicator(
                 OperationState.SUCCESS,
                 "Sesión manual lista para sincronizar",
             )
             self.statusBar().showMessage(
                 f"SISFE sincronizado: {result.movements_registered} novedades nuevas", 5000
             )
+
+        self._sisfe_login_dialog.request_snapshot(cuij, completed)
+
+    # ------------------------------------------------------------------
+    # Estado del caso y de los portales
+    # ------------------------------------------------------------------
+    @staticmethod
+    def case_caption(case: Case) -> str:
+        """Carátula del caso; si todavía no hay datos, el nombre de la carpeta."""
+        caption = build_case_caption(read_case_metadata(case), fallback="")
+        return caption or case.name
+
+    def update_sisfe_indicator(self, state: OperationState, message: str):
+        """Un único estado técnico, replicado en la barra inferior."""
+        self.sisfe_status.set_state(state, message)
+        if hasattr(self, "sisfe_indicator"):
+            self.sisfe_indicator.set_state(state, message)
+
+    def record_case_sync(self, case: Case):
+        moment = datetime.now()
+        try:
+            self.store.set_case_sync_state(case.path, moment.isoformat(timespec="seconds"))
+        except OSError:
+            return
+        if self.case and self.case.path == case.path:
+            self.update_case_sync_label()
+
+    def update_case_sync_label(self, text: str | None = None):
+        if not hasattr(self, "case_sync_label"):
+            return
+        if text is not None:
+            self.case_sync_label.setText(text)
+            self.case_sync_label.setToolTip(text)
+            return
+        if not self.case:
+            self.case_sync_label.setText("")
+            self.case_sync_label.setToolTip("")
+            return
+        stored = self.store.settings.case_sync_state.get(str(self.case.path), "")
+        try:
+            moment = datetime.fromisoformat(stored) if stored else None
+        except ValueError:
+            moment = None
+        if not moment:
+            self.case_sync_label.setText("Sin sincronizar")
+            self.case_sync_label.setToolTip(
+                "Este expediente todavía no se sincronizó con el portal."
+            )
+            return
+        same_day = moment.date() == datetime.now().date()
+        self.case_sync_label.setText(
+            f"Actualizado {moment.strftime('%H:%M')}"
+            if same_day
+            else f"Actualizado {moment.strftime('%d/%m %H:%M')}"
+        )
+        self.case_sync_label.setToolTip(
+            f"Última sincronización del expediente: {moment.strftime('%d/%m/%Y %H:%M')}"
+        )
+
+    def open_selected_novedad(self):
+        """Doble clic: si el movimiento tiene PDF descargado, se abre."""
+        movement = self.selected_novedad_data() or {}
+        documents = [Path(path) for path in movement.get("local_documents", [])]
+        for document in documents:
+            if document.is_file():
+                open_file(document)
+                return
+        self.show_selected_novedad()
+
+    def expedientes_with_identifier(self) -> list[Case]:
+        cases: list[Case] = []
+        for root in self.store.settings.study_roots:
+            if not root.is_dir():
+                continue
+            for candidate in list_cases(root):
+                if str(read_case_metadata(candidate).get("CUIJ", "")).strip():
+                    cases.append(candidate)
+        return cases
+
+    def sync_all_expedientes(self):
+        """Acción global, separada de la sincronización del expediente abierto."""
+        if self._sync_all_active:
+            QMessageBox.information(
+                self, "Sincronización en curso", "Ya hay una sincronización masiva en curso."
+            )
+            return
+        if not self.require_study():
+            return
+        if not self.sisfe_session.active or not self._sisfe_login_dialog:
+            QMessageBox.information(
+                self, "Sesión SISFE", "Iniciá y confirmá la sesión manual de SISFE primero."
+            )
+            return
+        if not self._sisfe_login_dialog.ready_for_sync:
+            QMessageBox.information(
+                self,
+                "Sesión SISFE",
+                "SISFE todavía está abriendo el área de expedientes. Esperá unos segundos y reintentá.",
+            )
+            return
+        cases = self.expedientes_with_identifier()
+        if not cases:
+            QMessageBox.information(
+                self,
+                "Sincronizar todos",
+                "Ningún caso tiene número de expediente cargado todavía.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Sincronizar todos los expedientes",
+            f"Se consultarán {len(cases)} expedientes, uno por vez. ¿Continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._sync_all_queue = list(cases)
+        self._sync_all_active = True
+        self.update_sisfe_indicator(
+            OperationState.RUNNING, f"Sincronizando {len(cases)} expedientes…"
+        )
+        self._sync_next_expediente()
+
+    def _sync_next_expediente(self):
+        if not self._sync_all_queue:
+            self._sync_all_active = False
+            self.update_sisfe_indicator(
+                OperationState.SUCCESS, "Sesión SISFE validada"
+            )
+            self.statusBar().showMessage("Sincronización de expedientes finalizada", 6000)
+            if self.case:
+                self.reload_novedades()
+                self.reload_case_files()
+            return
+        case = self._sync_all_queue.pop(0)
+        cuij = str(read_case_metadata(case).get("CUIJ", "")).strip()
+        remaining = len(self._sync_all_queue)
+        self.statusBar().showMessage(
+            f"Sincronizando {case.name}… ({remaining} restantes)"
+        )
+
+        def completed(snapshot, error):
+            if not error:
+                try:
+                    self.sisfe_portal.import_snapshot(
+                        case, snapshot, case.path / "Documentos SISFE"
+                    )
+                    self.record_case_sync(case)
+                except Exception as import_error:
+                    self.statusBar().showMessage(
+                        f"{case.name}: no se pudo importar ({import_error})", 6000
+                    )
+            else:
+                self.statusBar().showMessage(f"{case.name}: {error}", 6000)
+            QTimer.singleShot(0, self._sync_next_expediente)
 
         self._sisfe_login_dialog.request_snapshot(cuij, completed)
 
@@ -3702,7 +4181,7 @@ class MainWindow(QMainWindow):
             self.novedades_count.setText("Sin novedades")
             self.portal_case_status.setText("Trámite interno / ubicación actual: seleccioná un caso")
             if hasattr(self, "work_tabs"):
-                self.work_tabs.setTabText(self.portal_tab_index, "Portal · 0")
+                self.work_tabs.setTabText(self.portal_tab_index, "Expediente · 0")
             self.reload_activity()
             return
         try:
@@ -3790,7 +4269,7 @@ class MainWindow(QMainWindow):
             "Sin novedades" if not count else f"{count} novedad{'es' if count != 1 else ''}"
         )
         if hasattr(self, "work_tabs"):
-            self.work_tabs.setTabText(self.portal_tab_index, f"Portal · {count}")
+            self.work_tabs.setTabText(self.portal_tab_index, f"Expediente · {count}")
         self.reload_activity()
 
     def reload_pending_documents(self):
@@ -4171,14 +4650,14 @@ class MainWindow(QMainWindow):
         if not cuij.strip():
             QMessageBox.information(self, "Sin número de expediente", "El caso necesita número de expediente para consultar SISFE.")
             return
-        self.sisfe_status.set_state(OperationState.RUNNING, "Consultando documento SISFE…")
+        self.update_sisfe_indicator(OperationState.RUNNING, "Consultando documento SISFE…")
 
         def detail_ready(detail, error):
             if error:
-                self.sisfe_status.set_state(OperationState.ERROR, "No se pudo consultar el documento")
+                self.update_sisfe_indicator(OperationState.ERROR, "No se pudo consultar el documento")
                 QMessageBox.warning(self, "No pudimos consultar SISFE", str(error))
                 return
-            self.sisfe_status.set_state(OperationState.SUCCESS, "Documento SISFE encontrado")
+            self.update_sisfe_indicator(OperationState.SUCCESS, "Documento SISFE encontrado")
             detail = dict(detail, _gestor_context=context)
             completed(str(detail.get("remote_case_id") or ""), detail, movement)
 
@@ -4207,18 +4686,18 @@ class MainWindow(QMainWindow):
             return
         cuij = read_case_metadata(self.case).get("CUIJ", "") if self.case else ""
         self.novedad_detail_button.setEnabled(False)
-        self.sisfe_status.set_state(OperationState.RUNNING, "Consultando detalle SISFE…")
+        self.update_sisfe_indicator(OperationState.RUNNING, "Consultando detalle SISFE…")
 
         def completed(detail, error):
             self.update_novedad_actions()
             if error:
-                self.sisfe_status.set_state(
+                self.update_sisfe_indicator(
                     OperationState.ERROR,
                     "No se pudo consultar la novedad",
                 )
                 QMessageBox.warning(self, "No pudimos consultar la novedad", str(error))
                 return
-            self.sisfe_status.set_state(
+            self.update_sisfe_indicator(
                 OperationState.SUCCESS,
                 "Sesión manual lista para sincronizar",
             )
@@ -4340,7 +4819,7 @@ class MainWindow(QMainWindow):
             )
             if self.case == case:
                 self.reload_novedades()
-            self.sisfe_status.set_state(
+            self.update_sisfe_indicator(
                 OperationState.RUNNING,
                 f"Descargando desde SISFE · {len(self._sisfe_download_queue)} en cola",
             )
@@ -4384,7 +4863,7 @@ class MainWindow(QMainWindow):
             f" · {len(self._sisfe_download_queue)} en cola"
             if self._sisfe_download_queue else ""
         )
-        self.sisfe_status.set_state(
+        self.update_sisfe_indicator(
             OperationState.RUNNING, f"Descargando desde SISFE…{queue_suffix}"
         )
         self.statusBar().showMessage("La descarga SISFE continúa en segundo plano", 5000)
@@ -4400,7 +4879,7 @@ class MainWindow(QMainWindow):
         if success:
             self._sisfe_download_states[key] = ("completed", message)
             self._sisfe_download_failures.pop(key, None)
-            self.sisfe_status.set_state(OperationState.SUCCESS, "Descarga SISFE completada")
+            self.update_sisfe_indicator(OperationState.SUCCESS, "Descarga SISFE completada")
             self.statusBar().showMessage(f"SISFE: {message}", 6500)
             dialog = self._sisfe_case_dialog
             self._sisfe_case_dialog = None
@@ -4413,7 +4892,7 @@ class MainWindow(QMainWindow):
             self._sisfe_download_states[key] = ("failed", message)
             if request:
                 self._sisfe_download_failures[key] = request
-            self.sisfe_status.set_state(OperationState.ERROR, "No se pudo descargar desde SISFE")
+            self.update_sisfe_indicator(OperationState.ERROR, "No se pudo descargar desde SISFE")
             self.sisfe_status.setToolTip(message)
             self.sisfe_retry_button.setVisible(True)
             self.sisfe_show_download_button.setVisible(True)
@@ -4486,10 +4965,10 @@ class MainWindow(QMainWindow):
             return
         self.new_case_in_root(self.store.settings.study_root)
 
-    def import_external_case(self):
+    def import_external_case(self, study_root: Path | None = None):
         if not self.require_study():
             return
-        root = self.store.settings.study_root
+        root = Path(study_root) if study_root else self.store.settings.study_root
         if root is None or not root.is_dir():
             QMessageBox.warning(
                 self,
@@ -4570,9 +5049,9 @@ class MainWindow(QMainWindow):
             self.quick_access.setEnabled(library is not None)
             active = self.store.settings.study_root
             self.quick_label.setText(
-                f"ACCESO RÁPIDO · {active.name.upper()}"
+                f"DOCUMENTOS FRECUENTES · {active.name.upper()}"
                 if active
-                else "ACCESO RÁPIDO"
+                else "DOCUMENTOS FRECUENTES"
             )
             if library:
                 self.quick_access.setToolTip(str(library))
@@ -4987,7 +5466,9 @@ class MainWindow(QMainWindow):
             for key, value in self._loaded_metadata.items()
             if key not in CASE_FIELDS and key not in SYSTEM_METADATA_KEYS and str(value).strip()
         )
-        self.more_metadata_button.setText(f"Más datos · {count}" if count else "Más datos")
+        self.more_metadata_button.setText(
+            f"Datos del caso · {count}" if count else "Datos del caso"
+        )
 
     def update_case_badge(self):
         if not self.case:
@@ -5042,11 +5523,28 @@ class MainWindow(QMainWindow):
                     path for path in current.iterdir()
                     if not path.name.startswith(".")
                 ]
+                query = (
+                    self.files_search.text().strip().casefold()
+                    if hasattr(self, "files_search")
+                    else ""
+                )
+                if query:
+                    entries = [
+                        path for path in entries if query in path.name.casefold()
+                    ]
                 sort_key = self.files_sort_combo.currentData() or "name_asc"
-                reverse = sort_key in {"name_desc", "modified_desc"}
+                reverse = sort_key.endswith("_desc")
                 if sort_key.startswith("modified"):
                     entries.sort(
                         key=lambda path: (path.stat().st_mtime, path.name.casefold()),
+                        reverse=reverse,
+                    )
+                elif sort_key.startswith("size"):
+                    entries.sort(
+                        key=lambda path: (
+                            path.stat().st_size if path.is_file() else -1,
+                            path.name.casefold(),
+                        ),
                         reverse=reverse,
                     )
                 else:
@@ -5062,6 +5560,18 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(label)
                 item.setIcon(self.icon_for_path(path))
                 item.setData(PATH_ROLE, str(path))
+                try:
+                    stats = path.stat()
+                    item.setData(
+                        MODIFIED_ROLE,
+                        datetime.fromtimestamp(stats.st_mtime).strftime("%d/%m/%Y %H:%M"),
+                    )
+                    item.setData(
+                        SIZE_ROLE, "—" if path.is_dir() else human_size(stats.st_size)
+                    )
+                except OSError:
+                    item.setData(MODIFIED_ROLE, "")
+                    item.setData(SIZE_ROLE, "")
                 if path.is_dir():
                     item.setToolTip(f"Carpeta\n{path}")
                 else:
@@ -5307,11 +5817,13 @@ class MainWindow(QMainWindow):
             if path.is_dir():
                 menu.addAction("Abrir en el Explorador", lambda: open_file(path))
             menu.addAction(
-                "Agregar contenido a compilación" if path.is_dir() else "Agregar a compilación",
+                "Agregar contenido a Presentación" if path.is_dir() else "Agregar a Presentación",
                 self.add_selected_to_compilation,
             )
             if path.is_file() and path.suffix.lower() in {".doc", ".docx", ".odt", ".rtf"}:
                 menu.addAction("Usar como escrito", lambda: self.set_current_writing(path))
+            if path.is_file() and can_convert_to_pdf(path):
+                menu.addAction("Convertir a PDF", lambda: self.convert_to_pdf(path))
             if path.is_file() and path.suffix.lower() == ".pdf":
                 menu.addAction("Generar cédula…", lambda: self.generate_cedula_from_pdf(path))
                 classify = menu.addMenu("Clasificar documento")
@@ -5331,6 +5843,8 @@ class MainWindow(QMainWindow):
                 menu.addSeparator()
             menu.addAction("Pegar", self.paste_case_files).setShortcut(QKeySequence.StandardKey.Paste)
         menu.addSeparator()
+        menu.addAction("Nueva carpeta…", self.create_case_subfolder)
+        menu.addAction("Agregar carpeta existente…", self.pick_case_folder)
         menu.addAction("Recuperar vínculos de documentos", self.recover_case_document_links).setEnabled(self._recovery_thread is None)
         menu.exec(self.case_files.mapToGlobal(point))
 
@@ -5522,6 +6036,37 @@ class MainWindow(QMainWindow):
         worker.failed.connect(lambda message: (QMessageBox.warning(self, "No pudimos extraer el decreto", message), thread.quit()))
         thread.finished.connect(cleanup)
         thread.start()
+
+    def convert_to_pdf(self, source: Path):
+        """Crea un PDF junto al original, sin reemplazarlo ni moverlo."""
+        if not self.case:
+            return
+        try:
+            converted = to_pdf(source, source.parent / ".gestor-conversion")
+            target = unique_path(source.with_suffix(".pdf"))
+            shutil.move(str(converted), target)
+        except Exception as error:
+            QMessageBox.warning(self, "No pudimos convertir a PDF", str(error))
+            return
+        finally:
+            shutil.rmtree(source.parent / ".gestor-conversion", ignore_errors=True)
+        self.reload_case_files(target)
+        self.statusBar().showMessage(f"Convertido a PDF: {target.name}", 4000)
+
+    def create_case_subfolder(self):
+        if not self.require_case():
+            return
+        parent = self.case_directory or self.case.path
+        name, accepted = QInputDialog.getText(self, "Nueva carpeta", "Nombre de la carpeta:")
+        if not accepted or not name.strip():
+            return
+        try:
+            target = unique_path(parent / safe_name(name.strip()))
+            target.mkdir(parents=True)
+        except Exception as error:
+            QMessageBox.warning(self, "No pudimos crear la carpeta", str(error))
+            return
+        self.reload_case_files(target)
 
     def remove_selected_case_files(self):
         paths = self.selected_case_paths()
@@ -5946,7 +6491,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Faltan archivos",
-                "Agregá la documental y el escrito en el panel Compilación.",
+                "Agregá la documental y el escrito en el panel Presentación.",
             )
             return
         if not self.confirm_pending_metadata_change():
@@ -6414,11 +6959,11 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Gestor de documental")
-    app.setApplicationDisplayName("Gestor de documental")
+    app.setApplicationName("FORO")
+    app.setApplicationDisplayName("FORO")
     app.setStyle("Fusion")
     app.setStyleSheet(APP_STYLE)
-    app.setWindowIcon(ui_icon("layers", "#D45B36", 32))
+    app.setWindowIcon(foro_application_icon(64))
     window = MainWindow()
     window.show()
     return app.exec()

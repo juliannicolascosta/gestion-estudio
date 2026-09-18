@@ -6,7 +6,7 @@ La navegación comienza en una o varias ubicaciones reconocibles que agrupan los
 
 ## Buscar en conjunto, actuar en contexto
 
-El buscador consulta todos los casos sin obligar al usuario a recordar si están en el disco local, una red o Google Drive. La ubicación seleccionada determina dónde se crea el próximo caso y qué Acceso rápido se muestra, para que cada acción tenga un destino evidente.
+El buscador consulta todos los casos sin obligar al usuario a recordar si están en el disco local, una red o Google Drive. La ubicación seleccionada determina dónde se crea el próximo caso y qué Documentos frecuentes se muestran, para que cada acción tenga un destino evidente.
 
 ## Una carpeta por caso
 
@@ -34,7 +34,7 @@ Los archivos pueden entrar desde el sistema o salir hacia correo y otras aplicac
 
 ## Lo cotidiano permanece a la vista
 
-DNI, matrícula, CBU y constancias viven en Acceso rápido, sin mezclarse con los casos. La biblioteca no exige abrir otra ventana y permite arrastrar hacia un caso, una compilación o un correo.
+DNI, matrícula, CBU y constancias viven en **Documentos frecuentes**, sin mezclarse con los casos. Es un panel chico y flotante, siempre a un clic, que permite arrastrar hacia un caso, la Presentación o un correo.
 
 ## Normalizar con control
 

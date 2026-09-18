@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) "dist"),
     [switch]$PackageOnly
 )
@@ -176,7 +176,7 @@ $BootstrapContent = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "installe
 Set-Content -LiteralPath $BootstrapSource -Value $BootstrapContent -Encoding UTF8
 & $Csc /nologo /target:winexe /platform:x64 /optimize+ `
     "/out:$Bootstrapper" `
-    "/win32icon:$(Join-Path $Project 'gestor_documental\gestor-documental.ico')" `
+    "/win32icon:$(Join-Path $Project 'gestor_documental\foro.ico')" `
     /reference:System.Windows.Forms.dll `
     $BootstrapSource
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Bootstrapper)) {
