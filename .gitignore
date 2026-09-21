@@ -17,3 +17,5 @@ ui-*-profile/
 /Diario de notas.docx
 /.gestor-documental.json
 /.gestor-estudio.sqlite3
+
+portable-build/
