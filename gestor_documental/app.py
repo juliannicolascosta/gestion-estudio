@@ -183,6 +183,7 @@ from .ui.case_files import (
     QuickAccessList,
 )
 from .ui.case_import import ExternalCaseImportDialog
+from .ui.case_spreadsheet_import import CaseSpreadsheetImportDialog
 from .ui.operation_status import OperationState, OperationStatusIndicator
 from .ui.roles import (
     ACTIVITY_ROLE,
@@ -1783,6 +1784,8 @@ class MainWindow(QMainWindow):
         professional_menu = QMenu(self.professional_settings_button)
         professional_menu.addAction("Configuración general…", self.configure_application)
         professional_menu.addAction("Configurar semáforo de casos…", self.configure_case_activity)
+        professional_menu.addSeparator()
+        professional_menu.addAction("Importar casos…", self.import_cases_from_spreadsheet)
         professional_menu.addSeparator()
         professional_menu.addAction(
             "Sincronizar todos los expedientes…", self.sync_all_expedientes
@@ -5122,6 +5125,30 @@ class MainWindow(QMainWindow):
         if not self.require_study():
             return
         self.new_case_in_root(self.store.settings.study_root)
+
+    def import_cases_from_spreadsheet(self):
+        if not self.require_study():
+            return
+        root = self.store.settings.study_root
+        if root is None or not root.is_dir():
+            QMessageBox.warning(
+                self,
+                "Ubicación no disponible",
+                "Conectá o sincronizá esta ubicación antes de importar casos.",
+            )
+            return
+        professional = self.professional_combo.currentText().strip()
+        if professional == ADD_PROFESSIONAL_LABEL:
+            professional = ""
+        dialog = CaseSpreadsheetImportDialog(root, professional, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        imported = [outcome.case for outcome in dialog.outcomes if outcome.case is not None]
+        selected = imported[-1].path if imported else (self.case.path if self.case else None)
+        self.reload_cases(selected)
+        if imported:
+            self.set_case(imported[-1])
+        self.statusBar().showMessage(f"Casos importados: {len(imported)}", 5000)
 
     def import_external_case(self, study_root: Path | None = None):
         if not self.require_study():

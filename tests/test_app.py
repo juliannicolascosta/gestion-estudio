@@ -23,6 +23,7 @@ from gestor_documental.app import (
     PATH_ROLE,
 )
 from gestor_documental.compilation_draft import load_compilation_history
+from gestor_documental.case_spreadsheet_import import ImportRow, import_rows
 from gestor_documental.ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE
 from gestor_documental.services import (
     CompilationCancelled,
@@ -1010,6 +1011,21 @@ class AppSmokeTests(unittest.TestCase):
                 Path(window.case_tree.currentItem().data(0, PATH_ROLE)),
                 study / "Caso nuevo",
             )
+            window.close()
+
+    def test_imported_cases_appear_in_case_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            outcome = import_rows(study, [ImportRow(2, "Maccey, Sandra")])[0]
+            window.reload_cases(outcome.case.path)
+            current = window.case_tree.currentItem()
+            self.assertIsNotNone(current)
+            self.assertEqual(Path(current.data(0, PATH_ROLE)), outcome.case.path)
             window.close()
 
     def test_case_files_can_be_copied_cut_pasted_and_refresh_from_disk(self):
