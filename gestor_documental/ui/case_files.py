@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QMimeData, Qt, QUrl
+from PyQt6.QtCore import QMimeData, QRect, Qt, QUrl
 from PyQt6.QtGui import QColor, QDrag, QKeySequence, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -38,6 +38,8 @@ class ExplorerColumnsDelegate(QStyledItemDelegate):
         view_option = QStyleOptionViewItem(option)
         self.initStyleOption(view_option, index)
         label = view_option.text
+        name, separator, tags_text = label.partition("    · ")
+        tags = [tag.strip() for tag in tags_text.split(" · ") if tag.strip()] if separator else []
         view_option.text = ""
         widget = view_option.widget
         style = widget.style() if widget else QApplication.style()
@@ -56,8 +58,21 @@ class ExplorerColumnsDelegate(QStyledItemDelegate):
         painter.drawText(
             name_rect,
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            metrics.elidedText(label, Qt.TextElideMode.ElideMiddle, max(name_rect.width(), 0)),
+            metrics.elidedText(name, Qt.TextElideMode.ElideMiddle, max(name_rect.width(), 0)),
         )
+        if tags and name_rect.width() > 220:
+            chip_x = name_rect.left() + min(metrics.horizontalAdvance(name) + 14, name_rect.width() - 80)
+            for tag in tags:
+                chip_width = metrics.horizontalAdvance(tag) + 14
+                if chip_x + chip_width > name_rect.right():
+                    break
+                chip = QRect(chip_x, name_rect.center().y() - 10, chip_width, 20)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor("#E5F1EC" if tag != "FIRMADO" else "#DDEFE4"))
+                painter.drawRoundedRect(chip, 7, 7)
+                painter.setPen(QColor("#285E4C"))
+                painter.drawText(chip, int(Qt.AlignmentFlag.AlignCenter), tag)
+                chip_x += chip_width + 5
         painter.setPen(QColor("#6B7A6E" if not selected else "#3E5A4B"))
         date_rect = text_rect.adjusted(
             max(name_rect.width(), 0), 0, -SIZE_COLUMN_WIDTH, 0
@@ -91,6 +106,7 @@ class CaseFilesList(QListWidget):
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
+            self.setStyleSheet("QListWidget { border: 2px solid #2B7564; background: #F1F8F5; }")
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
@@ -102,6 +118,7 @@ class CaseFilesList(QListWidget):
             super().dragMoveEvent(event)
 
     def dropEvent(self, event):
+        self.setStyleSheet("")
         if event.mimeData().hasUrls():
             paths = [Path(url.toLocalFile()) for url in event.mimeData().urls()]
             self.window().import_paths(paths)
@@ -119,17 +136,9 @@ class CaseFilesList(QListWidget):
         drag.setMimeData(mime)
         drag.exec(Qt.DropAction.CopyAction)
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self.count():
-            return
-        painter = QPainter(self.viewport())
-        painter.setPen(QColor("#7A8984"))
-        painter.drawText(
-            self.viewport().rect().adjusted(24, 24, -24, -24),
-            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Arrastrá archivos acá\nSe guardan en la carpeta del caso",
-        )
+    def dragLeaveEvent(self, event):
+        self.setStyleSheet("")
+        super().dragLeaveEvent(event)
 
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.StandardKey.Copy):

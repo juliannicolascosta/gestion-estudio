@@ -41,6 +41,7 @@ _SHAPES = {
     "check": '<path d="m5 12 4 4L19 6"/>',
     "refresh": '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.5 12a7 7 0 0 0-12-4.5L4 10M5.5 12a7 7 0 0 0 12 4.5L20 14"/>',
     "search": '<circle cx="11" cy="11" r="6"/><path d="m15.5 15.5 4.5 4.5"/>',
+    "sort": '<path d="M7 5v14M4 8l3-3 3 3M17 19V5M14 16l3 3 3-3"/>',
     "dot": '<circle class="solid" cx="12" cy="12" r="5.5" stroke="none"/>',
     "books": (
         '<path class="soft" d="M4 5.5h3.6v13H4Z"/><path d="M4 5.5h3.6v13H4Z"/>'
@@ -51,6 +52,8 @@ _SHAPES = {
     "history": '<path d="M4 12a8 8 0 1 0 2.4-5.7M4 5v4h4"/><path d="M12 8v4.5l3 1.8"/>',
     "person": '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
     "bell": '<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 19a2 2 0 0 0 4 0"/>',
+    "judicial": '<path class="soft" d="M5 20h14M8 16h8M10 7h4v9h-4Z"/><path d="m5 8 5-5 4 4-5 5ZM14 5l5 5M4 21h16"/>',
+    "party-filing": '<path class="soft" d="M6 3h8l4 4v14H6Z"/><path d="M14 3v5h4M9 12h6M9 16h4"/>',
 }
 
 

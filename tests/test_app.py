@@ -84,12 +84,9 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIn("Configuración general…", settings_actions)
             self.assertIn("Crear respaldo del Estudio…", settings_actions)
             self.assertIn("Restaurar respaldo del Estudio…", settings_actions)
-            self.assertEqual(window.work_tabs.count(), 4)
+            self.assertEqual(window.work_tabs.count(), 3)
             self.assertEqual(window.work_tabs.tabText(window.files_tab_index), "Archivos")
-            self.assertEqual(
-                window.work_tabs.tabText(window.activity_tab_index),
-                "Actividad · 0",
-            )
+            self.assertEqual(window.activity_tab_index, -1)
             self.assertEqual(
                 window.work_tabs.tabText(window.portal_tab_index),
                 "Expediente · 0",
@@ -164,7 +161,7 @@ class AppSmokeTests(unittest.TestCase):
             window.set_case(case)
 
             self.assertEqual(window.activity_list.count(), 2)
-            self.assertEqual(window.work_tabs.tabText(window.activity_tab_index), "Actividad · 2")
+            self.assertEqual(window.work_tabs.count(), 3)
             pending_item = next(
                 window.activity_list.item(index)
                 for index in range(window.activity_list.count())
@@ -246,8 +243,7 @@ class AppSmokeTests(unittest.TestCase):
                 dialog_class.return_value.selected_data.return_value = selected_data
                 window.open_study_activity()
             self.assertEqual(window.case.path, second.path)
-            self.assertEqual(window.work_tabs.currentIndex(), window.activity_tab_index)
-            self.assertEqual(window.activity_list.currentItem().text().splitlines()[0], "DOCUMENTACIÓN · Partida")
+            self.assertEqual(window.work_tabs.currentIndex(), window.pending_tab_index)
             window.close()
 
     def test_activity_suggests_matching_pending_file_and_opens_it(self):
@@ -1198,7 +1194,7 @@ class AppSmokeTests(unittest.TestCase):
 
             self.assertEqual(window.sisfe_status.state, OperationState.IDLE)
             self.assertIn("sin validar", window.sisfe_indicator.toolTip().casefold())
-            self.assertEqual(window.case_sync_label.text(), "Sin sincronizar")
+            self.assertEqual(window.case_sync_label.text(), "Expediente sin sincronizar")
             window.update_sisfe_indicator(OperationState.SUCCESS, "Sesión SISFE validada")
             self.assertEqual(window.sisfe_status.state, OperationState.SUCCESS)
             self.assertIn("validada", window.sisfe_indicator.toolTip())

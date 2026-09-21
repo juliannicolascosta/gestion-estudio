@@ -1966,9 +1966,10 @@ class MainWindow(QMainWindow):
         self.pending_tab_index = self.work_tabs.addTab(
             self._build_pending_tab(), ui_icon("check", "#2B5748"), "Pendientes · 0"
         )
-        self.activity_tab_index = self.work_tabs.addTab(
-            self._build_activity_tab(), ui_icon("bell", "#8A5B12"), "Actividad · 0"
-        )
+        # Se conserva la lógica interna para accesos globales y compatibilidad,
+        # pero Actividad ya no ocupa una pestaña del caso.
+        self._activity_page = self._build_activity_tab()
+        self.activity_tab_index = -1
         self.workspace_splitter.addWidget(self.work_tabs)
         self.workspace_splitter.addWidget(self._build_presentation_panel())
         self.workspace_splitter.setStretchFactor(0, 1)
@@ -2047,13 +2048,6 @@ class MainWindow(QMainWindow):
         self.more_metadata_button.clicked.connect(self.open_extended_metadata)
         title_row.addWidget(self.more_metadata_button)
 
-        self.compilation_toggle_button = icon_button(
-            "arrow-right",
-            "Ocultar el panel Presentación",
-            self.toggle_compilation_panel,
-            bordered=True,
-        )
-        title_row.addWidget(self.compilation_toggle_button)
         layout.addLayout(title_row)
 
         fields_widget = QWidget()
@@ -2120,6 +2114,21 @@ class MainWindow(QMainWindow):
         self.files_count = QLabel("0 elementos")
         self.files_count.setObjectName("muted")
         header.addWidget(self.files_count)
+        sort_button = icon_button("sort", "Ordenar archivos", lambda: None, bordered=True)
+        sort_menu = QMenu(sort_button)
+        for label, value in (
+            ("Nombre A → Z", "name_asc"), ("Nombre Z → A", "name_desc"),
+            ("Más recientes", "modified_desc"), ("Más antiguos", "modified_asc"),
+            ("Tipo A → Z", "type_asc"), ("Tipo Z → A", "type_desc"),
+        ):
+            sort_menu.addAction(
+                label,
+                lambda _checked=False, key=value: self.files_sort_combo.setCurrentIndex(
+                    self.files_sort_combo.findData(key)
+                ),
+            )
+        sort_button.setMenu(sort_menu)
+        header.addWidget(sort_button)
         layout.addLayout(header)
 
         # El orden se gobierna desde los encabezados de columna; el combo se
@@ -2133,6 +2142,8 @@ class MainWindow(QMainWindow):
             ("Fecha · antigua", "modified_asc"),
             ("Tamaño · mayor", "size_desc"),
             ("Tamaño · menor", "size_asc"),
+            ("Tipo · A → Z", "type_asc"),
+            ("Tipo · Z → A", "type_desc"),
         ):
             self.files_sort_combo.addItem(label, value)
         self.files_sort_combo.currentIndexChanged.connect(self.change_files_sort)
@@ -2227,15 +2238,6 @@ class MainWindow(QMainWindow):
 
         actions = QHBoxLayout()
         actions.setSpacing(6)
-        self.sisfe_status = OperationStatusIndicator("SISFE sin validar")
-        self.sisfe_status.hide()
-        self.sisfe_connect_button = QPushButton("Validar sesión SISFE")
-        decorate_button(self.sisfe_connect_button, "external")
-        self.sisfe_connect_button.setToolTip(
-            "La sesión del portal es del profesional, no de un expediente en particular"
-        )
-        self.sisfe_connect_button.clicked.connect(self.open_sisfe_session)
-        actions.addWidget(self.sisfe_connect_button)
         self.sisfe_sync_button = QPushButton("Sincronizar este expediente")
         self.sisfe_sync_button.setObjectName("green")
         decorate_button(self.sisfe_sync_button, "refresh", "#FFFFFF")
@@ -2388,6 +2390,16 @@ class MainWindow(QMainWindow):
         self.compilation_count = QLabel("0 elementos")
         self.compilation_count.setObjectName("muted")
         header.addWidget(self.compilation_count)
+        add_presentation = icon_button(
+            "plus", "Agregar archivos a la presentación", self.pick_presentation_files,
+            bordered=True,
+        )
+        header.addWidget(add_presentation)
+        self.compilation_toggle_button = icon_button(
+            "arrow-right", "Ocultar el panel Presentación", self.toggle_compilation_panel,
+            bordered=True,
+        )
+        header.addWidget(self.compilation_toggle_button)
         preparation_layout.addLayout(header)
 
         writing_row = QHBoxLayout()
@@ -2398,22 +2410,6 @@ class MainWindow(QMainWindow):
         self.writing_button.setToolTip("Elegir un modelo y crear el escrito del caso (Ctrl+N)")
         self.writing_button.clicked.connect(self.new_writing_from_model)
         writing_row.addWidget(self.writing_button, 1)
-        self.writing_options_button = QPushButton()
-        self.writing_options_button.setObjectName("primary")
-        self.writing_options_button.setIcon(ui_icon("arrow-down", "#F9F4E9"))
-        self.writing_options_button.setMaximumWidth(38)
-        self.writing_options_button.setToolTip("Otras opciones de escritos y modelos")
-        self.writing_options_button.setAccessibleName("Otras opciones de escritos y modelos")
-        self.writing_menu = QMenu(self)
-        self.writing_menu.addAction("Escrito en blanco", self.new_blank_writing)
-        self.writing_menu.addAction("Modificar modelo base en Word", self.open_base_template)
-        self.writing_menu.addAction("Ver campos automáticos…", self.show_template_variables)
-        self.writing_menu.addAction("Abrir guía de modelos", self.open_template_guide)
-        self.writing_menu.addSeparator()
-        self.writing_menu.addAction("Agregar modelo…", self.add_writing_model)
-        self.writing_menu.addAction("Abrir modelos", self.open_models_folder)
-        self.writing_options_button.setMenu(self.writing_menu)
-        writing_row.addWidget(self.writing_options_button)
         preparation_layout.addLayout(writing_row)
 
         self.writing_name = QLabel("Todavía no elegiste un escrito")
@@ -2545,12 +2541,19 @@ class MainWindow(QMainWindow):
         bar = QStatusBar()
         bar.setSizeGripEnabled(False)
         self.sisfe_indicator = OperationStatusIndicator("SISFE sin validar", compact=True)
+        self.sisfe_status = self.sisfe_indicator
         self.sisfe_indicator.setToolTip(
             "SISFE sin validar. Abrí y confirmá la sesión del profesional."
         )
+        self.sisfe_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sisfe_indicator.mousePressEvent = lambda _event: self.open_sisfe_session()
         bar.addWidget(self.sisfe_indicator)
-        self.case_sync_label = QLabel("")
-        self.case_sync_label.setObjectName("muted")
+        self.sync_all_button = QPushButton("Sincronizar todo")
+        self.sync_all_button.setObjectName("statusAction")
+        self.sync_all_button.setToolTip("Actualizar todos los expedientes SISFE cargados")
+        self.sync_all_button.clicked.connect(self.sync_all_expedientes)
+        bar.addWidget(self.sync_all_button)
+        self.case_sync_label = OperationStatusIndicator("", compact=False)
         bar.addPermanentWidget(self.case_sync_label)
         self.setStatusBar(bar)
         self.statusBar().showMessage("Listo")
@@ -2748,6 +2751,7 @@ class MainWindow(QMainWindow):
             "edit_professional": self.edit_current_professional,
             "configure_mev": self.configure_mev_profile,
             "configure_sisfe": self.configure_sisfe_profile,
+            "configure_radicaciones": self.configure_radicaciones,
             "add_model": self.add_writing_model,
             "open_models": self.open_models_folder,
             "open_base_template": self.open_base_template,
@@ -2854,6 +2858,69 @@ class MainWindow(QMainWindow):
             values = dialog.values()
             self.store.set_sisfe_profile(professional, values["user"], values["password"])
             self.statusBar().showMessage("Acceso SISFE guardado para este profesional", 4500)
+
+    def cases_by_radicacion(self) -> dict[str, list[Case]]:
+        grouped: dict[str, list[Case]] = {}
+        for root in self.store.settings.study_roots:
+            if not root.is_dir():
+                continue
+            for case in list_cases(root):
+                value = str(read_case_metadata(case).get("Radicación", "")).strip()
+                if value:
+                    grouped.setdefault(value, []).append(case)
+        return grouped
+
+    def configure_radicaciones(self):
+        grouped = self.cases_by_radicacion()
+        if not grouped:
+            QMessageBox.information(
+                self, "Radicaciones", "Todavía no hay radicaciones cargadas en los casos."
+            )
+            return
+        current, accepted = QInputDialog.getItem(
+            self, "Radicaciones", "Elegí una radicación para revisar:",
+            sorted(grouped, key=str.casefold), 0, False,
+        )
+        if not accepted or not current:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Administrar radicación")
+        box.setText(f"{current}\n\nUsada en {len(grouped[current])} caso(s).")
+        rename_button = box.addButton("Renombrar", QMessageBox.ButtonRole.AcceptRole)
+        delete_button = box.addButton("Eliminar", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is delete_button:
+            QMessageBox.information(
+                self, "Radicación en uso",
+                "No puede eliminarse mientras esté vinculada a casos. Renombrala o quitá el dato desde cada caso.",
+            )
+            return
+        if box.clickedButton() is not rename_button:
+            return
+        replacement, accepted = QInputDialog.getText(
+            self, "Renombrar radicación", "Nuevo nombre:", text=current
+        )
+        replacement = " ".join(replacement.split()).strip()
+        if not accepted or not replacement or replacement == current:
+            return
+        if QMessageBox.question(
+            self, "Aplicar a los casos",
+            f"¿Aplicar «{replacement}» a los {len(grouped[current])} caso(s) vinculados?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            for case in grouped[current]:
+                metadata = read_case_metadata(case)
+                metadata["Radicación"] = replacement
+                save_case_metadata(case, metadata)
+        except OSError as error:
+            QMessageBox.warning(self, "No pudimos actualizar", str(error))
+            return
+        self.reload_cases(self.case.path if self.case else None)
+        self.statusBar().showMessage("Radicación actualizada en todos los casos vinculados", 5000)
 
     def choose_study_root(self):
         initial = str(self.store.settings.study_root or Path.home())
@@ -3624,7 +3691,8 @@ class MainWindow(QMainWindow):
 
     def update_sisfe_indicator(self, state: OperationState, message: str):
         """Un único estado técnico, replicado en la barra inferior."""
-        self.sisfe_status.set_state(state, message)
+        if hasattr(self, "sisfe_status"):
+            self.sisfe_status.set_state(state, message)
         if hasattr(self, "sisfe_indicator"):
             self.sisfe_indicator.set_state(state, message)
 
@@ -3641,11 +3709,11 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "case_sync_label"):
             return
         if text is not None:
-            self.case_sync_label.setText(text)
+            self.case_sync_label.set_state(OperationState.RUNNING, text)
             self.case_sync_label.setToolTip(text)
             return
         if not self.case:
-            self.case_sync_label.setText("")
+            self.case_sync_label.set_state(OperationState.IDLE, "")
             self.case_sync_label.setToolTip("")
             return
         stored = self.store.settings.case_sync_state.get(str(self.case.path), "")
@@ -3654,16 +3722,17 @@ class MainWindow(QMainWindow):
         except ValueError:
             moment = None
         if not moment:
-            self.case_sync_label.setText("Sin sincronizar")
+            self.case_sync_label.set_state(OperationState.IDLE, "Expediente sin sincronizar")
             self.case_sync_label.setToolTip(
                 "Este expediente todavía no se sincronizó con el portal."
             )
             return
         same_day = moment.date() == datetime.now().date()
-        self.case_sync_label.setText(
-            f"Actualizado {moment.strftime('%H:%M')}"
+        self.case_sync_label.set_state(
+            OperationState.SUCCESS,
+            f"Expediente sincronizado · {moment.strftime('%H:%M')}"
             if same_day
-            else f"Actualizado {moment.strftime('%d/%m %H:%M')}"
+            else f"Expediente sincronizado · {moment.strftime('%d/%m %H:%M')}"
         )
         self.case_sync_label.setToolTip(
             f"Última sincronización del expediente: {moment.strftime('%d/%m/%Y %H:%M')}"
@@ -3839,22 +3908,12 @@ class MainWindow(QMainWindow):
         if not selected:
             return
         self.reload_cases(Path(selected["case_path"]))
-        self.work_tabs.setCurrentIndex(self.activity_tab_index)
-        for index in range(self.activity_list.count()):
-            item = self.activity_list.item(index)
-            data = item.data(ACTIVITY_ROLE)
-            if not isinstance(data, dict):
-                continue
-            if (
-                data.get("target") == selected.get("target")
-                and data.get("title") == selected.get("title")
-                and data.get("external_id") == selected.get("external_id")
-                and data.get("task_id") == selected.get("task_id")
-                and data.get("file_path") == selected.get("file_path")
-            ):
-                self.activity_list.setCurrentItem(item)
-                self.activity_list.scrollToItem(item)
-                break
+        target = selected.get("target")
+        self.work_tabs.setCurrentIndex(
+            self.portal_tab_index if target == "portal"
+            else self.files_tab_index if target == "files"
+            else self.pending_tab_index
+        )
 
     def reload_activity(self):
         if not hasattr(self, "activity_list"):
@@ -3862,7 +3921,6 @@ class MainWindow(QMainWindow):
         self.activity_list.clear()
         if not self.case:
             self.activity_count.setText("Sin acciones")
-            self.work_tabs.setTabText(self.activity_tab_index, "Actividad · 0")
             return
         try:
             items = self.case_activity_items(
@@ -3871,7 +3929,6 @@ class MainWindow(QMainWindow):
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.activity_count.setText("No disponible")
             self.activity_list.addItem(f"No pudimos reunir la actividad: {error}")
-            self.work_tabs.setTabText(self.activity_tab_index, "Actividad")
             return
         colors = {0: "#B42318", 1: "#B36A24", 2: "#8A5B12", 3: "#2B7564"}
         icons = {
@@ -3934,7 +3991,6 @@ class MainWindow(QMainWindow):
             + (f" · {urgent_count} urgentes" if urgent_count else "")
             + (f" · {completed_count} completadas" if completed_count else "")
         )
-        self.work_tabs.setTabText(self.activity_tab_index, f"Actividad · {active_count}")
         self.update_activity_actions()
 
     def update_activity_actions(self):
@@ -4210,6 +4266,9 @@ class MainWindow(QMainWindow):
             interpretation = _interpretation_summary(movement.title)
             detail_line = f"\nDETECCIÓN · {interpretation}" if interpretation else ""
             local_documents = self.movement_local_documents(movement.external_id, movement.source)
+            cedula_documents = [
+                path for path in local_documents if "CEDULA" in _comparable_text(path.stem).upper()
+            ]
             document_line = "\nPDF disponible localmente" if local_documents else ""
             download_key = self.sisfe_download_key(self.case, movement.external_id)
             download_state, download_message = self._sisfe_download_states.get(
@@ -4223,22 +4282,20 @@ class MainWindow(QMainWindow):
                 "running": "\nDESCARGANDO · SISFE en segundo plano",
                 "failed": "\nERROR · clic derecho para reintentar",
             }.get(download_state, "")
+            judicial = self.is_judicial_movement(movement.title)
             icon_color = (
-                "#C9493C" if download_state == "failed"
-                else "#2774A6" if download_state in {"queued", "running"}
-                else "#B36A24" if interpretation
-                else "#2B7564"
+                "#2B7A55" if local_documents
+                else "#C9493C" if movement.source == "sisfe" and movement.external_id
+                else "#768681"
             )
+            cedula_line = "\nCÉDULA ASOCIADA" if cedula_documents else ""
             item = QListWidgetItem(
                 ui_icon(
-                    "warning" if download_state == "failed"
-                    else "refresh" if download_state in {"queued", "running"}
-                    else "check" if local_documents
-                    else "bell",
+                    "judicial" if judicial else "party-filing",
                     icon_color,
                 ),
-                f"{movement.title}\n{stamp} · {movement.source.upper()}"
-                f"{detail_line}{document_line}{state_line}",
+                f"{stamp} · {'JUZGADO' if judicial else 'PARTE'}\n{movement.title}"
+                f"{detail_line}{document_line}{state_line}{cedula_line}",
             )
             if "CARGO A VERIFICAR" in f"{movement.title} {interpretation}".upper():
                 item.setForeground(QColor("#B42318"))
@@ -4260,7 +4317,9 @@ class MainWindow(QMainWindow):
                     "occurred_at": movement.occurred_at.isoformat() if movement.occurred_at else "",
                     "interpretation": interpretation,
                     "local_documents": [str(path) for path in local_documents],
+                    "cedula_documents": [str(path) for path in cedula_documents],
                     "download_state": download_state,
+                    "judicial": judicial,
                 },
             )
             self.novedades_list.addItem(item)
@@ -4587,6 +4646,7 @@ class MainWindow(QMainWindow):
             return
         menu = QMenu(self)
         local_documents = [Path(path) for path in movement.get("local_documents", [])]
+        cedula_documents = [Path(path) for path in movement.get("cedula_documents", [])]
         download_state = str(movement.get("download_state") or "")
         if local_documents:
             if len(local_documents) == 1:
@@ -4595,8 +4655,20 @@ class MainWindow(QMainWindow):
                 open_menu = menu.addMenu("Abrir documento")
                 for path in local_documents:
                     open_menu.addAction(path.name, lambda checked=False, value=path: open_file(value))
-            if local_documents[0].suffix.lower() == ".pdf":
-                menu.addAction("Generar cédula", lambda: self.generate_cedula_from_pdf(local_documents[0]))
+            if cedula_documents:
+                menu.addAction("Abrir cédula asociada", lambda: open_file(cedula_documents[0]))
+            if movement.get("judicial") and local_documents[0].suffix.lower() == ".pdf":
+                menu.addAction(
+                    "Generar cédula",
+                    lambda: self.generate_cedula_from_pdf(
+                        local_documents[0],
+                        context=dict(
+                            self.capture_sisfe_context(),
+                            movement_external_id=movement.get("external_id", ""),
+                            movement_source=movement.get("source", ""),
+                        ),
+                    ),
+                )
         if movement.get("source") == "sisfe" and movement.get("external_id"):
             if local_documents:
                 action = menu.addAction("Descargar documento")
@@ -4615,10 +4687,22 @@ class MainWindow(QMainWindow):
                 action.setEnabled(False)
             else:
                 menu.addAction("Descargar documento", self.download_selected_novedad_document)
-                menu.addAction("Generar cédula", self.generate_cedula_from_selected_novedad)
+                if movement.get("judicial"):
+                    menu.addAction("Generar cédula", self.generate_cedula_from_selected_novedad)
         menu.addSeparator()
         menu.addAction("Ver detalle", self.show_selected_novedad)
         menu.exec(self.novedades_list.mapToGlobal(point))
+
+    @staticmethod
+    def is_judicial_movement(title: str) -> bool:
+        normalized = _comparable_text(title).upper()
+        return any(
+            term in normalized
+            for term in (
+                "DECRETO", "PROVIDENCIA", "PROVEIDO", "AUTO ", "RESOLUCION",
+                "SENTENCIA", "AUDIENCIA", "DESPACHO", "NOTIFICACION",
+            )
+        )
 
     def download_selected_novedad_document(self):
         self._request_selected_movement_detail(
@@ -5547,6 +5631,14 @@ class MainWindow(QMainWindow):
                         ),
                         reverse=reverse,
                     )
+                elif sort_key.startswith("type"):
+                    entries.sort(
+                        key=lambda path: (
+                            "" if path.is_dir() else path.suffix.casefold(),
+                            path.name.casefold(),
+                        ),
+                        reverse=reverse,
+                    )
                 else:
                     entries.sort(key=lambda path: path.name.casefold(), reverse=reverse)
                 # Las carpetas quedan primero: es navegación visual, no una
@@ -5673,6 +5765,15 @@ class MainWindow(QMainWindow):
             return
         files = QFileDialog.getOpenFileNames(self, "Agregar archivos al caso")[0]
         self.import_paths([Path(path) for path in files])
+
+    def pick_presentation_files(self):
+        if not self.require_case():
+            return
+        files = QFileDialog.getOpenFileNames(
+            self, "Agregar archivos a la presentación", str(self.case.path)
+        )[0]
+        if files:
+            self.handle_compilation_drop([Path(path) for path in files])
 
     def pick_case_folder(self):
         if not self.require_case():
@@ -5826,15 +5927,6 @@ class MainWindow(QMainWindow):
                 menu.addAction("Convertir a PDF", lambda: self.convert_to_pdf(path))
             if path.is_file() and path.suffix.lower() == ".pdf":
                 menu.addAction("Generar cédula…", lambda: self.generate_cedula_from_pdf(path))
-                classify = menu.addMenu("Clasificar documento")
-                for category, label in (
-                    ("judicial", "Judicial · decreto o proveído"),
-                    ("parte", "Escrito de parte"),
-                    ("cedula", "Cédula"),
-                    ("audiencia", "Audiencia"),
-                    ("otro", "Otro documento"),
-                ):
-                    classify.addAction(label, lambda checked=False, value=category: self.set_document_category(path, value))
             menu.addSeparator()
             menu.addAction("Enviar a la Papelera", self.remove_selected_case_files)
         clipboard_paths = self.clipboard_file_paths()
@@ -6026,6 +6118,27 @@ class MainWindow(QMainWindow):
                 if self.case == case:
                     self.reload_case_files(writing)
                     self.set_current_writing(writing)
+                external_id = str(context.get("movement_external_id") or "")
+                if external_id:
+                    try:
+                        with StudyDatabase(study_database_path(case.path.parent)) as database:
+                            expediente = database.find_expediente_by_folder(case.path)
+                            movement = database.find_movement_by_external_id(
+                                expediente.id, external_id,
+                                source=str(context.get("movement_source") or "sisfe"),
+                            ) if expediente else None
+                            if expediente and movement:
+                                document = database.add_document(
+                                    expediente.id,
+                                    writing.relative_to(case.path),
+                                    source="generated",
+                                    category="cedula",
+                                )
+                                database.link_document_to_movement(
+                                    movement.id, document.id, role="cedula"
+                                )
+                    except (OSError, ValueError, sqlite3.Error):
+                        pass
                 open_file(writing)
                 self.warn_unresolved_placeholders(writing)
                 review = " Revisá los firmantes." if not extracted.signers_detected else ""
@@ -6160,8 +6273,11 @@ class MainWindow(QMainWindow):
             self.add_compilation_path(path, kind)
 
     def compilation_text(self, path: Path, kind: str) -> str:
-        prefix = "ESCRITO" if kind == "writing" else "DOC"
-        return f"{prefix}  ·  {path.name}"
+        return (
+            f"{path.name}    · PRESENTACIÓN PRINCIPAL"
+            if kind == "writing"
+            else path.name
+        )
 
     def add_compilation_path(self, path: Path, kind: str = "document"):
         for index in range(self.compilation.count()):

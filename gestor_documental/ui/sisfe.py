@@ -53,7 +53,8 @@ class SisfeLoginDialog(QDialog):
         self.session = session
         self.credentials = dict(credentials or {})
         self.setWindowTitle("Iniciar sesión SISFE")
-        self.setMinimumSize(980, 720)
+        self.resize(760, 660)
+        self.setMinimumSize(680, 560)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         note = QLabel(
@@ -86,7 +87,7 @@ class SisfeLoginDialog(QDialog):
         self.session.mark_portal_opened()
         self._validate_after_load = False
         self.browser.loadFinished.connect(self.portal_loaded)
-        self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/"))
+        self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/login-matriculado"))
 
     def portal_loaded(self, ok: bool):
         path = self.browser.url().path().rstrip("/")

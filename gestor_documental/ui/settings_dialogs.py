@@ -106,6 +106,20 @@ class ApplicationSettingsDialog(QDialog):
             ),
             "Firmador",
         )
+        self.tabs.addTab(
+            self._action_tab(
+                QLabel("Administrá los nombres de radicación usados por los casos."),
+                (("Administrar radicaciones", "configure_radicaciones"),),
+            ),
+            "Radicaciones",
+        )
+        self.tabs.addTab(
+            self._action_tab(
+                QLabel("Acceso de Matriculados y contraseña protegida por Windows."),
+                (("Configurar acceso SISFE", "configure_sisfe"),),
+            ),
+            "SISFE",
+        )
         layout.addWidget(self.tabs, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
@@ -328,7 +342,8 @@ class SisfeAccessDialog(QDialog):
         form.addRow("Contraseña", self.password)
         layout.addLayout(form)
         note = QLabel(
-            "Por tu autorización, estos datos se guardan localmente en texto plano para agilizar el acceso."
+            "La contraseña se protege con Windows y sólo puede descifrarse en este usuario y equipo. "
+            "El CAPTCHA se completa siempre de forma manual."
         )
         note.setObjectName("muted")
         note.setWordWrap(True)

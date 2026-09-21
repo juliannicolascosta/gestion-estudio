@@ -279,6 +279,9 @@ class ServiceTests(unittest.TestCase):
                 reloaded.settings.sisfe_profiles["Dra. Ana Pérez"],
                 {"user": "ana.perez", "password": "clave de prueba"},
             )
+            persisted = store.config.read_text(encoding="utf-8")
+            self.assertNotIn("clave de prueba", persisted)
+            self.assertIn("password_protected", persisted)
 
     def test_settings_support_multiple_study_locations_and_safe_removal(self):
         with tempfile.TemporaryDirectory() as directory:

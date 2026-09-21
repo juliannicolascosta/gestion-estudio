@@ -30,6 +30,7 @@ from .models import (
     Case,
     CompilationResult,
 )
+from .secure_store import protect_secret, unprotect_secret
 
 
 def portable_data_dir() -> Path | None:
@@ -306,7 +307,7 @@ class SettingsStore:
             sisfe_profiles={
                 str(name): {
                     "user": str(data.get("user", "")),
-                    "password": str(data.get("password", "")),
+                    "password": self._sisfe_password(data),
                 }
                 for name, data in (payload.get("sisfe_profiles", {}) or {}).items()
                 if isinstance(data, dict)
@@ -340,7 +341,13 @@ class SettingsStore:
                 str(self.settings.signer_output_dir) if self.settings.signer_output_dir else None
             ),
             "mev_profiles": self.settings.mev_profiles,
-            "sisfe_profiles": self.settings.sisfe_profiles,
+            "sisfe_profiles": {
+                name: {
+                    "user": data.get("user", ""),
+                    "password_protected": protect_secret(data.get("password", "")),
+                }
+                for name, data in self.settings.sisfe_profiles.items()
+            },
             "layout_state": self.settings.layout_state,
             "activity_settings": self.settings.activity_settings,
             "naming_pattern": self.settings.naming_pattern,
@@ -444,12 +451,24 @@ class SettingsStore:
         self.save()
 
     def set_sisfe_profile(self, professional: str, user: str, password: str):
-        """Store the explicitly authorised local SISFE prefill values."""
+        """Store SISFE prefill values; the password is protected when saved."""
         self.settings.sisfe_profiles[professional] = {
             "user": " ".join(user.split()).strip(),
             "password": password,
         }
         self.save()
+
+    @staticmethod
+    def _sisfe_password(data: dict[str, object]) -> str:
+        protected = str(data.get("password_protected", ""))
+        if protected:
+            try:
+                return unprotect_secret(protected)
+            except (OSError, ValueError):
+                return ""
+        # Migración de configuraciones anteriores: se lee una vez y la próxima
+        # escritura del almacén la reemplaza por DPAPI.
+        return str(data.get("password", ""))
 
     def set_activity_settings(self, settings: dict[str, object]):
         self.settings.activity_settings = dict(settings)
