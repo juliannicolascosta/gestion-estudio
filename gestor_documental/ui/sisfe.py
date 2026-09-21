@@ -46,9 +46,12 @@ SISFE_ORIGIN = "https://sisfe.justiciasantafe.gov.ar"
 
 
 class SisfeLoginDialog(QDialog):
-    """Embedded manual login whose cookies live only for this process."""
+    """Embedded SISFE login backed by a persistent, app-owned browser profile."""
 
-    def __init__(self, session: ManualSisfeSession, parent=None, *, credentials: dict[str, str] | None = None):
+    def __init__(
+        self, session: ManualSisfeSession, parent=None, *,
+        credentials: dict[str, str] | None = None, profile_dir: Path,
+    ):
         super().__init__(parent)
         self.session = session
         self.credentials = dict(credentials or {})
@@ -58,8 +61,8 @@ class SisfeLoginDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         note = QLabel(
-            "Completá el acceso de Matriculados y el CAPTCHA aquí. Las cookies se usan sólo "
-            "durante esta ejecución y no se guardan en el equipo."
+            "FORO reutiliza la sesión de este equipo. Si SISFE vuelve a solicitar acceso, "
+            "completá únicamente el CAPTCHA."
         )
         note.setWordWrap(True)
         note.setObjectName("muted")
@@ -68,9 +71,14 @@ class SisfeLoginDialog(QDialog):
         self.validation_status.setObjectName("muted")
         self.validation_status.setWordWrap(True)
         layout.addWidget(self.validation_status)
-        self.profile = QWebEngineProfile(self)
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        cache_dir = profile_dir / "Cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        self.profile = QWebEngineProfile("FORO-SISFE", self)
+        self.profile.setPersistentStoragePath(str(profile_dir))
+        self.profile.setCachePath(str(cache_dir))
         self.profile.setPersistentCookiesPolicy(
-            QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies
+            QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
         )
         self._sync_timer: QTimer | None = None
         self.ready_for_sync = False
@@ -86,20 +94,32 @@ class SisfeLoginDialog(QDialog):
         layout.addWidget(buttons)
         self.session.mark_portal_opened()
         self._validate_after_load = False
+        self._checking_saved_session = True
+        self._validating_saved_session = False
+        self._prefill_attempts = 0
         self.browser.loadFinished.connect(self.portal_loaded)
-        self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/login-matriculado"))
+        self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
+
+    def prepare_for_open(self):
+        """Reuse the same WebView and verify its existing session before showing login."""
+        if self.ready_for_sync and self.session.active:
+            return
+        self._checking_saved_session = True
+        self._prefill_attempts = 0
+        self.validation_status.setText("Comprobando la sesión SISFE guardada…")
+        self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
 
     def portal_loaded(self, ok: bool):
         path = self.browser.url().path().rstrip("/")
-        if ok and path != "/buscar-expediente" and (self.credentials.get("user") or self.credentials.get("password")):
-            self.browser.page().runJavaScript(
-                browser_prefill_login_script(
-                    self.credentials.get("user", ""), self.credentials.get("password", ""),
-                    self.credentials.get("circumscription", ""),
-                    self.credentials.get("college", ""),
-                    self.credentials.get("license", ""),
-                )
-            )
+        if ok and path == "/buscar-expediente" and self._checking_saved_session:
+            self._checking_saved_session = False
+            self._validating_saved_session = True
+            self.validate_loaded_session()
+            return
+        if ok and path == "/login-matriculado":
+            self._checking_saved_session = False
+            self._prefill_attempts = 0
+            self._try_prefill()
         self.ready_for_sync = bool(ok and path == "/buscar-expediente")
         if self._validate_after_load:
             self._validate_after_load = False
@@ -110,6 +130,33 @@ class SisfeLoginDialog(QDialog):
                     "No pudimos abrir el área de expedientes de SISFE. Reintentá."
                 )
                 self.use_session_button.setEnabled(True)
+
+    def _try_prefill(self):
+        self._prefill_attempts += 1
+        script = browser_prefill_login_script(
+            self.credentials.get("password", ""),
+            self.credentials.get("circumscription", ""),
+            self.credentials.get("college", ""),
+            self.credentials.get("license", ""),
+        )
+
+        def completed(result):
+            result = result if isinstance(result, dict) else {}
+            if result.get("complete"):
+                self.validation_status.setText(
+                    "Datos SISFE completados. Resolvé el CAPTCHA y presioná Validar sesión."
+                )
+                return
+            if self._prefill_attempts < 30 and self.browser.url().path().rstrip("/") == "/login-matriculado":
+                QTimer.singleShot(350, self._try_prefill)
+                return
+            missing = [name for name, found in result.get("fields", {}).items() if not found]
+            detail = ", ".join(missing) if missing else "formulario no disponible"
+            self.validation_status.setText(
+                f"No se pudieron completar todos los datos ({detail}). Revisá Configuración → SISFE."
+            )
+
+        self.browser.page().runJavaScript(script, completed)
 
     def accept_manual_session(self):
         self.ready_for_sync = False
@@ -152,11 +199,17 @@ class SisfeLoginDialog(QDialog):
             if not isinstance(result, dict):
                 result = {"ok": False, "error": "SISFE devolvió una validación inválida."}
             if result.get("ok"):
+                self._validating_saved_session = False
                 self.session.confirm_manual_login()
                 self.ready_for_sync = True
                 self.accept()
                 return
             detail = result.get("status") or result.get("error") or "sin detalle"
+            if self._validating_saved_session:
+                self._validating_saved_session = False
+                self.validation_status.setText("La sesión anterior venció. Abriendo el acceso SISFE…")
+                self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/login-matriculado"))
+                return
             self.validation_status.setText(
                 f"SISFE todavía no autorizó la sesión ({detail}). "
                 "Esperá o completá el CAPTCHA y reintentá."

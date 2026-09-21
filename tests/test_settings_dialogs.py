@@ -88,13 +88,25 @@ class SettingsDialogTests(unittest.TestCase):
         self.assertEqual(dialog.values(), {"name": "Ana Pérez"})
         dialog.close()
 
-    def test_sisfe_profile_preserves_password_and_trims_user(self):
-        dialog = SisfeAccessDialog({"user": "  matricula  ", "password": " clave "})
+    def test_sisfe_profile_contains_only_real_login_fields(self):
+        dialog = SisfeAccessDialog({
+            "circumscription": "Rosario", "college": "Abogados",
+            "license": " 12345 ", "password": " clave ",
+        })
 
         self.assertEqual(
             dialog.values(),
-            {"user": "matricula", "password": " clave "},
+            {
+                "circumscription": "Rosario", "college": "Abogados",
+                "license": "12345", "password": " clave ",
+            },
         )
+        self.assertFalse(hasattr(dialog, "user"))
+        dialog.close()
+
+    def test_sisfe_profile_migrates_legacy_user_to_license(self):
+        dialog = SisfeAccessDialog({"user": "matricula anterior", "password": "clave"})
+        self.assertEqual(dialog.values()["license"], "matricula anterior")
         dialog.close()
 
 

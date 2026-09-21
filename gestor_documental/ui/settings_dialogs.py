@@ -4,6 +4,7 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -37,6 +38,18 @@ PROFESSIONAL_PROFILE_FIELDS = (
     ("account_type", "Tipo de cuenta"),
     ("account_number", "Número de cuenta"),
     ("cbu", "CBU"),
+)
+
+SISFE_CIRCUMSCRIPTIONS = (
+    "Santa Fe", "Rosario", "Venado Tuerto", "Reconquista", "Rafaela",
+)
+SISFE_COLLEGES = (
+    "Abogados", "Arquitectos", "Calígrafos", "Contadores", "Corredores Inmobiliarios",
+    "Escribanos", "Higiene, Seguridad y Salud Ocupacional", "Ingenieros Agrónomos",
+    "Ingenieros Civiles", "Ingenieros Especialistas", "Maestros Mayores de Obras",
+    "Martilleros", "Médicos", "Ministerio Público", "Ministerio Público de la Acusación",
+    "Ministerio Público de la Defensa", "Odontólogos", "Peritos Oficiales", "Procuradores",
+    "Psicólogos", "Psicopedagogos", "Trabajadores Sociales", "Traductores",
 )
 
 
@@ -333,19 +346,23 @@ class SisfeAccessDialog(QDialog):
             "Se precarga en Matriculados; el CAPTCHA siempre se completa manualmente.",
         ))
         form = QFormLayout()
-        self.user = QLineEdit(profile.get("user", ""))
-        self.user.setPlaceholderText("Usuario SISFE")
+        self.circumscription = QComboBox()
+        self.circumscription.addItems(SISFE_CIRCUMSCRIPTIONS)
+        self.circumscription.setCurrentText(profile.get("circumscription", "Santa Fe"))
+        self.college = QComboBox()
+        self.college.addItems(SISFE_COLLEGES)
+        self.college.setCurrentText(profile.get("college", "Abogados"))
+        # Early builds stored the matrícula in the non-existent "user" field.
+        legacy_license = profile.get("user", "")
+        self.license = QLineEdit(profile.get("license", legacy_license))
+        self.license.setPlaceholderText("Número de matrícula")
         self.password = QLineEdit(profile.get("password", ""))
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.setPlaceholderText("Contraseña SISFE")
-        self.circumscription = QLineEdit(profile.get("circumscription", ""))
-        self.college = QLineEdit(profile.get("college", ""))
-        self.license = QLineEdit(profile.get("license", ""))
-        form.addRow("Usuario", self.user)
-        form.addRow("Contraseña", self.password)
         form.addRow("Circunscripción", self.circumscription)
         form.addRow("Colegio", self.college)
         form.addRow("Matrícula", self.license)
+        form.addRow("Contraseña", self.password)
         layout.addLayout(form)
         note = QLabel(
             "La contraseña se protege con Windows y sólo puede descifrarse en este usuario y equipo. "
@@ -361,18 +378,12 @@ class SisfeAccessDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        self.user.setFocus()
+        self.license.setFocus()
 
     def values(self) -> dict[str, str]:
-        values = {
-            "user": self.user.text().strip(),
+        return {
+            "circumscription": self.circumscription.currentText().strip(),
+            "college": self.college.currentText().strip(),
+            "license": self.license.text().strip(),
             "password": self.password.text(),
         }
-        for key, edit in (
-            ("circumscription", self.circumscription),
-            ("college", self.college),
-            ("license", self.license),
-        ):
-            if edit.text().strip():
-                values[key] = edit.text().strip()
-        return values

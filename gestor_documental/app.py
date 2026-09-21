@@ -2857,9 +2857,9 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             values = dialog.values()
             self.store.set_sisfe_profile(
-                professional, values["user"], values["password"],
-                values.get("circumscription", ""), values.get("college", ""),
-                values.get("license", ""),
+                professional,
+                values["circumscription"], values["college"],
+                values["license"], values["password"],
             )
             self.statusBar().showMessage("Acceso SISFE guardado para este profesional", 4500)
 
@@ -3613,9 +3613,26 @@ class MainWindow(QMainWindow):
     def open_sisfe_session(self):
         professional = self.professional_combo.currentText().strip()
         credentials = self.store.settings.sisfe_profiles.get(professional, {})
-        dialog = SisfeLoginDialog(self.sisfe_session, self, credentials=credentials)
+        if (
+            self._sisfe_login_dialog is not None
+            and self._sisfe_login_dialog.ready_for_sync
+            and self.sisfe_session.active
+        ):
+            self.update_sisfe_indicator(OperationState.SUCCESS, "Sesión SISFE activa")
+            self.statusBar().showMessage("Se reutilizó la sesión SISFE vigente.", 4000)
+            return
+        if self._sisfe_login_dialog is None:
+            self._sisfe_login_dialog = SisfeLoginDialog(
+                self.sisfe_session,
+                self,
+                credentials=credentials,
+                profile_dir=self.store.app_dir / "SISFE" / "BrowserProfile",
+            )
+        else:
+            self._sisfe_login_dialog.credentials = dict(credentials)
+            self._sisfe_login_dialog.prepare_for_open()
+        dialog = self._sisfe_login_dialog
         if dialog.exec() and self.sisfe_session.active:
-            self._sisfe_login_dialog = dialog
             self.update_sisfe_indicator(
                 OperationState.SUCCESS,
                 "Sesión SISFE activa",

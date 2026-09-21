@@ -110,55 +110,45 @@ def browser_validation_script() -> str:
 
 
 def browser_prefill_login_script(
-    user: str, password: str, circumscription: str = "", college: str = "", license_number: str = ""
+    password: str, circumscription: str = "", college: str = "", license_number: str = ""
 ) -> str:
     """Fill visible login fields only; it never submits or handles CAPTCHA."""
-    target_user = json.dumps(user)
     target_password = json.dumps(password)
     target_circumscription = json.dumps(circumscription)
     target_college = json.dumps(college)
     target_license = json.dumps(license_number)
     return f"""
         (() => {{
-          const user = {target_user};
           const password = {target_password};
           const configured = {{
             circunscripcion: {target_circumscription}, colegio: {target_college}, matricula: {target_license}
           }};
-          const fields = [...document.querySelectorAll('input')];
-          const passwordField = fields.find(field => field.type === 'password');
-          const userField = fields.find(field => field !== passwordField &&
-            /user|usuario|mail|email|documento|dni/i.test(
-              [field.name, field.id, field.placeholder, field.autocomplete].filter(Boolean).join(' ')
-            ))
-            || fields.find(field => field !== passwordField &&
-              ['text', 'email', 'tel'].includes((field.type || 'text').toLowerCase()));
+          const passwordField = document.querySelector('#password');
           const setValue = (field, value) => {{
-            if (!field || !value) return;
-            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            if (!field || !value) return false;
+            const prototype = field.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(prototype, 'value').set;
             setter.call(field, value);
             field.dispatchEvent(new Event('input', {{bubbles: true}}));
             field.dispatchEvent(new Event('change', {{bubbles: true}}));
+            field.dispatchEvent(new Event('blur', {{bubbles: true}}));
+            return field.value === value;
           }};
-          setValue(userField, user);
-          setValue(passwordField, password);
-          const controls = [...document.querySelectorAll('input, select')];
+          const result = {{formFound: Boolean(document.querySelector('#matricula')), fields: {{}}}};
+          result.fields.password = password ? setValue(passwordField, password) : Boolean(passwordField);
           for (const [kind, value] of Object.entries(configured)) {{
-            if (!value) continue;
-            const pattern = kind === 'circunscripcion' ? 'circuns|distrito' : kind;
-            const field = controls.find(control => new RegExp(pattern, 'i').test(
-              [control.name, control.id, control.placeholder, control.getAttribute('aria-label')]
-                .filter(Boolean).join(' ')
-            ));
-            if (!field) continue;
+            const field = document.querySelector('#' + kind);
+            if (!value) {{ result.fields[kind] = Boolean(field); continue; }}
+            if (!field) {{ result.fields[kind] = false; continue; }}
             if (field.tagName === 'SELECT') {{
               const option = [...field.options].find(item =>
                 item.value === value || item.textContent.trim().toLowerCase() === value.toLowerCase()
               );
-              if (option) setValue(field, option.value);
-            }} else setValue(field, value);
+              result.fields[kind] = Boolean(option && setValue(field, option.value));
+            }} else result.fields[kind] = setValue(field, value);
           }}
-          return Boolean(userField || passwordField);
+          result.complete = result.formFound && Object.values(result.fields).every(Boolean);
+          return result;
         }})()
     """
 

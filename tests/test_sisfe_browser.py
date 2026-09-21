@@ -53,11 +53,14 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertNotIn("window.__gestorSisfeValidation = currentUser", script)
 
     def test_login_prefill_only_fills_visible_fields_and_never_submits(self):
-        script = browser_prefill_login_script("usuario", "contraseña")
-        self.assertIn("usuario", script)
+        script = browser_prefill_login_script("contraseña", "Rosario", "Abogados", "12345")
         encoded = re.search(r"const password = (.+);", script).group(1)
         self.assertEqual(json.loads(encoded), "contraseña")
-        self.assertIn("type === 'password'", script)
+        self.assertIn("document.querySelector('#password')", script)
+        self.assertIn("HTMLSelectElement.prototype", script)
+        self.assertIn("new Event('input'", script)
+        self.assertIn("new Event('change'", script)
+        self.assertIn("result.complete", script)
         self.assertNotIn(".submit(", script)
         self.assertNotIn("click()", script)
 

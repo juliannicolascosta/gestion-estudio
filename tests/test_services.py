@@ -260,7 +260,9 @@ class ServiceTests(unittest.TestCase):
             signer_output = Path(directory) / "Firmados"
             signer_output.mkdir()
             store.set_signer_output_dir(signer_output)
-            store.set_sisfe_profile("Dra. Ana Pérez", "ana.perez", "clave de prueba")
+            store.set_sisfe_profile(
+                "Dra. Ana Pérez", "Rosario", "Abogados", "12345", "clave de prueba"
+            )
             reloaded = SettingsStore(app_dir)
             self.assertEqual(reloaded.settings.study_root, study)
             self.assertIn("Dra. Ana Pérez", reloaded.settings.professionals)
@@ -277,7 +279,10 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(reloaded.settings.signer_output_dir, signer_output)
             self.assertEqual(
                 reloaded.settings.sisfe_profiles["Dra. Ana Pérez"],
-                {"user": "ana.perez", "password": "clave de prueba"},
+                {
+                    "circumscription": "Rosario", "college": "Abogados",
+                    "license": "12345", "password": "clave de prueba",
+                },
             )
             persisted = store.config.read_text(encoding="utf-8")
             self.assertNotIn("clave de prueba", persisted)

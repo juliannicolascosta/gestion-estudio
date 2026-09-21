@@ -340,7 +340,6 @@ class SettingsStore:
             "mev_profiles": self.settings.mev_profiles,
             "sisfe_profiles": {
                 name: {
-                    "user": data.get("user", ""),
                     "password_protected": protect_secret(data.get("password", "")),
                     "circumscription": data.get("circumscription", ""),
                     "college": data.get("college", ""),
@@ -451,22 +450,16 @@ class SettingsStore:
         self.save()
 
     def set_sisfe_profile(
-        self, professional: str, user: str, password: str,
-        circumscription: str = "", college: str = "", license_number: str = "",
+        self, professional: str, circumscription: str, college: str,
+        license_number: str, password: str,
     ):
         """Store SISFE prefill values; the password is protected when saved."""
         profile = {
-            "user": " ".join(user.split()).strip(),
             "password": password,
+            "circumscription": " ".join(circumscription.split()).strip(),
+            "college": " ".join(college.split()).strip(),
+            "license": " ".join(license_number.split()).strip(),
         }
-        for key, value in (
-            ("circumscription", circumscription),
-            ("college", college),
-            ("license", license_number),
-        ):
-            cleaned = " ".join(value.split()).strip()
-            if cleaned:
-                profile[key] = cleaned
         self.settings.sisfe_profiles[professional] = profile
         self.save()
 
@@ -483,14 +476,15 @@ class SettingsStore:
         return str(data.get("password", ""))
 
     def _sisfe_profile(self, data: dict[str, object]) -> dict[str, str]:
+        license_number = str(data.get("license", "")).strip()
+        if not license_number:
+            license_number = str(data.get("user", "")).strip()
         profile = {
-            "user": str(data.get("user", "")),
             "password": self._sisfe_password(data),
+            "circumscription": str(data.get("circumscription", "Santa Fe")).strip() or "Santa Fe",
+            "college": str(data.get("college", "Abogados")).strip() or "Abogados",
+            "license": license_number,
         }
-        for key in ("circumscription", "college", "license"):
-            value = str(data.get(key, "")).strip()
-            if value:
-                profile[key] = value
         return profile
 
     def set_activity_settings(self, settings: dict[str, object]):

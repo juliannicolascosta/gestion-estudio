@@ -539,7 +539,7 @@ class AppSmokeTests(unittest.TestCase):
             case = create_case(study, "Caso")
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
-            store.set_sisfe_profile("Profesional", "usuario", "clave")
+            store.set_sisfe_profile("Profesional", "Rosario", "Abogados", "12345", "clave")
             window = MainWindow(store)
             window.reload_cases(case.path)
             with patch("gestor_documental.app.SisfeLoginDialog") as dialog_class:
@@ -560,7 +560,11 @@ class AppSmokeTests(unittest.TestCase):
             dialog_class.assert_called_once_with(
                 window.sisfe_session,
                 window,
-                credentials={"user": "usuario", "password": "clave"},
+                credentials={
+                    "circumscription": "Rosario", "college": "Abogados",
+                    "license": "12345", "password": "clave",
+                },
+                profile_dir=store.app_dir / "SISFE" / "BrowserProfile",
             )
             window.close()
 
