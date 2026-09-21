@@ -53,8 +53,8 @@ class SisfeLoginDialog(QDialog):
         self.session = session
         self.credentials = dict(credentials or {})
         self.setWindowTitle("Iniciar sesión SISFE")
-        self.resize(760, 660)
-        self.setMinimumSize(680, 560)
+        self.resize(620, 780)
+        self.setMinimumSize(560, 640)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         note = QLabel(
@@ -94,7 +94,10 @@ class SisfeLoginDialog(QDialog):
         if ok and path != "/buscar-expediente" and (self.credentials.get("user") or self.credentials.get("password")):
             self.browser.page().runJavaScript(
                 browser_prefill_login_script(
-                    self.credentials.get("user", ""), self.credentials.get("password", "")
+                    self.credentials.get("user", ""), self.credentials.get("password", ""),
+                    self.credentials.get("circumscription", ""),
+                    self.credentials.get("college", ""),
+                    self.credentials.get("license", ""),
                 )
             )
         self.ready_for_sync = bool(ok and path == "/buscar-expediente")
@@ -163,7 +166,7 @@ class SisfeLoginDialog(QDialog):
         timer.timeout.connect(poll)
         timer.start()
 
-    def request_snapshot(self, cuij: str, completed):
+    def request_snapshot(self, cuij: str, completed, known_ids: tuple[str, ...] = ()):
         """Query SISFE from its own browser context and return a plain snapshot."""
         if not self.ready_for_sync:
             completed(None, RuntimeError("SISFE todavía está preparando el área de expedientes."))
@@ -171,7 +174,7 @@ class SisfeLoginDialog(QDialog):
         if self._sync_timer and self._sync_timer.isActive():
             completed(None, RuntimeError("SISFE todavía está procesando otra consulta."))
             return
-        self.browser.page().runJavaScript(browser_sync_script(cuij))
+        self.browser.page().runJavaScript(browser_sync_script(cuij, known_ids))
         elapsed = {"milliseconds": 0}
         timer = QTimer(self)
         timer.setInterval(250)

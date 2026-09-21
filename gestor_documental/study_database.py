@@ -19,7 +19,7 @@ from .models import Case
 from .services import read_case_metadata, save_case_metadata
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 DATABASE_NAME = ".gestor-estudio.sqlite3"
 CASE_IDENTITY_FIELD = "Identificación interna del expediente"
 
@@ -89,6 +89,10 @@ class StudyDatabase:
         if current < 7:
             self._migrate_to_7()
             self.connection.execute("PRAGMA user_version = 7")
+            current = 7
+        if current < 8:
+            self._migrate_to_8()
+            self.connection.execute("PRAGMA user_version = 8")
         self.connection.commit()
 
     def _migrate_to_1(self):
@@ -230,6 +234,13 @@ class StudyDatabase:
             ON expedientes(case_identity) WHERE case_identity <> ''
             """
         )
+
+    def _migrate_to_8(self):
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(movimientos)")}
+        if "movement_kind" not in columns:
+            self.connection.execute("ALTER TABLE movimientos ADD COLUMN movement_kind TEXT NOT NULL DEFAULT 'otro'")
+        if "document_available" not in columns:
+            self.connection.execute("ALTER TABLE movimientos ADD COLUMN document_available INTEGER NOT NULL DEFAULT 0")
 
     @staticmethod
     def _client_values(metadata: dict[str, str]) -> dict[str, str]:
@@ -505,6 +516,8 @@ class StudyDatabase:
         source: str = "manual",
         external_id: str = "",
         logical_key: str = "",
+        movement_kind: str = "otro",
+        document_available: bool = False,
     ) -> Movimiento:
         """Add a movement, or return the existing one for an external ID."""
         title = title.strip()
@@ -519,6 +532,20 @@ class StudyDatabase:
                 (source, external_id),
             ).fetchone()
             if row:
+                if movement_kind != "otro" or document_available:
+                    self.connection.execute(
+                        """
+                        UPDATE movimientos
+                        SET movement_kind = CASE WHEN ? <> 'otro' THEN ? ELSE movement_kind END,
+                            document_available = MAX(document_available, ?)
+                        WHERE id = ?
+                        """,
+                        (movement_kind, movement_kind, int(document_available), row["id"]),
+                    )
+                    self.connection.commit()
+                    row = self.connection.execute(
+                        "SELECT * FROM movimientos WHERE id = ?", (row["id"],)
+                    ).fetchone()
                 return self._movimiento_from_row(row)
         if logical_key:
             row = self.connection.execute(
@@ -538,12 +565,14 @@ class StudyDatabase:
             occurred_at=occurred_at,
             source=source,
             external_id=external_id,
+            movement_kind=movement_kind,
+            document_available=document_available,
         )
         self.connection.execute(
             """
             INSERT INTO movimientos
-                (id, expediente_id, title, occurred_at, source, external_id, logical_key, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, expediente_id, title, occurred_at, source, external_id, logical_key, movement_kind, document_available, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -553,6 +582,8 @@ class StudyDatabase:
                 record.source,
                 record.external_id,
                 logical_key,
+                record.movement_kind,
+                int(record.document_available),
                 now,
             ),
         )
@@ -952,6 +983,8 @@ class StudyDatabase:
             occurred_at=datetime.fromisoformat(row["occurred_at"]) if row["occurred_at"] else None,
             source=row["source"],
             external_id=row["external_id"],
+            movement_kind=row["movement_kind"] if "movement_kind" in row.keys() else "otro",
+            document_available=bool(row["document_available"]) if "document_available" in row.keys() else False,
         )
 
     @staticmethod

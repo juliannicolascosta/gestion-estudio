@@ -35,6 +35,8 @@ class SisfeMovementPayload:
     internal_id: str = ""
     occurred_at: datetime | None = None
     documents: tuple[SisfeDocumentPayload, ...] = ()
+    movement_kind: str = "otro"
+    document_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,8 @@ class SisfeImportService:
                     source=self.source,
                     external_id=movement.internal_id,
                     logical_key=self._movement_key(movement),
+                    movement_kind=movement.movement_kind,
+                    document_available=movement.document_available,
                 )
                 if database.connection.total_changes > before:
                     movements_registered += 1

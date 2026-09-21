@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from PyQt6.QtCore import QByteArray, Qt
-from PyQt6.QtGui import QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
 
@@ -40,6 +40,8 @@ _SHAPES = {
     "edit": '<path class="soft" d="M5 19h4l10-10-4-4L5 15Z"/><path d="m13.5 6.5 4 4M5 19h14"/>',
     "check": '<path d="m5 12 4 4L19 6"/>',
     "refresh": '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.5 12a7 7 0 0 0-12-4.5L4 10M5.5 12a7 7 0 0 0 12 4.5L20 14"/>',
+    "download": '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+    "notification": '<path class="soft" d="M3 6h18v12H3Z"/><path d="m3 7 9 7 9-7"/>',
     "search": '<circle cx="11" cy="11" r="6"/><path d="m15.5 15.5 4.5 4.5"/>',
     "sort": '<path d="M7 5v14M4 8l3-3 3 3M17 19V5M14 16l3 3 3-3"/>',
     "dot": '<circle class="solid" cx="12" cy="12" r="5.5" stroke="none"/>',
@@ -77,6 +79,32 @@ def ui_icon(name: str, color: str = "#2B7564", size: int = 24) -> QIcon:
     painter.end()
     pixmap.setDevicePixelRatio(scale)
     return QIcon(pixmap)
+
+
+def badged_icon(name: str, color: str, count: int, size: int = 24) -> QIcon:
+    """Superpone una cantidad sobre el ícono sin alterar su color de estado."""
+    if count <= 0:
+        return ui_icon(name, color, size)
+    scale = 2
+    canvas = ui_icon(name, color, size).pixmap(size * scale, size * scale)
+    canvas.setDevicePixelRatio(1)
+    painter = QPainter(canvas)
+    diameter = 17 * scale
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#C9493C"))
+    painter.drawEllipse(canvas.width() - diameter, 0, diameter, diameter)
+    font = QFont()
+    font.setBold(True)
+    font.setPixelSize(9 * scale)
+    painter.setFont(font)
+    painter.setPen(QColor("#FFFFFF"))
+    painter.drawText(
+        canvas.width() - diameter, 0, diameter, diameter,
+        int(Qt.AlignmentFlag.AlignCenter), str(min(count, 99)),
+    )
+    painter.end()
+    canvas.setDevicePixelRatio(scale)
+    return QIcon(canvas)
 
 
 FORO_ISOTYPE = Path(__file__).with_name("foro-isotipo.svg")

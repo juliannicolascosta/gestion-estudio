@@ -63,6 +63,24 @@ _PAGINATION_HELPERS = """
               }
               return collected;
             };
+            const collectPagedUntilKnown = async (loadPage, knownIds) => {
+              if (!knownIds.size) return collectPaged(loadPage);
+              const collected = [];
+              const seenPages = new Set();
+              for (let page = 0; page < 100; page += 1) {
+                const payload = await loadPage(page, pageSize);
+                const rows = rowsFrom(payload);
+                const signature = pageSignature(rows);
+                if (seenPages.has(signature)) break;
+                seenPages.add(signature);
+                for (const row of rows) {
+                  if (knownIds.has(String((row && row.id) || ''))) return collected;
+                  collected.push(row);
+                }
+                if (lastPage(payload, page, rows)) break;
+              }
+              return collected;
+            };
 """
 
 
@@ -77,7 +95,7 @@ def browser_validation_script() -> str:
               throw new Error('SISFE no entregó el token de la sesión');
             }
             const response = await fetch(
-              '/iol/expedientes/findByFilter?diasNovedades=30&page=0&size=1',
+                '/iol/expedientes/findByFilter?page=0&size=1',
               {
                 credentials: 'include',
                 headers: {Authorization: 'Bearer ' + currentUser.token}
@@ -91,14 +109,22 @@ def browser_validation_script() -> str:
     """
 
 
-def browser_prefill_login_script(user: str, password: str) -> str:
+def browser_prefill_login_script(
+    user: str, password: str, circumscription: str = "", college: str = "", license_number: str = ""
+) -> str:
     """Fill visible login fields only; it never submits or handles CAPTCHA."""
     target_user = json.dumps(user)
     target_password = json.dumps(password)
+    target_circumscription = json.dumps(circumscription)
+    target_college = json.dumps(college)
+    target_license = json.dumps(license_number)
     return f"""
         (() => {{
           const user = {target_user};
           const password = {target_password};
+          const configured = {{
+            circunscripcion: {target_circumscription}, colegio: {target_college}, matricula: {target_license}
+          }};
           const fields = [...document.querySelectorAll('input')];
           const passwordField = fields.find(field => field.type === 'password');
           const userField = fields.find(field => field !== passwordField &&
@@ -116,6 +142,22 @@ def browser_prefill_login_script(user: str, password: str) -> str:
           }};
           setValue(userField, user);
           setValue(passwordField, password);
+          const controls = [...document.querySelectorAll('input, select')];
+          for (const [kind, value] of Object.entries(configured)) {{
+            if (!value) continue;
+            const pattern = kind === 'circunscripcion' ? 'circuns|distrito' : kind;
+            const field = controls.find(control => new RegExp(pattern, 'i').test(
+              [control.name, control.id, control.placeholder, control.getAttribute('aria-label')]
+                .filter(Boolean).join(' ')
+            ));
+            if (!field) continue;
+            if (field.tagName === 'SELECT') {{
+              const option = [...field.options].find(item =>
+                item.value === value || item.textContent.trim().toLowerCase() === value.toLowerCase()
+              );
+              if (option) setValue(field, option.value);
+            }} else setValue(field, value);
+          }}
           return Boolean(userField || passwordField);
         }})()
     """
@@ -144,7 +186,7 @@ def browser_movement_detail_script(cuij: str, movement_id: str) -> str:
             }};
 {_PAGINATION_HELPERS}
             const selected = await findPaged(
-              (page, size) => getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=' + page + '&size=' + size),
+              (page, size) => getJson('/iol/expedientes/findByFilter?page=' + page + '&size=' + size),
               row => JSON.stringify(row).replace(/\\D/g, '').includes(target)
             );
             if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
@@ -251,13 +293,15 @@ def browser_click_official_additional_attachment_script(row_number: int) -> str:
     """
 
 
-def browser_sync_script(cuij: str) -> str:
+def browser_sync_script(cuij: str, known_ids: tuple[str, ...] = ()) -> str:
     target = json.dumps("".join(char for char in cuij if char.isdigit()))
+    known = json.dumps([str(value) for value in known_ids if str(value)])
     return f"""
         window.__gestorSisfeResult = null;
         (async () => {{
           try {{
             const target = {target};
+            const knownIds = new Set({known});
             const currentUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
             if (!currentUser || !currentUser.token) {{
               throw new Error('SISFE no entregó el token de la sesión');
@@ -272,7 +316,7 @@ def browser_sync_script(cuij: str) -> str:
             }};
 {_PAGINATION_HELPERS}
             const selected = await findPaged(
-              (page, size) => getJson('/iol/expedientes/findByFilter?diasNovedades=30&page=' + page + '&size=' + size),
+              (page, size) => getJson('/iol/expedientes/findByFilter?page=' + page + '&size=' + size),
               row => JSON.stringify(row).replace(/\\D/g, '').includes(target)
             );
             if (!selected || !selected.id) throw new Error('SISFE no devolvió el expediente seleccionado');
@@ -294,10 +338,10 @@ def browser_sync_script(cuij: str) -> str:
               return '';
             }};
             const context = {{details, selected}};
-            const news = await collectPaged((page, size) => getJson(
+            const news = await collectPagedUntilKnown((page, size) => getJson(
               '/iol/expedientes/findNovedadesById?idExpediente=' + encodeURIComponent(selected.id) +
               '&page=' + page + '&size=' + size
-            ));
+            ), knownIds);
             window.__gestorSisfeResult = {{
               ok: true,
               cuij: target,
@@ -314,7 +358,11 @@ def browser_sync_script(cuij: str) -> str:
               movements: news.map(row => ({{
                 internal_id: String(row.id || ''),
                 title: String(row.novedad || row.tipoActuacion || 'Movimiento SISFE'),
-                occurred_at: row.fecha || null
+                occurred_at: row.fecha || null,
+                movement_kind: row.adjunto1 != null
+                  ? (/cedula/i.test(String(row.novedad || '')) ? 'cedula' : 'judicial')
+                  : (row.adjunto3 != null ? 'parte' : 'otro'),
+                document_available: row.adjunto1 != null || row.adjunto3 != null
               }}))
             }};
           }} catch (error) {{
@@ -334,6 +382,8 @@ def snapshot_from_browser_payload(payload: dict) -> SisfeCaseSnapshot:
             internal_id=str(row.get("internal_id", "")),
             title=str(row.get("title", "Movimiento SISFE")),
             occurred_at=_parse_date(row.get("occurred_at")),
+            movement_kind=str(row.get("movement_kind", "otro")),
+            document_available=bool(row.get("document_available", False)),
             documents=_documents_from_browser_row(row),
         )
         for row in payload.get("movements", [])

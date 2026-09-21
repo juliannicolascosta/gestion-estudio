@@ -51,6 +51,8 @@ class Movimiento:
     occurred_at: datetime | None = None
     source: str = "manual"
     external_id: str = ""
+    movement_kind: str = "otro"
+    document_available: bool = False
 
 
 @dataclass(frozen=True)

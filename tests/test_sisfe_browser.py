@@ -30,6 +30,19 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("al consultar", script)
         self.assertNotIn("document.cookie", script)
         self.assertNotIn("window.__gestorSisfeResult = currentUser", script)
+        self.assertNotIn("diasNovedades=30", script)
+
+    def test_incremental_sync_stops_when_it_reaches_a_known_movement(self):
+        script = browser_sync_script("21-12345678-9", ("mov-10", "mov-9"))
+        self.assertIn('new Set(["mov-10", "mov-9"])', script)
+        self.assertIn("collectPagedUntilKnown", script)
+        self.assertIn("return collected", script)
+
+    def test_structural_columns_define_movement_kind(self):
+        script = browser_sync_script("21-12345678-9")
+        self.assertIn("row.adjunto1 != null", script)
+        self.assertIn("row.adjunto3 != null", script)
+        self.assertIn("'cedula' : 'judicial'", script)
 
     def test_validation_uses_sisfe_bearer_token_only_inside_browser(self):
         script = browser_validation_script()
@@ -85,7 +98,11 @@ class SisfeBrowserTests(unittest.TestCase):
                 "case_status": "A casillero",
                 "case_status_since": "2026-08-30",
                 "movements": [
-                    {"internal_id": "9", "title": "Cédula", "occurred_at": "2026-08-31T12:00:00"}
+                    {
+                        "internal_id": "9", "title": "Cédula",
+                        "occurred_at": "2026-08-31T12:00:00",
+                        "movement_kind": "cedula", "document_available": True,
+                    }
                 ],
             }
         )
@@ -94,6 +111,8 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertEqual(snapshot.case_status_since, "2026-08-30")
         self.assertEqual(snapshot.movements[0].internal_id, "9")
         self.assertEqual(snapshot.movements[0].occurred_at.year, 2026)
+        self.assertEqual(snapshot.movements[0].movement_kind, "cedula")
+        self.assertTrue(snapshot.movements[0].document_available)
 
     def test_combined_internal_status_is_split_from_its_since_date(self):
         snapshot = snapshot_from_browser_payload(

@@ -338,8 +338,14 @@ class SisfeAccessDialog(QDialog):
         self.password = QLineEdit(profile.get("password", ""))
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.setPlaceholderText("Contraseña SISFE")
+        self.circumscription = QLineEdit(profile.get("circumscription", ""))
+        self.college = QLineEdit(profile.get("college", ""))
+        self.license = QLineEdit(profile.get("license", ""))
         form.addRow("Usuario", self.user)
         form.addRow("Contraseña", self.password)
+        form.addRow("Circunscripción", self.circumscription)
+        form.addRow("Colegio", self.college)
+        form.addRow("Matrícula", self.license)
         layout.addLayout(form)
         note = QLabel(
             "La contraseña se protege con Windows y sólo puede descifrarse en este usuario y equipo. "
@@ -358,4 +364,15 @@ class SisfeAccessDialog(QDialog):
         self.user.setFocus()
 
     def values(self) -> dict[str, str]:
-        return {"user": self.user.text().strip(), "password": self.password.text()}
+        values = {
+            "user": self.user.text().strip(),
+            "password": self.password.text(),
+        }
+        for key, edit in (
+            ("circumscription", self.circumscription),
+            ("college", self.college),
+            ("license", self.license),
+        ):
+            if edit.text().strip():
+                values[key] = edit.text().strip()
+        return values

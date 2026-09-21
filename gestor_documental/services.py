@@ -305,10 +305,7 @@ class SettingsStore:
                 if isinstance(data, dict)
             },
             sisfe_profiles={
-                str(name): {
-                    "user": str(data.get("user", "")),
-                    "password": self._sisfe_password(data),
-                }
+                str(name): self._sisfe_profile(data)
                 for name, data in (payload.get("sisfe_profiles", {}) or {}).items()
                 if isinstance(data, dict)
             },
@@ -345,6 +342,9 @@ class SettingsStore:
                 name: {
                     "user": data.get("user", ""),
                     "password_protected": protect_secret(data.get("password", "")),
+                    "circumscription": data.get("circumscription", ""),
+                    "college": data.get("college", ""),
+                    "license": data.get("license", ""),
                 }
                 for name, data in self.settings.sisfe_profiles.items()
             },
@@ -450,12 +450,24 @@ class SettingsStore:
         self.settings.layout_state = dict(state)
         self.save()
 
-    def set_sisfe_profile(self, professional: str, user: str, password: str):
+    def set_sisfe_profile(
+        self, professional: str, user: str, password: str,
+        circumscription: str = "", college: str = "", license_number: str = "",
+    ):
         """Store SISFE prefill values; the password is protected when saved."""
-        self.settings.sisfe_profiles[professional] = {
+        profile = {
             "user": " ".join(user.split()).strip(),
             "password": password,
         }
+        for key, value in (
+            ("circumscription", circumscription),
+            ("college", college),
+            ("license", license_number),
+        ):
+            cleaned = " ".join(value.split()).strip()
+            if cleaned:
+                profile[key] = cleaned
+        self.settings.sisfe_profiles[professional] = profile
         self.save()
 
     @staticmethod
@@ -469,6 +481,17 @@ class SettingsStore:
         # Migración de configuraciones anteriores: se lee una vez y la próxima
         # escritura del almacén la reemplaza por DPAPI.
         return str(data.get("password", ""))
+
+    def _sisfe_profile(self, data: dict[str, object]) -> dict[str, str]:
+        profile = {
+            "user": str(data.get("user", "")),
+            "password": self._sisfe_password(data),
+        }
+        for key in ("circumscription", "college", "license"):
+            value = str(data.get(key, "")).strip()
+            if value:
+                profile[key] = value
+        return profile
 
     def set_activity_settings(self, settings: dict[str, object]):
         self.settings.activity_settings = dict(settings)

@@ -389,10 +389,9 @@ class AppSmokeTests(unittest.TestCase):
                 window.work_tabs.tabText(window.portal_tab_index),
                 "Expediente · 1",
             )
-            self.assertFalse(window.novedad_detail_button.isEnabled())
             window.novedades_list.setCurrentRow(0)
             self.app.processEvents()
-            self.assertTrue(window.novedad_detail_button.isEnabled())
+            self.assertIsNotNone(window.selected_novedad_data())
             window.close()
 
     def test_layout_can_collapse_restore_and_persist_per_computer(self):
@@ -555,8 +554,8 @@ class AppSmokeTests(unittest.TestCase):
                 window.open_sisfe_session()
 
             self.assertTrue(window.sisfe_session.active)
-            self.assertIn("preparando", window.sisfe_status.text().lower())
-            self.assertEqual(window.sisfe_status.state, OperationState.RUNNING)
+            self.assertIn("activa", window.sisfe_status.text().lower())
+            self.assertEqual(window.sisfe_status.state, OperationState.SUCCESS)
             self.assertNotIn("password", vars(window.sisfe_session))
             dialog_class.assert_called_once_with(
                 window.sisfe_session,
@@ -1194,12 +1193,37 @@ class AppSmokeTests(unittest.TestCase):
 
             self.assertEqual(window.sisfe_status.state, OperationState.IDLE)
             self.assertIn("sin validar", window.sisfe_indicator.toolTip().casefold())
+            self.assertEqual(window.sync_all_button.text(), "")
+            self.assertEqual(
+                window.sync_all_button.toolTip(), "Sincronizar todos los expedientes"
+            )
+            self.assertEqual(window.sisfe_sync_button.text(), "")
+            self.assertEqual(window.sisfe_sync_button.toolTip(), "Sincronizar expediente")
+            self.assertFalse(hasattr(window, "novedad_detail_button"))
             self.assertEqual(window.case_sync_label.text(), "Expediente sin sincronizar")
             window.update_sisfe_indicator(OperationState.SUCCESS, "Sesión SISFE validada")
             self.assertEqual(window.sisfe_status.state, OperationState.SUCCESS)
             self.assertIn("validada", window.sisfe_indicator.toolTip())
             window.update_case_sync_label("Sincronizando…")
             self.assertEqual(window.case_sync_label.text(), "Sincronizando…")
+            window.close()
+
+    def test_unseen_sisfe_badge_persists_until_expediente_is_viewed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+            window.work_tabs.setCurrentIndex(window.files_tab_index)
+
+            window.record_unseen_sisfe(case, 4)
+            self.assertEqual(read_case_metadata(case)["Novedades SISFE sin ver"], "4")
+            window.work_tabs.setCurrentIndex(window.portal_tab_index)
+            self.app.processEvents()
+            self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(case))
             window.close()
 
     def test_sisfe_movement_shows_its_existing_local_document_without_copying_it(self):

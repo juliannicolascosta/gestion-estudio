@@ -123,7 +123,7 @@ from .compilation_draft import (
 )
 from .sisfe_session import ManualSisfeSession
 from .sisfe_sync import SisfePortalService
-from .icons import file_icon_name, foro_application_icon, foro_mark, ui_icon
+from .icons import badged_icon, file_icon_name, foro_application_icon, foro_mark, ui_icon
 from .signing import (
     DigitalSignatureSession,
     SigningCertificate,
@@ -1970,6 +1970,7 @@ class MainWindow(QMainWindow):
         # pero Actividad ya no ocupa una pestaña del caso.
         self._activity_page = self._build_activity_tab()
         self.activity_tab_index = -1
+        self.work_tabs.currentChanged.connect(self.case_tab_changed)
         self.workspace_splitter.addWidget(self.work_tabs)
         self.workspace_splitter.addWidget(self._build_presentation_panel())
         self.workspace_splitter.setStretchFactor(0, 1)
@@ -2239,10 +2240,16 @@ class MainWindow(QMainWindow):
         actions = QHBoxLayout()
         actions.setSpacing(6)
         self.sisfe_sync_button = QPushButton("Sincronizar este expediente")
-        self.sisfe_sync_button.setObjectName("green")
-        decorate_button(self.sisfe_sync_button, "refresh", "#FFFFFF")
+        self.sisfe_sync_button.setText("")
+        self.sisfe_sync_button.setIcon(ui_icon("refresh", "#2B7564"))
+        self.sisfe_sync_button.setToolTip("Sincronizar expediente")
+        self.sisfe_sync_button.setAccessibleName("Sincronizar expediente")
         self.sisfe_sync_button.clicked.connect(self.sync_sisfe)
         actions.addWidget(self.sisfe_sync_button)
+        self.download_pending_button = icon_button(
+            "download", "Descargar PDFs pendientes", self.download_pending_pdfs, bordered=True
+        )
+        actions.addWidget(self.download_pending_button)
         actions.addStretch()
         self.sisfe_retry_button = icon_button(
             "refresh", "Reintentar la última descarga SISFE", self.retry_sisfe_download,
@@ -2256,14 +2263,6 @@ class MainWindow(QMainWindow):
         )
         self.sisfe_show_download_button.setVisible(False)
         actions.addWidget(self.sisfe_show_download_button)
-        self.novedad_detail_button = icon_button(
-            "external",
-            "Ver el detalle del movimiento seleccionado",
-            self.show_selected_novedad,
-            bordered=True,
-        )
-        self.novedad_detail_button.setEnabled(False)
-        actions.addWidget(self.novedad_detail_button)
         layout.addLayout(actions)
         return card
 
@@ -2547,14 +2546,15 @@ class MainWindow(QMainWindow):
         )
         self.sisfe_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sisfe_indicator.mousePressEvent = lambda _event: self.open_sisfe_session()
-        bar.addWidget(self.sisfe_indicator)
-        self.sync_all_button = QPushButton("Sincronizar todo")
+        bar.addPermanentWidget(self.sisfe_indicator)
+        self.sync_all_button = icon_button(
+            "refresh", "Sincronizar todos los expedientes", self.sync_all_expedientes,
+            bordered=False,
+        )
         self.sync_all_button.setObjectName("statusAction")
-        self.sync_all_button.setToolTip("Actualizar todos los expedientes SISFE cargados")
-        self.sync_all_button.clicked.connect(self.sync_all_expedientes)
-        bar.addWidget(self.sync_all_button)
+        bar.addPermanentWidget(self.sync_all_button)
         self.case_sync_label = OperationStatusIndicator("", compact=False)
-        bar.addPermanentWidget(self.case_sync_label)
+        self.case_sync_label.hide()
         self.setStatusBar(bar)
         self.statusBar().showMessage("Listo")
 
@@ -2856,7 +2856,11 @@ class MainWindow(QMainWindow):
         dialog = SisfeAccessDialog(self.store.settings.sisfe_profiles.get(professional, {}), self)
         if dialog.exec():
             values = dialog.values()
-            self.store.set_sisfe_profile(professional, values["user"], values["password"])
+            self.store.set_sisfe_profile(
+                professional, values["user"], values["password"],
+                values.get("circumscription", ""), values.get("college", ""),
+                values.get("license", ""),
+            )
             self.statusBar().showMessage("Acceso SISFE guardado para este profesional", 4500)
 
     def cases_by_radicacion(self) -> dict[str, list[Case]]:
@@ -3137,7 +3141,8 @@ class MainWindow(QMainWindow):
                         "red": "red_color",
                         "archived": "archived_color",
                     }[activity.status]
-                    item.setIcon(0, ui_icon("folder", str(policy[color_key])))
+                    unseen = int(metadata.get("Novedades SISFE sin ver", "0") or 0)
+                    item.setIcon(0, badged_icon("folder", str(policy[color_key]), unseen))
                     item.setData(0, PATH_ROLE, str(case.path))
                     state_label = {
                         "green": "Actividad normal",
@@ -3612,11 +3617,11 @@ class MainWindow(QMainWindow):
         if dialog.exec() and self.sisfe_session.active:
             self._sisfe_login_dialog = dialog
             self.update_sisfe_indicator(
-                OperationState.RUNNING,
-                "Preparando el área de expedientes SISFE…",
+                OperationState.SUCCESS,
+                "Sesión SISFE activa",
             )
         else:
-            self.update_sisfe_indicator(OperationState.ERROR, "Sesión SISFE sin confirmar")
+            self.update_sisfe_indicator(OperationState.ERROR, "SISFE desconectado")
 
     def sync_sisfe(self):
         if not self.require_case():
@@ -3667,18 +3672,59 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "No pudimos importar SISFE", str(import_error))
                 return
             self.record_case_sync(case)
+            self.record_unseen_sisfe(case, result.movements_registered)
             if self.case == case:
                 self.reload_novedades()
                 self.reload_case_files()
             self.update_sisfe_indicator(
                 OperationState.SUCCESS,
-                "Sesión manual lista para sincronizar",
+                "Sesión SISFE activa",
             )
             self.statusBar().showMessage(
                 f"SISFE sincronizado: {result.movements_registered} novedades nuevas", 5000
             )
 
-        self._sisfe_login_dialog.request_snapshot(cuij, completed)
+        self._sisfe_login_dialog.request_snapshot(
+            cuij, completed, self.known_sisfe_movement_ids(case)
+        )
+
+    @staticmethod
+    def known_sisfe_movement_ids(case: Case) -> tuple[str, ...]:
+        try:
+            with StudyDatabase(study_database_path(case.path.parent)) as database:
+                expediente = database.find_expediente_by_folder(case.path)
+                if not expediente:
+                    return ()
+                return tuple(
+                    movement.external_id
+                    for movement in database.list_recent_movements(expediente.id, None)
+                    if movement.source == "sisfe" and movement.external_id
+                )
+        except (OSError, RuntimeError, sqlite3.Error):
+            return ()
+
+    def record_unseen_sisfe(self, case: Case, count: int):
+        if not isinstance(count, int):
+            return
+        if count <= 0:
+            return
+        if self.case == case and self.work_tabs.currentIndex() == self.portal_tab_index:
+            return
+        metadata = read_case_metadata(case)
+        previous = int(metadata.get("Novedades SISFE sin ver", "0") or 0)
+        metadata["Novedades SISFE sin ver"] = str(previous + count)
+        save_case_metadata(case, metadata)
+        self.reload_cases(self.case.path if self.case else None)
+
+    def case_tab_changed(self, index: int):
+        if index != self.portal_tab_index or not self.case:
+            return
+        metadata = read_case_metadata(self.case)
+        if not metadata.get("Novedades SISFE sin ver"):
+            return
+        metadata.pop("Novedades SISFE sin ver", None)
+        save_case_metadata(self.case, metadata)
+        self.reload_cases(self.case.path)
 
     # ------------------------------------------------------------------
     # Estado del caso y de los portales
@@ -3807,7 +3853,7 @@ class MainWindow(QMainWindow):
         if not self._sync_all_queue:
             self._sync_all_active = False
             self.update_sisfe_indicator(
-                OperationState.SUCCESS, "Sesión SISFE validada"
+                OperationState.SUCCESS, "Sesión SISFE activa"
             )
             self.statusBar().showMessage("Sincronización de expedientes finalizada", 6000)
             if self.case:
@@ -3824,10 +3870,11 @@ class MainWindow(QMainWindow):
         def completed(snapshot, error):
             if not error:
                 try:
-                    self.sisfe_portal.import_snapshot(
+                    result = self.sisfe_portal.import_snapshot(
                         case, snapshot, case.path / "Documentos SISFE"
                     )
                     self.record_case_sync(case)
+                    self.record_unseen_sisfe(case, result.movements_registered)
                 except Exception as import_error:
                     self.statusBar().showMessage(
                         f"{case.name}: no se pudo importar ({import_error})", 6000
@@ -3836,7 +3883,9 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"{case.name}: {error}", 6000)
             QTimer.singleShot(0, self._sync_next_expediente)
 
-        self._sisfe_login_dialog.request_snapshot(cuij, completed)
+        self._sisfe_login_dialog.request_snapshot(
+            cuij, completed, self.known_sisfe_movement_ids(case)
+        )
 
     def case_activity_items(self, case: Case, *, show_completed: bool = False):
         metadata = read_case_metadata(case)
@@ -4282,19 +4331,22 @@ class MainWindow(QMainWindow):
                 "running": "\nDESCARGANDO · SISFE en segundo plano",
                 "failed": "\nERROR · clic derecho para reintentar",
             }.get(download_state, "")
-            judicial = self.is_judicial_movement(movement.title)
+            kind = movement.movement_kind or "otro"
+            judicial = kind in {"judicial", "cedula"} or self.is_judicial_movement(movement.title)
+            available = bool(movement.document_available)
             icon_color = (
                 "#2B7A55" if local_documents
-                else "#C9493C" if movement.source == "sisfe" and movement.external_id
+                else "#C9493C" if available
                 else "#768681"
             )
             cedula_line = "\nCÉDULA ASOCIADA" if cedula_documents else ""
             item = QListWidgetItem(
                 ui_icon(
-                    "judicial" if judicial else "party-filing",
+                    "notification" if kind == "cedula" else "judicial" if judicial else "party-filing",
                     icon_color,
                 ),
-                f"{stamp} · {'JUZGADO' if judicial else 'PARTE'}\n{movement.title}"
+                f"{stamp}\n{kind.upper() if kind != 'otro' else ('ACTUACIÓN JUDICIAL' if judicial else 'ESCRITO DE PARTE')}"
+                f" · {'JUZGADO' if judicial else 'PARTE'}\n{movement.title}"
                 f"{detail_line}{document_line}{state_line}{cedula_line}",
             )
             if "CARGO A VERIFICAR" in f"{movement.title} {interpretation}".upper():
@@ -4320,6 +4372,8 @@ class MainWindow(QMainWindow):
                     "cedula_documents": [str(path) for path in cedula_documents],
                     "download_state": download_state,
                     "judicial": judicial,
+                    "movement_kind": kind,
+                    "document_available": available,
                 },
             )
             self.novedades_list.addItem(item)
@@ -4718,6 +4772,10 @@ class MainWindow(QMainWindow):
                 )
                 return
             detail["_generate_cedula"] = True
+            detail.setdefault("_gestor_context", {}).update(
+                movement_external_id=movement.get("external_id", ""),
+                movement_source=movement.get("source", "sisfe"),
+            )
             self.start_sisfe_download(remote_case_id, detail)
 
         self._request_selected_movement_detail(continue_after_detail)
@@ -4769,7 +4827,6 @@ class MainWindow(QMainWindow):
             )
             return
         cuij = read_case_metadata(self.case).get("CUIJ", "") if self.case else ""
-        self.novedad_detail_button.setEnabled(False)
         self.update_sisfe_indicator(OperationState.RUNNING, "Consultando detalle SISFE…")
 
         def completed(detail, error):
@@ -6278,6 +6335,53 @@ class MainWindow(QMainWindow):
             if kind == "writing"
             else path.name
         )
+
+    def download_pending_pdfs(self):
+        if not self.case or not self._sisfe_login_dialog or not self.sisfe_session.active:
+            QMessageBox.information(self, "Sesión SISFE", "Iniciá la sesión SISFE primero.")
+            return
+        pending = []
+        for index in range(self.novedades_list.count()):
+            data = self.novedades_list.item(index).data(MOVEMENT_ROLE)
+            if (
+                isinstance(data, dict)
+                and data.get("source") == "sisfe"
+                and data.get("external_id")
+                and data.get("document_available")
+                and not data.get("local_documents")
+            ):
+                pending.append(data)
+        if not pending:
+            self.statusBar().showMessage("No hay PDFs pendientes de descarga", 4000)
+            return
+        cuij = str(read_case_metadata(self.case).get("CUIJ", "")).strip()
+        case = self.case
+        total = len(pending)
+
+        def next_pending():
+            if not pending:
+                self.statusBar().showMessage(
+                    f"Se preparó la descarga de {total} PDF(s) pendiente(s)", 6000
+                )
+                return
+            movement = pending.pop(0)
+            self.statusBar().showMessage(
+                f"Preparando PDFs pendientes… {total - len(pending)} de {total}"
+            )
+
+            def detail_ready(detail, error):
+                if not error and detail:
+                    context = self.capture_sisfe_context()
+                    context["case"] = case
+                    detail = dict(detail, _gestor_context=context)
+                    self.start_sisfe_download(str(detail.get("remote_case_id") or ""), detail)
+                QTimer.singleShot(0, next_pending)
+
+            self._sisfe_login_dialog.request_movement_detail(
+                cuij, str(movement["external_id"]), detail_ready
+            )
+
+        next_pending()
 
     def add_compilation_path(self, path: Path, kind: str = "document"):
         for index in range(self.compilation.count()):
