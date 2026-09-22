@@ -18,6 +18,12 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('@@VERSION@@', bootstrapper)
         self.assertIn('@@ASSEMBLY_VERSION@@', bootstrapper)
         self.assertNotRegex(bootstrapper, r"Gestor de documental 0\.\d+")
+        self.assertIn("InstallDestinationForm", bootstrapper)
+        self.assertIn("FolderBrowserDialog", bootstrapper)
+        self.assertIn("ProgressBar", bootstrapper)
+        self.assertIn("Preparando archivos", bootstrapper)
+        self.assertIn("Instalando FORO", bootstrapper)
+        self.assertNotIn("instalarÃ", bootstrapper)
         self.assertRegex(gestor_documental.__version__, r"^\d+\.\d+\.\d+$")
         self.assertFalse((ROOT / "gestor_documental" / "version_info.txt").exists())
 

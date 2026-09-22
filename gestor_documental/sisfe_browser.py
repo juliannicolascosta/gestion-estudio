@@ -338,13 +338,10 @@ def browser_sync_script(cuij: str, known_ids: tuple[str, ...] = ()) -> str:
               title: details.expCaratula || selected.expCaratula || '',
               tribunal: details.radicado || selected.radicacionActual || '',
               case_status: scalar(details.ubicacionActual) || scalar(details.expUbicacionActual) ||
-                scalar(details.tramiteInterno) || scalar(details.estadoActual) || scalar(details.estado) ||
-                scalar(details.situacionActual) || deepValue(context, ['ubicacionactual', 'expubicacionactual',
-                  'tramiteinterno', 'estadoactual', 'estadoexpediente', 'situacionactual', 'ubicacion', 'estado']),
+                scalar(selected.ubicacionActual) || scalar(selected.expUbicacionActual),
               case_status_since: scalar(details.fechaEstado) || scalar(details.fechaEstadoActual) ||
                 scalar(details.fechaUbicacionActual) || scalar(details.expFechaUbicacion) ||
-                scalar(details.fechaSituacion) || deepValue(context, ['fechaubicacionactual', 'expfechaubicacion',
-                  'fechaestado', 'fechaestadoactual', 'fechasituacion', 'fechadesde']),
+                scalar(selected.fechaUbicacionActual) || scalar(selected.expFechaUbicacion),
               movements: news.map(row => ({{
                 internal_id: String(row.id || ''),
                 title: String(row.novedad || row.tipoActuacion || 'Movimiento SISFE'),

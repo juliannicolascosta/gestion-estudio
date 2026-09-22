@@ -160,7 +160,7 @@ elseif (-not (Test-Path -LiteralPath (Join-Path $SfxSource "payload.zip"))) {
     throw "No existe un paquete preparado para reutilizar."
 }
 
-$Installer = [IO.Path]::GetFullPath((Join-Path $OutputDirectory "Gestor de documental Setup $Version.exe"))
+$Installer = [IO.Path]::GetFullPath((Join-Path $OutputDirectory "FORO Setup $Version.exe"))
 $CscCandidates = @(
     (Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"),
     (Join-Path $env:WINDIR "Microsoft.NET\Framework\v4.0.30319\csc.exe")
@@ -178,6 +178,7 @@ Set-Content -LiteralPath $BootstrapSource -Value $BootstrapContent -Encoding UTF
     "/out:$Bootstrapper" `
     "/win32icon:$(Join-Path $Project 'gestor_documental\foro.ico')" `
     /reference:System.Windows.Forms.dll `
+    /reference:System.Drawing.dll `
     $BootstrapSource
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Bootstrapper)) {
     throw "No se pudo compilar el iniciador del instalador."

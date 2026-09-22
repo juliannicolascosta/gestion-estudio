@@ -7,7 +7,7 @@
 )
 
 $ErrorActionPreference = "Stop"
-$ProductName = "Gestor de documental"
+$ProductName = "FORO"
 $Version = "@@VERSION@@"
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Payload = Join-Path $SourceDir "payload.zip"
@@ -94,9 +94,9 @@ function New-GestorShortcut([string]$ShortcutPath) {
 }
 
 try {
-    "[$(Get-Date -Format s)] Inicio de la instalacion $Version" | Set-Content -LiteralPath $LogFile -Encoding UTF8
+    "[$(Get-Date -Format s)] Inicio de la instalación $Version" | Set-Content -LiteralPath $LogFile -Encoding UTF8
     if (-not (Test-Path -LiteralPath $Payload -PathType Leaf)) {
-        throw "No se encontro el contenido del instalador."
+        throw "No se encontró el contenido del instalador."
     }
 
     New-Item -ItemType Directory -Path $InstallParent, $StagingDir -Force | Out-Null
@@ -112,7 +112,7 @@ try {
     $StagedPythonw = Join-Path $StagingDir "runtime\pythonw.exe"
     $StagedRunScript = Join-Path $StagingDir "app\run.py"
     if (-not (Test-Path -LiteralPath $StagedPythonw) -or -not (Test-Path -LiteralPath $StagedRunScript)) {
-        throw "La instalacion no contiene todos los archivos necesarios."
+        throw "La instalación no contiene todos los archivos necesarios."
     }
 
     Stop-GestorProcess
@@ -143,7 +143,7 @@ try {
         New-Item -Path $UninstallKey -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name DisplayName -Value $ProductName -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name DisplayVersion -Value $Version -PropertyType String -Force | Out-Null
-        New-ItemProperty -Path $UninstallKey -Name Publisher -Value "Gestor de documental" -PropertyType String -Force | Out-Null
+        New-ItemProperty -Path $UninstallKey -Name Publisher -Value "FORO" -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name InstallLocation -Value $InstallDir -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name DisplayIcon -Value (Join-Path $InstallDir "app\gestor_documental\foro.ico") -PropertyType String -Force | Out-Null
         New-ItemProperty -Path $UninstallKey -Name UninstallString -Value $UninstallCommand -PropertyType String -Force | Out-Null
@@ -154,7 +154,7 @@ try {
         New-ItemProperty -Path $UninstallKey -Name NoRepair -Value 1 -PropertyType DWord -Force | Out-Null
     }
 
-    "[$(Get-Date -Format s)] Instalacion finalizada en $InstallDir" | Add-Content -LiteralPath $LogFile -Encoding UTF8
+    "[$(Get-Date -Format s)] Instalación finalizada en $InstallDir" | Add-Content -LiteralPath $LogFile -Encoding UTF8
     if (-not $NoLaunch) {
         Start-Process -FilePath $Pythonw -ArgumentList ('"' + $RunScript + '"') -WorkingDirectory (Join-Path $InstallDir "app")
     }
@@ -180,7 +180,7 @@ catch {
     if (-not $Quiet) {
         Add-Type -AssemblyName PresentationFramework
         [System.Windows.MessageBox]::Show(
-            "No pudimos completar la instalacion.`n`n$($_.Exception.Message)`n`nRegistro: $LogFile",
+            "No pudimos completar la instalación.`n`n$($_.Exception.Message)`n`nRegistro: $LogFile",
             $ProductName,
             "OK",
             "Error"

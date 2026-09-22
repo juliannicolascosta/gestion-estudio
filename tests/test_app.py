@@ -78,29 +78,30 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(window.professional_combo.itemText(0), ADD_PROFESSIONAL_LABEL)
             self.assertEqual(
                 window.professional_combo.currentText(),
-                store.settings.current_professional,
+                ADD_PROFESSIONAL_LABEL,
             )
             self.assertFalse(window.professional_settings_button.icon().isNull())
             settings_actions = [action.text() for action in window.professional_settings_button.menu().actions()]
-            self.assertIn("Configuración general…", settings_actions)
-            self.assertIn("Crear respaldo del Estudio…", settings_actions)
-            self.assertIn("Restaurar respaldo del Estudio…", settings_actions)
-            self.assertEqual(window.work_tabs.count(), 3)
+            self.assertEqual(settings_actions, [
+                "Configuración",
+                "Crear copia de seguridad del Estudio",
+                "Restaurar copia de seguridad del Estudio",
+                "Importar casos",
+                "Sincronizar todos los expedientes",
+            ])
+            self.assertEqual(window.work_tabs.count(), 2)
             self.assertEqual(window.work_tabs.tabText(window.files_tab_index), "Archivos")
             self.assertEqual(window.activity_tab_index, -1)
             self.assertEqual(
                 window.work_tabs.tabText(window.portal_tab_index),
                 "Expediente · 0",
             )
-            self.assertEqual(
-                window.work_tabs.tabText(window.pending_tab_index),
-                "Pendientes · 0",
-            )
+            self.assertEqual(window.pending_tab_index, -1)
             self.assertIs(window.compilation_card.parentWidget(), window.presentation_column)
             self.assertIs(window.presentation_column.parentWidget(), window.workspace_splitter)
             self.assertIs(window.workspace_splitter.widget(0), window.work_tabs)
             self.assertEqual(window.presentation_column.minimumWidth(), 250)
-            self.assertLess(window._visible_workspace_sizes[1], 350)
+            self.assertGreaterEqual(window._visible_workspace_sizes[1], 400)
             self.assertEqual(window.compilation_count.text(), "0 elementos")
             self.assertEqual(window.sisfe_status.state, OperationState.IDLE)
             self.assertIn("expediente", window.search.placeholderText().lower())
@@ -158,11 +159,12 @@ class AppSmokeTests(unittest.TestCase):
                 )
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
+            store.add_professional("Dra. Ana Pérez")
             window = MainWindow(store)
             window.set_case(case)
 
             self.assertEqual(window.activity_list.count(), 2)
-            self.assertEqual(window.work_tabs.count(), 3)
+            self.assertEqual(window.work_tabs.count(), 2)
             pending_item = next(
                 window.activity_list.item(index)
                 for index in range(window.activity_list.count())
@@ -170,7 +172,7 @@ class AppSmokeTests(unittest.TestCase):
             )
             window.activity_list.setCurrentItem(pending_item)
             window.open_selected_activity()
-            self.assertEqual(window.work_tabs.currentIndex(), window.pending_tab_index)
+            self.assertEqual(window.work_tabs.currentIndex(), window.files_tab_index)
             self.assertEqual(window.pending_documents_list.currentItem().text(), "Recibo de sueldo")
 
             portal_item = next(
@@ -244,7 +246,7 @@ class AppSmokeTests(unittest.TestCase):
                 dialog_class.return_value.selected_data.return_value = selected_data
                 window.open_study_activity()
             self.assertEqual(window.case.path, second.path)
-            self.assertEqual(window.work_tabs.currentIndex(), window.pending_tab_index)
+            self.assertEqual(window.work_tabs.currentIndex(), window.files_tab_index)
             window.close()
 
     def test_activity_suggests_matching_pending_file_and_opens_it(self):
@@ -301,6 +303,7 @@ class AppSmokeTests(unittest.TestCase):
             case = create_case(study, "Caso")
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
+            store.add_professional("Profesional")
             window = MainWindow(store)
             window.set_case(case)
             with patch.object(
@@ -402,6 +405,7 @@ class AppSmokeTests(unittest.TestCase):
             study.mkdir()
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
+            store.add_professional("Profesional")
             window = MainWindow(store)
             window.show()
             self.app.processEvents()
@@ -470,10 +474,7 @@ class AppSmokeTests(unittest.TestCase):
             window.reload_cases(case.path)
 
             self.assertEqual(window.pending_documents_list.count(), 2)
-            self.assertEqual(
-                window.work_tabs.tabText(window.pending_tab_index),
-                "Pendientes · 2",
-            )
+            self.assertEqual(window.pending_tab_index, -1)
             with patch(
                 "gestor_documental.app.QInputDialog.getText",
                 return_value=("Partida de nacimiento", True),
@@ -512,7 +513,6 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertEqual(window.pending_documents_list.count(), 3)
             self.assertEqual(window.pending_documents_list.item(0).checkState(), Qt.CheckState.Checked)
-            self.assertEqual(window.work_tabs.tabText(window.pending_tab_index), "Pendientes · 2")
 
             window.pending_documents_list.setCurrentRow(2)
             window.move_pending_document(-1)
@@ -540,6 +540,7 @@ class AppSmokeTests(unittest.TestCase):
             case = create_case(study, "Caso")
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
+            store.add_professional("Profesional")
             store.set_sisfe_profile("Profesional", "Rosario", "Abogados", "12345", "clave")
             window = MainWindow(store)
             window.reload_cases(case.path)
@@ -793,9 +794,10 @@ class AppSmokeTests(unittest.TestCase):
                     "dni": "30111222",
                     "license_santa_fe": "L 123 F 45",
                 }
-                window.professional_combo.setCurrentIndex(0)
+                window.add_professional()
 
-            self.assertEqual(window.professional_combo.itemText(0), ADD_PROFESSIONAL_LABEL)
+            self.assertEqual(window.professional_combo.itemText(0), "Dra. Ana Pérez")
+            self.assertEqual(window.professional_combo.itemText(1), ADD_PROFESSIONAL_LABEL)
             self.assertEqual(window.professional_combo.currentText(), "Dra. Ana Pérez")
             self.assertEqual(store.settings.current_professional, "Dra. Ana Pérez")
             self.assertEqual(
@@ -1186,6 +1188,7 @@ class AppSmokeTests(unittest.TestCase):
             study.mkdir()
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
+            store.add_professional("Profesional")
             window = MainWindow(store)
 
             window.choose_presentation_limit(20 * 1024 * 1024)
@@ -1212,8 +1215,8 @@ class AppSmokeTests(unittest.TestCase):
             window.reload_cases(case.path)
 
             self.assertEqual(window.sisfe_status.state, OperationState.IDLE)
-            self.assertIn("sin validar", window.sisfe_indicator.toolTip().casefold())
-            self.assertEqual(window.sync_all_button.text(), "")
+            self.assertIn("sin confirmar", window.sisfe_indicator.toolTip().casefold())
+            self.assertEqual(window.sync_all_button.text(), "Sincronizar todos")
             self.assertEqual(
                 window.sync_all_button.toolTip(), "Sincronizar todos los expedientes"
             )
@@ -1244,6 +1247,30 @@ class AppSmokeTests(unittest.TestCase):
             window.work_tabs.setCurrentIndex(window.portal_tab_index)
             self.app.processEvents()
             self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(case))
+            window.close()
+
+    def test_case_badges_use_each_case_metadata_and_can_all_be_marked_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            first = create_case(study, "Primero")
+            second = create_case(study, "Segundo")
+            save_case_metadata(first, {"Novedades SISFE sin ver": "120"})
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            counts = []
+
+            def capture(name, color, count, size=24):
+                counts.append(count)
+                from gestor_documental.icons import ui_icon
+                return ui_icon(name, color, size)
+
+            with patch("gestor_documental.app.badged_icon", side_effect=capture):
+                window = MainWindow(store)
+            self.assertEqual(sorted(counts), [0, 120])
+            window.mark_all_sisfe_news_read()
+            self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(first))
+            self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(second))
             window.close()
 
     def test_sisfe_movement_shows_its_existing_local_document_without_copying_it(self):

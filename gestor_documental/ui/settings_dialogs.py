@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -73,12 +74,12 @@ class ApplicationSettingsDialog(QDialog):
     def __init__(self, summary: dict[str, object], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Configuración")
-        self.setMinimumSize(680, 520)
+        self.setMinimumSize(720, 540)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.addLayout(_heading(
             "Configuración del Gestor",
-            "Profesionales, modelos de escritos y firma reunidos en un solo lugar.",
+            "Profesionales, modelos y preferencias del Estudio en un solo lugar.",
         ))
         self.tabs = QTabWidget()
         self.professional_summary = QLabel()
@@ -90,17 +91,16 @@ class ApplicationSettingsDialog(QDialog):
                 (
                     ("Añadir profesional", "add_professional"),
                     ("Editar perfil actual", "edit_professional"),
-                    ("Acceso MEV", "configure_mev"),
                     ("Acceso SISFE", "configure_sisfe"),
                 ),
             ),
-            "Profesionales",
+            "Profesional",
         )
         self.tabs.addTab(
             self._action_tab(
                 self.models_summary,
                 (
-                    ("Agregar modelo Word", "add_model"),
+                    ("Crear modelo nuevo", "add_model"),
                     ("Abrir carpeta de modelos", "open_models"),
                     ("Modificar modelo base", "open_base_template"),
                     ("Ver campos automáticos", "show_template_variables"),
@@ -111,13 +111,10 @@ class ApplicationSettingsDialog(QDialog):
         )
         self.tabs.addTab(
             self._action_tab(
-                self.signer_summary,
-                (
-                    ("Elegir aplicación de firma", "configure_signer"),
-                    ("Elegir carpeta de archivos firmados", "configure_signer_output"),
-                ),
+                QLabel("Plazos y criterios visuales del árbol de casos."),
+                (("Configurar semáforo", "configure_case_activity"),),
             ),
-            "Firmador",
+            "Semáforo de casos",
         )
         self.tabs.addTab(
             self._action_tab(
@@ -128,10 +125,14 @@ class ApplicationSettingsDialog(QDialog):
         )
         self.tabs.addTab(
             self._action_tab(
-                QLabel("Acceso de Matriculados y contraseña protegida por Windows."),
-                (("Configurar acceso SISFE", "configure_sisfe"),),
+                self.signer_summary,
+                (
+                    ("Elegir certificado al firmar", "choose_certificate"),
+                    ("Elegir aplicación de firma", "configure_signer"),
+                    ("Elegir carpeta de archivos firmados", "configure_signer_output"),
+                ),
             ),
-            "SISFE",
+            "Firma digital",
         )
         layout.addWidget(self.tabs, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -158,9 +159,12 @@ class ApplicationSettingsDialog(QDialog):
 
     def refresh_summary(self, summary: dict[str, object]):
         professional = str(summary.get("professional") or "Sin profesional seleccionado")
+        professionals = [str(value) for value in summary.get("professionals", [])]
         profile_fields = int(summary.get("profile_fields") or 0)
         self.professional_summary.setText(
-            f"Profesional actual: {professional}\nDatos completos: {profile_fields} campos."
+            f"Profesional actual: {professional}\n"
+            f"Perfiles: {', '.join(professionals) if professionals else 'ninguno'}\n"
+            f"Datos completos: {profile_fields} campos."
         )
         models_count = int(summary.get("models_count") or 0)
         models_path = str(summary.get("models_path") or "")
@@ -173,6 +177,37 @@ class ApplicationSettingsDialog(QDialog):
         self.signer_summary.setText(
             f"Firmador externo: {signer}\nArchivos firmados: {signer_output}"
         )
+
+
+class RadicacionesDialog(QDialog):
+    def __init__(self, radicaciones: dict[str, int], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Radicaciones")
+        self.setMinimumSize(520, 400)
+        layout = QVBoxLayout(self)
+        layout.addLayout(_heading(
+            "Radicaciones",
+            "Seleccioná una radicación para renombrarla en todos los casos que la utilizan.",
+        ))
+        self.list = QListWidget()
+        for name in sorted(radicaciones, key=str.casefold):
+            self.list.addItem(f"{name}  ·  {radicaciones[name]} caso(s)")
+            self.list.item(self.list.count() - 1).setData(256, name)
+        layout.addWidget(self.list, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.rename_button = buttons.addButton("Renombrar", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.rename_button.setEnabled(False)
+        self.list.itemSelectionChanged.connect(
+            lambda: self.rename_button.setEnabled(self.list.currentItem() is not None)
+        )
+        self.rename_button.clicked.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    @property
+    def selected_name(self) -> str:
+        item = self.list.currentItem()
+        return str(item.data(256)) if item else ""
 
 
 class ActivitySettingsDialog(QDialog):

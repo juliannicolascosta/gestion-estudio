@@ -200,6 +200,7 @@ from .ui.settings_dialogs import (
     ApplicationSettingsDialog,
     NamingPatternDialog,
     ProfessionalProfileDialog,
+    RadicacionesDialog,
     SisfeAccessDialog,
 )
 from .ui.sisfe import SisfeCaseBrowserDialog, SisfeLoginDialog
@@ -273,6 +274,7 @@ QLineEdit#metaValue { background: transparent; border: 0; border-bottom: 1px sol
 QLineEdit#metaValue:focus { border-bottom: 1px solid #698D05; }
 QComboBox#professional { background: #23483C; color: #F9F4E9; border: 1px solid #3F6455; min-width: 180px; padding: 6px 9px; }
 QComboBox#professional::drop-down { border: 0; width: 18px; }
+QComboBox#professional QAbstractItemView { background: #FFFFFF; color: #2A332B; border: 1px solid #D5D0C0; selection-background-color: #E5EEE8; selection-color: #1F4034; outline: 0; }
 QPushButton { background: #FFFFFF; color: #2A332B; border: 1px solid #D5D0C0; border-radius: 6px; padding: 8px 12px; font-weight: 600; }
 QPushButton:hover { background: #FBF9F3; border-color: #B6AF9A; }
 QPushButton:disabled { color: #A6AFA4; border-color: #E6E1D3; }
@@ -1688,7 +1690,7 @@ class MainWindow(QMainWindow):
         self._restoring_layout = True
         self._sync_all_queue: list[Case] = []
         self._sync_all_active = False
-        self._visible_workspace_sizes = [920, 300]
+        self._visible_workspace_sizes = [780, 440]
         self._layout_save_timer = QTimer(self)
         self._layout_save_timer.setSingleShot(True)
         self._layout_save_timer.setInterval(350)
@@ -1771,7 +1773,9 @@ class MainWindow(QMainWindow):
         self.professional_combo.setToolTip(
             "Profesional activo. Define ubicaciones, perfil y accesos a los portales."
         )
-        self.professional_combo.currentTextChanged.connect(self.professional_changed)
+        self.professional_combo.activated.connect(
+            lambda _index: self.professional_changed(self.professional_combo.currentText())
+        )
         layout.addWidget(self.professional_combo, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.professional_settings_button = icon_button(
@@ -1782,19 +1786,11 @@ class MainWindow(QMainWindow):
         )
         self.professional_settings_button.setObjectName("topIcon")
         professional_menu = QMenu(self.professional_settings_button)
-        professional_menu.addAction("Configuración general…", self.configure_application)
-        professional_menu.addAction("Configurar semáforo de casos…", self.configure_case_activity)
-        professional_menu.addSeparator()
-        professional_menu.addAction("Importar casos…", self.import_cases_from_spreadsheet)
-        professional_menu.addSeparator()
-        professional_menu.addAction(
-            "Sincronizar todos los expedientes…", self.sync_all_expedientes
-        )
-        professional_menu.addSeparator()
-        professional_menu.addAction("Crear respaldo del Estudio…", self.create_active_study_backup)
-        professional_menu.addAction("Restaurar respaldo del Estudio…", self.restore_study_from_backup)
-        professional_menu.addSeparator()
-        professional_menu.addAction("Restablecer distribución", self.reset_layout)
+        professional_menu.addAction("Configuración", self.configure_application)
+        professional_menu.addAction("Crear copia de seguridad del Estudio", self.create_active_study_backup)
+        professional_menu.addAction("Restaurar copia de seguridad del Estudio", self.restore_study_from_backup)
+        professional_menu.addAction("Importar casos", self.import_cases_from_spreadsheet)
+        professional_menu.addAction("Sincronizar todos los expedientes", self.sync_all_expedientes)
         self.professional_settings_button.setMenu(professional_menu)
         layout.addWidget(self.professional_settings_button, 0, Qt.AlignmentFlag.AlignVCenter)
         return top
@@ -1966,9 +1962,8 @@ class MainWindow(QMainWindow):
         self.portal_tab_index = self.work_tabs.addTab(
             self._build_expediente_tab(), ui_icon("file-text", "#2B5748"), "Expediente · 0"
         )
-        self.pending_tab_index = self.work_tabs.addTab(
-            self._build_pending_tab(), ui_icon("check", "#2B5748"), "Pendientes · 0"
-        )
+        self._pending_page = self._build_pending_tab()
+        self.pending_tab_index = -1
         # Se conserva la lógica interna para accesos globales y compatibilidad,
         # pero Actividad ya no ocupa una pestaña del caso.
         self._activity_page = self._build_activity_tab()
@@ -2030,8 +2025,6 @@ class MainWindow(QMainWindow):
             self.begin_metadata_edit,
             bordered=True,
         )
-        title_row.addWidget(self.edit_metadata_button)
-
         self.cancel_metadata_button = QPushButton("Cancelar")
         self.cancel_metadata_button.clicked.connect(self.cancel_metadata_edit)
         self.cancel_metadata_button.hide()
@@ -2084,6 +2077,12 @@ class MainWindow(QMainWindow):
             if previous_edit is not None:
                 QWidget.setTabOrder(previous_edit, edit)
             previous_edit = edit
+        fields_grid.addWidget(
+            self.edit_metadata_button,
+            1,
+            len(VISIBLE_CASE_FIELDS),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
         layout.addWidget(fields_widget)
 
         # Radicación: texto libre que además se autocompleta con los valores
@@ -2542,18 +2541,21 @@ class MainWindow(QMainWindow):
     def _build_status_bar(self):
         bar = QStatusBar()
         bar.setSizeGripEnabled(False)
-        self.sisfe_indicator = OperationStatusIndicator("SISFE sin validar", compact=True)
+        self.sisfe_indicator = OperationStatusIndicator("SISFE sin confirmar", compact=True)
         self.sisfe_status = self.sisfe_indicator
         self.sisfe_indicator.setToolTip(
-            "SISFE sin validar. Abrí y confirmá la sesión del profesional."
+            "SISFE sin confirmar. Abrí y confirmá la sesión del profesional."
         )
         self.sisfe_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sisfe_indicator.mousePressEvent = lambda _event: self.open_sisfe_session()
-        bar.addPermanentWidget(self.sisfe_indicator)
-        self.sync_all_button = icon_button(
-            "refresh", "Sincronizar todos los expedientes", self.sync_all_expedientes,
-            bordered=False,
-        )
+        bar.addWidget(self.sisfe_indicator)
+        self.status_center = QLabel("")
+        self.status_center.setObjectName("muted")
+        bar.addWidget(self.status_center, 1)
+        self.sync_all_button = QPushButton("Sincronizar todos")
+        decorate_button(self.sync_all_button, "refresh")
+        self.sync_all_button.setToolTip("Sincronizar todos los expedientes")
+        self.sync_all_button.clicked.connect(self.sync_all_expedientes)
         self.sync_all_button.setObjectName("statusAction")
         bar.addPermanentWidget(self.sync_all_button)
         self.case_sync_label = OperationStatusIndicator("", compact=False)
@@ -2707,7 +2709,7 @@ class MainWindow(QMainWindow):
         self.set_compilation_panel_visible(self.presentation_column.isHidden())
 
     def reset_layout(self):
-        self._visible_workspace_sizes = [920, 300]
+        self._visible_workspace_sizes = [780, 440]
         self.body_splitter.setSizes([250, 1200])
         self.workspace_splitter.setSizes(self._visible_workspace_sizes)
         self.presentation_column.setSizes([520, 300])
@@ -2739,6 +2741,7 @@ class MainWindow(QMainWindow):
         signer_output = self.store.settings.signer_output_dir
         return {
             "professional": professional,
+            "professionals": list(self.store.settings.professionals),
             "profile_fields": sum(bool(str(value).strip()) for value in profile.values()),
             "models_count": len(list_models(self.store.models_dir)),
             "models_path": self.store.models_dir,
@@ -2754,6 +2757,7 @@ class MainWindow(QMainWindow):
             "edit_professional": self.edit_current_professional,
             "configure_mev": self.configure_mev_profile,
             "configure_sisfe": self.configure_sisfe_profile,
+            "configure_case_activity": self.configure_case_activity,
             "configure_radicaciones": self.configure_radicaciones,
             "add_model": self.add_writing_model,
             "open_models": self.open_models_folder,
@@ -2762,6 +2766,7 @@ class MainWindow(QMainWindow):
             "configure_naming": self.configure_naming_pattern,
             "configure_signer": self.configure_signer,
             "configure_signer_output": self.configure_signer_output,
+            "choose_certificate": self.preview_signing_certificate,
         }
 
         def run_action(name: str):
@@ -2787,10 +2792,12 @@ class MainWindow(QMainWindow):
     def reload_professionals(self):
         self.professional_combo.blockSignals(True)
         self.professional_combo.clear()
-        self.professional_combo.addItem(ADD_PROFESSIONAL_LABEL)
         self.professional_combo.addItems(self.store.settings.professionals)
+        self.professional_combo.addItem(ADD_PROFESSIONAL_LABEL)
         index = self.professional_combo.findText(self.store.settings.current_professional)
-        self.professional_combo.setCurrentIndex(max(1, index))
+        self.professional_combo.setCurrentIndex(
+            index if index >= 0 else self.professional_combo.count() - 1
+        )
         self.professional_combo.blockSignals(False)
 
     def professional_changed(self, name: str):
@@ -2866,6 +2873,13 @@ class MainWindow(QMainWindow):
             )
             self.statusBar().showMessage("Acceso SISFE guardado para este profesional", 4500)
 
+    def preview_signing_certificate(self):
+        certificate = self.choose_signing_certificate()
+        if certificate:
+            self.statusBar().showMessage(
+                f"Certificado disponible: {certificate.summary}", 5000
+            )
+
     def cases_by_radicacion(self) -> dict[str, list[Case]]:
         grouped: dict[str, list[Case]] = {}
         for root in self.store.settings.study_roots:
@@ -2884,12 +2898,12 @@ class MainWindow(QMainWindow):
                 self, "Radicaciones", "Todavía no hay radicaciones cargadas en los casos."
             )
             return
-        current, accepted = QInputDialog.getItem(
-            self, "Radicaciones", "Elegí una radicación para revisar:",
-            sorted(grouped, key=str.casefold), 0, False,
+        dialog = RadicacionesDialog(
+            {name: len(cases) for name, cases in grouped.items()}, self
         )
-        if not accepted or not current:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
+        current = dialog.selected_name
         box = QMessageBox(self)
         box.setWindowTitle("Administrar radicación")
         box.setText(f"{current}\n\nUsada en {len(grouped[current])} caso(s).")
@@ -3116,9 +3130,9 @@ class MainWindow(QMainWindow):
                             _comparable_text(radicacion), radicacion
                         )
                     client_label, client_key = self.case_client_identity(metadata)
-                    visible_cases.append((case, activity, client_label, client_key))
+                    visible_cases.append((case, activity, client_label, client_key, metadata))
 
-                grouped: dict[str, list[tuple[Case, object, str, str]]] = {}
+                grouped: dict[str, list[tuple[Case, object, str, str, dict[str, str]]]] = {}
                 for entry in visible_cases:
                     if entry[3]:
                         grouped.setdefault(entry[3], []).append(entry)
@@ -3136,7 +3150,7 @@ class MainWindow(QMainWindow):
                     root_item.addChild(parent)
                     parent.setExpanded(True)
                     client_parents[client_key] = parent
-                for case, activity, _client_label, client_key in visible_cases:
+                for case, activity, _client_label, client_key, metadata in visible_cases:
                     item = QTreeWidgetItem([case.name])
                     color_key = {
                         "green": "green_color",
@@ -3270,7 +3284,30 @@ class MainWindow(QMainWindow):
                 "Quitar del Gestor…",
                 lambda: self.remove_study_root(root_path),
             )
+        menu.addSeparator()
+        menu.addAction(
+            "Marcar todas las novedades como leídas",
+            self.mark_all_sisfe_news_read,
+        )
         menu.exec(self.case_tree.mapToGlobal(point))
+
+    def mark_all_sisfe_news_read(self):
+        changed = 0
+        for root in self.store.settings.study_roots:
+            if not root.is_dir():
+                continue
+            for case in list_cases(root):
+                metadata = read_case_metadata(case)
+                if metadata.pop("Novedades SISFE sin ver", None) is not None:
+                    save_case_metadata(case, metadata)
+                    changed += 1
+        self.reload_cases(self.case.path if self.case else None)
+        self.statusBar().showMessage(
+            "Todas las novedades quedaron marcadas como leídas"
+            if changed
+            else "No había novedades sin leer",
+            4000,
+        )
 
     def toggle_case_archived(self, case: Case, archived: bool):
         try:
@@ -3981,7 +4018,7 @@ class MainWindow(QMainWindow):
         self.work_tabs.setCurrentIndex(
             self.portal_tab_index if target == "portal"
             else self.files_tab_index if target == "files"
-            else self.pending_tab_index
+            else self.files_tab_index
         )
 
     def reload_activity(self):
@@ -4262,7 +4299,7 @@ class MainWindow(QMainWindow):
         if not isinstance(data, dict):
             return
         if data.get("target") == "pending":
-            self.work_tabs.setCurrentIndex(self.pending_tab_index)
+            self.work_tabs.setCurrentIndex(self.files_tab_index)
             expected = str(data.get("title", "")).casefold()
             for index in range(self.pending_documents_list.count()):
                 item = self.pending_documents_list.item(index)
@@ -4317,7 +4354,7 @@ class MainWindow(QMainWindow):
             since = _format_sisfe_date(raw_since) if raw_since else ""
             raw_synced_at = str(metadata.get("Última sincronización SISFE", "")).strip()
             synced_at = _format_sisfe_date(raw_synced_at) if raw_synced_at else ""
-            status_text = status or "todavía no informado por SISFE"
+            status_text = status or "Sin información"
             since_text = f" · desde {since}" if since else ""
             synced_text = f"\nÚltima sincronización: {synced_at}" if synced_at else ""
             self.portal_case_status.setText(
@@ -4447,10 +4484,11 @@ class MainWindow(QMainWindow):
             else f"{pending_count} pendientes · {received_count} recibidos"
         )
         if hasattr(self, "work_tabs"):
-            self.work_tabs.setTabText(
-                self.pending_tab_index,
-                f"Pendientes · {pending_count}",
-            )
+            if self.pending_tab_index >= 0:
+                self.work_tabs.setTabText(
+                    self.pending_tab_index,
+                    f"Pendientes · {pending_count}",
+                )
         self.update_pending_document_actions()
         self.reload_activity()
 
@@ -4491,7 +4529,7 @@ class MainWindow(QMainWindow):
             return
         current.append(normalized)
         self.save_pending_documents(current)
-        self.work_tabs.setCurrentIndex(self.pending_tab_index)
+        self.work_tabs.setCurrentIndex(self.files_tab_index)
 
     def complete_pending_documents(self):
         selected = self.pending_documents_list.selectedItems()
@@ -5661,7 +5699,7 @@ class MainWindow(QMainWindow):
             return
         has_data = any(str(value).strip() for value in self._loaded_metadata.values())
         self.case_badge.setText(
-            f"{self.case.path.parent.name.upper()} · DATOS CARGADOS"
+            self.case.path.parent.name.upper()
             if has_data
             else f"{self.case.path.parent.name.upper()} · SIN DATOS"
         )

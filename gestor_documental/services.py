@@ -231,8 +231,6 @@ class SettingsStore:
             for item in payload.get("professionals", [])
             if str(item).strip()
         ]
-        if not professionals:
-            professionals = ["Profesional"]
         raw_profiles = payload.get("professional_profiles", {})
         professional_profiles = {
             repair_text(str(name)): {
@@ -247,7 +245,7 @@ class SettingsStore:
             professional_profiles.setdefault(name, {"name": name})
         current = repair_text(str(payload.get("current_professional", "")).strip())
         if current not in professionals:
-            current = professionals[0]
+            current = professionals[0] if professionals else ""
         roots_payload = payload.get("study_roots", [])
         roots = [
             Path(value)

@@ -239,7 +239,7 @@ class ServiceTests(unittest.TestCase):
             app_dir = Path(directory) / "app"
             study = Path(directory) / "Estudio"
             store = SettingsStore(app_dir)
-            self.assertEqual(store.settings.current_professional, "Profesional")
+            self.assertEqual(store.settings.current_professional, "")
             store.set_study_root(study)
             store.add_professional("Dra. Ana Pérez")
             store.save_professional_profile(

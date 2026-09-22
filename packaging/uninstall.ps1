@@ -5,13 +5,13 @@ param(
 )
 
 $ErrorActionPreference = "SilentlyContinue"
-$ProductName = "Gestor de documental"
+$ProductName = "FORO"
 $InstallDir = $PSScriptRoot
 
 if (-not $Quiet) {
     Add-Type -AssemblyName PresentationFramework
     $Answer = [System.Windows.MessageBox]::Show(
-        "Se quitara el programa. Los casos, modelos personalizados y configuraciones se conservaran.",
+        "Se quitará FORO. Los casos, modelos personalizados y configuraciones se conservarán.",
         "Desinstalar $ProductName",
         "YesNo",
         "Question"
@@ -41,7 +41,7 @@ Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile", "-E
 
 if (-not $Quiet) {
     [System.Windows.MessageBox]::Show(
-        "Gestor de documental se desinstalo. Los datos de trabajo se conservaron.",
+        "FORO se desinstaló. Los datos de trabajo se conservaron.",
         $ProductName,
         "OK",
         "Information"

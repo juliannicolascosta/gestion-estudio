@@ -52,7 +52,7 @@ class OperationStatusIndicator(QWidget):
         self._state = state
         icon_name, color = _PRESENTATION[state]
         if self._compact:
-            icon_name = "refresh" if state is OperationState.RUNNING else "external"
+            icon_name = "refresh" if state is OperationState.RUNNING else "dot"
         self.icon_label.setPixmap(ui_icon(icon_name, color, 18).pixmap(QSize(18, 18)))
         self.message_label.setText(text)
         self.setToolTip(text)

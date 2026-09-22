@@ -51,7 +51,7 @@ class SettingsDialogTests(unittest.TestCase):
 
         self.assertEqual(
             [dialog.tabs.tabText(index) for index in range(dialog.tabs.count())],
-            ["Profesionales", "Modelos", "Firmador", "Radicaciones", "SISFE"],
+            ["Profesional", "Modelos", "Semáforo de casos", "Radicaciones", "Firma digital"],
         )
         self.assertIn("Ana Pérez", dialog.professional_summary.text())
         self.assertIn("3", dialog.models_summary.text())
