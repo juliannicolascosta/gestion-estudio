@@ -2442,6 +2442,7 @@ class MainWindow(QMainWindow):
 
         self.compilation = CompilationList()
         self.compilation.filesDropped.connect(self.handle_compilation_drop)
+        self.compilation.dropRejected.connect(self.notify_unsupported_file_drop)
         self.compilation.removeRequested.connect(self.remove_from_compilation)
         self.compilation.openRequested.connect(open_file)
         self.compilation.orderChanged.connect(self.update_compilation_count)
@@ -4099,6 +4100,7 @@ class MainWindow(QMainWindow):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
+        self._sisfe_login_dialog.prepare_background_sync()
         self._sync_all_cases = list(cases)
         self._sync_all_index = 0
         task = LongTask("Sincronizando expedientes", len(cases))
@@ -6208,6 +6210,19 @@ class MainWindow(QMainWindow):
     def import_paths(self, paths: list[Path], add_to_compilation: bool = False) -> list[Path]:
         if not self.require_case():
             return []
+        try:
+            case_root = self.case.path.resolve(strict=True)
+            destination = (self.case_directory or self.case.path).resolve(strict=True)
+            destination.relative_to(case_root)
+            if not destination.is_dir():
+                raise ValueError
+        except (OSError, RuntimeError, ValueError):
+            QMessageBox.critical(
+                self,
+                "No pudimos agregar el archivo",
+                "La carpeta de destino no pertenece al caso actual.",
+            )
+            return []
         imported = []
         for source in paths:
             try:
@@ -6222,22 +6237,30 @@ class MainWindow(QMainWindow):
                     )
                     if not accepted or not name.strip():
                         continue
-                    destination = self.case_directory or self.case.path
+                    if Path(name.strip()).name != name.strip() or ".." in Path(name.strip()).parts:
+                        raise ValueError("El nombre de la carpeta no es seguro.")
                     target = import_directory(Case(destination), source, name)
                 elif source.is_file():
                     dialog = ImportFileDialog(source, self)
                     if not dialog.exec():
                         continue
-                    destination = self.case_directory or self.case.path
+                    normalized_name = dialog.normalized_name.strip()
+                    if (
+                        not normalized_name
+                        or Path(normalized_name).name != normalized_name
+                        or ".." in Path(normalized_name).parts
+                    ):
+                        raise ValueError("El nombre del archivo no es seguro.")
                     target = import_file(
                         Case(destination),
                         source,
-                        dialog.normalized_name,
+                        normalized_name,
                         dialog.convert_to_pdf,
                         dialog.selected_image_mode,
                     )
                 else:
                     continue
+                target.resolve(strict=True).relative_to(case_root)
                 imported.append(target)
                 if add_to_compilation:
                     self.add_paths_to_compilation([target])
@@ -6251,6 +6274,13 @@ class MainWindow(QMainWindow):
                 4500,
             )
         return imported
+
+    def notify_unsupported_file_drop(self):
+        self.statusBar().showMessage(
+            "Este elemento no puede arrastrarse directamente. "
+            "Descargalo primero y luego agregalo a FORO.",
+            7000,
+        )
 
     def path_is_inside_case(self, path: Path) -> bool:
         if not self.case:

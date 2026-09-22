@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..compilation_draft import CompilationHistoryEntry
+from .case_files import UnsafeFileDrop, local_file_paths_from_mime
 from .roles import PATH_ROLE
 
 
@@ -60,6 +61,7 @@ class CompilationHistoryDialog(QDialog):
 
 class CompilationList(QListWidget):
     filesDropped = pyqtSignal(object)
+    dropRejected = pyqtSignal()
     removeRequested = pyqtSignal()
     openRequested = pyqtSignal(object)
     orderChanged = pyqtSignal()
@@ -86,7 +88,13 @@ class CompilationList(QListWidget):
 
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
-            self.filesDropped.emit([Path(url.toLocalFile()) for url in event.mimeData().urls()])
+            try:
+                paths = local_file_paths_from_mime(event.mimeData())
+            except UnsafeFileDrop:
+                self.dropRejected.emit()
+                event.ignore()
+                return
+            self.filesDropped.emit(paths)
             event.acceptProposedAction()
             return
         super().dropEvent(event)

@@ -18,6 +18,63 @@ from .roles import MODIFIED_ROLE, PATH_ROLE, SIZE_ROLE
 
 DATE_COLUMN_WIDTH = 148
 SIZE_COLUMN_WIDTH = 92
+UNSUPPORTED_DROP_MESSAGE = (
+    "Este elemento no puede arrastrarse directamente. "
+    "Descargalo primero y luego agregalo a FORO."
+)
+
+
+class UnsafeFileDrop(ValueError):
+    """Raised when a drop is not an unambiguous set of local files."""
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def local_file_paths_from_mime(mime_data) -> list[Path]:
+    """Return only verified local files; never infer a path from other MIME data."""
+    if mime_data is None or not mime_data.hasUrls():
+        raise UnsafeFileDrop(UNSUPPORTED_DROP_MESSAGE)
+    urls = list(mime_data.urls())
+    if not urls:
+        raise UnsafeFileDrop(UNSUPPORTED_DROP_MESSAGE)
+
+    package_root = Path(__file__).resolve().parents[1]
+    application_root = package_root.parent
+    protected_roots = (package_root, application_root)
+    paths: list[Path] = []
+    for url in urls:
+        if not url.isLocalFile():
+            raise UnsafeFileDrop(UNSUPPORTED_DROP_MESSAGE)
+        raw_path = url.toLocalFile().strip()
+        if not raw_path or raw_path in {".", ".."}:
+            raise UnsafeFileDrop(UNSUPPORTED_DROP_MESSAGE)
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            raise UnsafeFileDrop(UNSUPPORTED_DROP_MESSAGE)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise UnsafeFileDrop(UNSUPPORTED_DROP_MESSAGE) from None
+        if not resolved.is_file():
+            raise UnsafeFileDrop(UNSUPPORTED_DROP_MESSAGE)
+        if any(_is_within(resolved, root) for root in protected_roots):
+            raise UnsafeFileDrop(UNSUPPORTED_DROP_MESSAGE)
+        paths.append(resolved)
+    return paths
+
+
+def is_supported_file_drop(mime_data) -> bool:
+    try:
+        local_file_paths_from_mime(mime_data)
+        return True
+    except UnsafeFileDrop:
+        return False
 
 
 class ExplorerColumnsDelegate(QStyledItemDelegate):
@@ -105,26 +162,33 @@ class CaseFilesList(QListWidget):
         self.setItemDelegate(ExplorerColumnsDelegate(self))
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
+        if is_supported_file_drop(event.mimeData()):
             self.setStyleSheet("QListWidget { border: 2px solid #2B7564; background: #F1F8F5; }")
+            event.acceptProposedAction()
+        elif event.mimeData().hasUrls() or event.mimeData().hasHtml() or event.mimeData().hasText():
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
+        if is_supported_file_drop(event.mimeData()):
+            event.acceptProposedAction()
+        elif event.mimeData().hasUrls() or event.mimeData().hasHtml() or event.mimeData().hasText():
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
 
     def dropEvent(self, event):
         self.setStyleSheet("")
-        if event.mimeData().hasUrls():
-            paths = [Path(url.toLocalFile()) for url in event.mimeData().urls()]
+        try:
+            paths = local_file_paths_from_mime(event.mimeData())
+        except UnsafeFileDrop:
+            self.window().notify_unsupported_file_drop()
+            event.ignore()
+            return
+        if paths:
             self.window().import_paths(paths)
             event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
 
     def startDrag(self, supported_actions):
         paths = [Path(item.data(PATH_ROLE)) for item in self.selectedItems()]
@@ -168,12 +232,16 @@ class QuickAccessList(CaseFilesList):
     """Biblioteca cotidiana del Estudio, separada de la documental del caso."""
 
     def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            paths = [Path(url.toLocalFile()) for url in event.mimeData().urls()]
+        self.setStyleSheet("")
+        try:
+            paths = local_file_paths_from_mime(event.mimeData())
+        except UnsafeFileDrop:
+            self.window().notify_unsupported_file_drop()
+            event.ignore()
+            return
+        if paths:
             self.window().import_quick_access_paths(paths)
             event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
 
     def paintEvent(self, event):
         QListWidget.paintEvent(self, event)

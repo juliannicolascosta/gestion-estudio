@@ -11,7 +11,12 @@ $Runtime = Join-Path $Payload "runtime"
 $App = Join-Path $Payload "app"
 $SfxSource = Join-Path $Build "sfx-source"
 $InstallScript = Join-Path $SfxSource "install.ps1"
-$VersionSource = Get-Content -LiteralPath (Join-Path $Project "gestor_documental\__init__.py") -Raw
+$Utf8 = [Text.Encoding]::UTF8
+$Utf8Bom = New-Object Text.UTF8Encoding($true)
+$VersionSource = [IO.File]::ReadAllText(
+    (Join-Path $Project "gestor_documental\__init__.py"),
+    $Utf8
+)
 if ($VersionSource -notmatch '__version__\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"') {
     throw "No se pudo determinar la version del programa."
 }
@@ -96,8 +101,11 @@ if (Test-Path -LiteralPath $PayloadZip) { Remove-Item -LiteralPath $PayloadZip -
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $PayloadZip)) {
     throw "No se pudo comprimir el contenido del instalador."
 }
-$InstallSource = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "install.ps1") -Raw).Replace("@@VERSION@@", $Version)
-Set-Content -LiteralPath $InstallScript -Value $InstallSource -Encoding UTF8
+$InstallSource = [IO.File]::ReadAllText(
+    (Join-Path $PSScriptRoot "install.ps1"),
+    $Utf8
+).Replace("@@VERSION@@", $Version)
+[IO.File]::WriteAllText($InstallScript, $InstallSource, $Utf8Bom)
 
 # Verify the real install script in an isolated location without changing the
 # user's Start menu, registry or application data.
@@ -172,8 +180,25 @@ if (-not $Csc) {
 $Bootstrapper = Join-Path $Build "GestorDocumentalInstallerBootstrapper.exe"
 $BootstrapSource = Join-Path $Build "installer_bootstrapper.generated.cs"
 $AssemblyVersion = "$Version.0"
-$BootstrapContent = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "installer_bootstrapper.cs") -Raw).Replace("@@VERSION@@", $Version).Replace("@@ASSEMBLY_VERSION@@", $AssemblyVersion)
-Set-Content -LiteralPath $BootstrapSource -Value $BootstrapContent -Encoding UTF8
+$BootstrapTemplate = [IO.File]::ReadAllText(
+    (Join-Path $PSScriptRoot "installer_bootstrapper.cs"),
+    $Utf8
+)
+$BootstrapContent = $BootstrapTemplate.Replace("@@VERSION@@", $Version).Replace("@@ASSEMBLY_VERSION@@", $AssemblyVersion)
+[IO.File]::WriteAllText($BootstrapSource, $BootstrapContent, $Utf8Bom)
+$GeneratedBootstrap = [IO.File]::ReadAllText($BootstrapSource, $Utf8)
+foreach ($RequiredText in @("Versión", "Elegí", "dónde", "instalación", "correctamente", "Examinar…")) {
+    if (-not $GeneratedBootstrap.Contains($RequiredText)) {
+        throw "El fuente generado del instalador perdió el texto UTF-8: $RequiredText"
+    }
+}
+if ($GeneratedBootstrap.Contains("Ã") -or $GeneratedBootstrap.Contains("â€¦")) {
+    throw "El fuente generado del instalador contiene texto con codificación incorrecta."
+}
+$BootstrapBytes = [IO.File]::ReadAllBytes($BootstrapSource)
+if ($BootstrapBytes.Length -lt 3 -or $BootstrapBytes[0] -ne 0xEF -or $BootstrapBytes[1] -ne 0xBB -or $BootstrapBytes[2] -ne 0xBF) {
+    throw "El fuente generado del instalador no tiene BOM UTF-8."
+}
 & $Csc /nologo /target:winexe /platform:x64 /optimize+ `
     "/out:$Bootstrapper" `
     "/win32icon:$(Join-Path $Project 'gestor_documental\foro.ico')" `

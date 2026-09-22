@@ -23,7 +23,14 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("ProgressBar", bootstrapper)
         self.assertIn("Preparando archivos", bootstrapper)
         self.assertIn("Instalando FORO", bootstrapper)
+        for text in ("Versión", "Elegí", "dónde", "instalación", "correctamente", "Examinar…"):
+            self.assertIn(text, bootstrapper)
+            self.assertIn(text, build)
         self.assertNotIn("instalarÃ", bootstrapper)
+        self.assertIn("[IO.File]::ReadAllText", build)
+        self.assertIn("[IO.File]::WriteAllText", build)
+        self.assertIn("New-Object Text.UTF8Encoding($true)", build)
+        self.assertIn("no tiene BOM UTF-8", build)
         self.assertRegex(gestor_documental.__version__, r"^\d+\.\d+\.\d+$")
         self.assertFalse((ROOT / "gestor_documental" / "version_info.txt").exists())
 

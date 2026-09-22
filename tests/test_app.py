@@ -1277,6 +1277,7 @@ class AppSmokeTests(unittest.TestCase):
             ):
                 window.sync_all_expedientes()
                 task = window._long_task
+                portal.prepare_background_sync.assert_called_once_with()
                 self.assertFalse(window.status_activity.isHidden())
                 self.assertEqual(portal.request_snapshot.call_count, 1)
                 window.toggle_long_task_pause()

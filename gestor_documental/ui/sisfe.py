@@ -83,7 +83,9 @@ class SisfeLoginDialog(QDialog):
         self._sync_timer: QTimer | None = None
         self.ready_for_sync = False
         self.browser = QWebEngineView()
-        self.browser.setPage(QWebEnginePage(self.profile, self.browser))
+        self.portal_page = QWebEnginePage(self.profile, self)
+        self.idle_page = QWebEnginePage(self.profile, self.browser)
+        self.browser.setPage(self.portal_page)
         layout.addWidget(self.browser, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         self.use_session_button = buttons.addButton(
@@ -97,20 +99,36 @@ class SisfeLoginDialog(QDialog):
         self._checking_saved_session = True
         self._validating_saved_session = False
         self._prefill_attempts = 0
-        self.browser.loadFinished.connect(self.portal_loaded)
-        self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
+        self.portal_page.loadFinished.connect(self.portal_loaded)
+        self.portal_page.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
+
+    def _attach_portal_page(self):
+        if self.browser.page() is not self.portal_page:
+            self.browser.setPage(self.portal_page)
+        self.browser.show()
+
+    def _detach_portal_page(self):
+        """Keep the authenticated page alive without a native visible surface."""
+        self.browser.hide()
+        if self.browser.page() is self.portal_page:
+            self.browser.setPage(self.idle_page)
+
+    def prepare_background_sync(self):
+        """Run batch queries in the persistent page without showing or focusing a window."""
+        self._detach_portal_page()
 
     def prepare_for_open(self):
         """Reuse the same WebView and verify its existing session before showing login."""
+        self._attach_portal_page()
         if self.ready_for_sync and self.session.active:
             return
         self._checking_saved_session = True
         self._prefill_attempts = 0
         self.validation_status.setText("Comprobando la sesión SISFE guardada…")
-        self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
+        self.portal_page.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
 
     def portal_loaded(self, ok: bool):
-        path = self.browser.url().path().rstrip("/")
+        path = self.portal_page.url().path().rstrip("/")
         if ok and path == "/buscar-expediente" and self._checking_saved_session:
             self._checking_saved_session = False
             self._validating_saved_session = True
@@ -147,7 +165,7 @@ class SisfeLoginDialog(QDialog):
                     "Datos SISFE completados. Resolvé el CAPTCHA y presioná Validar sesión."
                 )
                 return
-            if self._prefill_attempts < 30 and self.browser.url().path().rstrip("/") == "/login-matriculado":
+            if self._prefill_attempts < 30 and self.portal_page.url().path().rstrip("/") == "/login-matriculado":
                 QTimer.singleShot(350, self._try_prefill)
                 return
             missing = [name for name, found in result.get("fields", {}).items() if not found]
@@ -156,17 +174,17 @@ class SisfeLoginDialog(QDialog):
                 f"No se pudieron completar todos los datos ({detail}). Revisá Configuración → SISFE."
             )
 
-        self.browser.page().runJavaScript(script, completed)
+        self.portal_page.runJavaScript(script, completed)
 
     def accept_manual_session(self):
         self.ready_for_sync = False
         self._validate_after_load = True
         self.use_session_button.setEnabled(False)
         self.validation_status.setText("Abriendo el área de expedientes y validando la sesión…")
-        self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
+        self.portal_page.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
 
     def validate_loaded_session(self):
-        self.browser.page().runJavaScript(browser_validation_script())
+        self.portal_page.runJavaScript(browser_validation_script())
         timer = QTimer(self)
         timer.setInterval(250)
         elapsed = {"milliseconds": 0}
@@ -174,7 +192,7 @@ class SisfeLoginDialog(QDialog):
 
         def poll():
             elapsed["milliseconds"] += 250
-            self.browser.page().runJavaScript(
+            self.portal_page.runJavaScript(
                 "window.__gestorSisfeValidation === null ? null : "
                 "JSON.stringify(window.__gestorSisfeValidation)",
                 lambda value: finish(value) if value else None,
@@ -202,13 +220,14 @@ class SisfeLoginDialog(QDialog):
                 self._validating_saved_session = False
                 self.session.confirm_manual_login()
                 self.ready_for_sync = True
+                self.prepare_background_sync()
                 self.accept()
                 return
             detail = result.get("status") or result.get("error") or "sin detalle"
             if self._validating_saved_session:
                 self._validating_saved_session = False
                 self.validation_status.setText("La sesión anterior venció. Abriendo el acceso SISFE…")
-                self.browser.setUrl(QUrl(f"{SISFE_ORIGIN}/login-matriculado"))
+                self.portal_page.setUrl(QUrl(f"{SISFE_ORIGIN}/login-matriculado"))
                 return
             self.validation_status.setText(
                 f"SISFE todavía no autorizó la sesión ({detail}). "
@@ -227,7 +246,7 @@ class SisfeLoginDialog(QDialog):
         if self._sync_timer and self._sync_timer.isActive():
             completed(None, RuntimeError("SISFE todavía está procesando otra consulta."))
             return
-        self.browser.page().runJavaScript(browser_sync_script(cuij, known_ids))
+        self.portal_page.runJavaScript(browser_sync_script(cuij, known_ids))
         elapsed = {"milliseconds": 0}
         timer = QTimer(self)
         timer.setInterval(250)
@@ -235,7 +254,7 @@ class SisfeLoginDialog(QDialog):
 
         def poll():
             elapsed["milliseconds"] += 250
-            self.browser.page().runJavaScript(
+            self.portal_page.runJavaScript(
                 "window.__gestorSisfeResult === null ? null : "
                 "JSON.stringify(window.__gestorSisfeResult)",
                 lambda value: finish(value) if value else None,
@@ -271,7 +290,7 @@ class SisfeLoginDialog(QDialog):
         if self._sync_timer and self._sync_timer.isActive():
             completed(None, RuntimeError("SISFE todavía está procesando otra consulta."))
             return
-        self.browser.page().runJavaScript(script)
+        self.portal_page.runJavaScript(script)
         timer = QTimer(self)
         timer.setInterval(250)
         elapsed = {"milliseconds": 0}
@@ -282,7 +301,7 @@ class SisfeLoginDialog(QDialog):
             expression = (
                 f"window.{result_name} === null ? null : JSON.stringify(window.{result_name})"
             )
-            self.browser.page().runJavaScript(
+            self.portal_page.runJavaScript(
                 expression,
                 lambda value: finish(value) if value else None,
             )
