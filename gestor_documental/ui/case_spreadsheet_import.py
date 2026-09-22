@@ -5,7 +5,6 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -15,7 +14,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
-    QProgressDialog,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -29,7 +27,6 @@ from ..case_spreadsheet_import import (
     SpreadsheetData,
     classify_rows,
     existing_cases,
-    import_rows,
     mapped_rows,
     read_spreadsheet,
 )
@@ -180,32 +177,6 @@ class CaseSpreadsheetImportDialog(QDialog):
         self.import_button.setEnabled(any(row.selected for row in self.rows))
 
     def run_import(self):
-        selected = sum(row.selected for row in self.rows)
-        progress = QProgressDialog("Importando casos…", "", 0, selected, self)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setCancelButton(None)
-        progress.setMinimumDuration(0)
-
-        def update(current: int, total: int):
-            progress.setLabelText(f"Importando casos…  {current} / {total}")
-            progress.setValue(current)
-            QApplication.processEvents()
-
-        self.outcomes = import_rows(
-            self.study_root, self.rows, professional=self.professional, progress=update
-        )
-        progress.close()
-        imported = sum(outcome.case is not None for outcome in self.outcomes)
-        errors = [outcome for outcome in self.outcomes if outcome.error]
-        omitted = sum(not row.selected for row in self.rows)
-        details = "\n".join(
-            f"Fila {outcome.row.source_row} · {outcome.row.actor}: {outcome.error}"
-            for outcome in errors
-        )
-        message = QMessageBox(self)
-        message.setWindowTitle("Importación finalizada")
-        message.setText(f"{imported} importados\n{omitted} omitidos\n{len(errors)} con error")
-        if details:
-            message.setDetailedText(details)
-        message.exec()
+        # La ventana sólo confirma la selección. MainWindow ejecuta el lote en
+        # segundo plano y concentra allí progreso, pausa y cancelación.
         self.accept()

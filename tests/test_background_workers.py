@@ -1,11 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from gestor_documental.background_workers import (
     CedulaExtractionWorker,
     CompileWorker,
+    SisfeSnapshotImportWorker,
     StudyBackupWorker,
 )
 from gestor_documental.models import Case
@@ -60,6 +61,21 @@ class BackgroundWorkerTests(unittest.TestCase):
             self.assertEqual(completed, ["respaldo-creado"])
             create_backup.assert_called_once()
             self.assertEqual(create_backup.call_args.args[:2], (source, destination))
+
+    def test_sisfe_snapshot_worker_reports_one_result_without_ui(self):
+        portal = MagicMock()
+        portal.import_snapshot.return_value = "resultado"
+        case = Case(Path("caso"))
+        worker = SisfeSnapshotImportWorker(portal)
+        completed = []
+        worker.completed.connect(lambda *values: completed.append(values))
+
+        worker.process(case, "captura")
+
+        self.assertEqual(completed, [(case, "resultado", "")])
+        portal.import_snapshot.assert_called_once_with(
+            case, "captura", case.path / "Documentos SISFE"
+        )
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from threading import Event
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -10,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QMimeData, Qt, QUrl
 from PyQt6.QtGui import QPalette
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QInputDialog, QMessageBox, QPushButton
+from PyQt6.QtWidgets import QApplication, QDialog, QInputDialog, QMessageBox, QPushButton
 from pypdf import PdfWriter
 
 from gestor_documental.app import (
@@ -23,7 +25,7 @@ from gestor_documental.app import (
     PATH_ROLE,
 )
 from gestor_documental.compilation_draft import load_compilation_history
-from gestor_documental.case_spreadsheet_import import ImportRow, import_rows
+from gestor_documental.case_spreadsheet_import import ImportOutcome, ImportRow, import_rows
 from gestor_documental.ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE
 from gestor_documental.services import (
     CompilationCancelled,
@@ -36,6 +38,7 @@ from gestor_documental.services import (
 from gestor_documental.study_database import StudyDatabase, study_database_path
 from gestor_documental.sisfe_downloads import SisfeDownloadRegistry
 from gestor_documental.ui.operation_status import OperationState
+from gestor_documental.long_tasks import LongTask, TaskState
 
 
 class AppSmokeTests(unittest.TestCase):
@@ -1247,6 +1250,125 @@ class AppSmokeTests(unittest.TestCase):
             window.work_tabs.setCurrentIndex(window.portal_tab_index)
             self.app.processEvents()
             self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(case))
+            window.close()
+
+    def test_mass_sync_is_sequential_and_pause_waits_before_next_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            first = create_case(study, "Primero")
+            second = create_case(study, "Segundo")
+            save_case_metadata(first, {"CUIJ": "21-1"})
+            save_case_metadata(second, {"CUIJ": "21-2"})
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.sisfe_session.mark_portal_opened()
+            window.sisfe_session.confirm_manual_login()
+            portal = MagicMock()
+            portal.ready_for_sync = True
+            window._sisfe_login_dialog = portal
+            result = SimpleNamespace(movements_registered=2, documents_registered=1)
+
+            with (
+                patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes),
+                patch.object(window.sisfe_portal, "import_snapshot", return_value=result),
+                patch("gestor_documental.app.SisfeCaseBrowserDialog") as case_browser,
+            ):
+                window.sync_all_expedientes()
+                task = window._long_task
+                self.assertFalse(window.status_activity.isHidden())
+                self.assertEqual(portal.request_snapshot.call_count, 1)
+                window.toggle_long_task_pause()
+                callback = portal.request_snapshot.call_args.args[1]
+                callback(object(), None)
+                self.app.processEvents()
+                self.assertEqual(portal.request_snapshot.call_count, 1)
+                self.assertEqual(task.state, TaskState.PAUSED)
+                window.toggle_long_task_pause()
+                for _ in range(200):
+                    self.app.processEvents()
+                    if portal.request_snapshot.call_count == 2:
+                        break
+                    QTest.qWait(5)
+                self.assertEqual(portal.request_snapshot.call_count, 2)
+                portal.request_snapshot.call_args.args[1](None, RuntimeError("no encontrado"))
+                self.app.processEvents()
+                self.app.processEvents()
+                case_browser.assert_not_called()
+
+            self.assertEqual(task.state, TaskState.COMPLETED)
+            self.assertEqual(task.current, 2)
+            self.assertEqual([detail.result for detail in task.details], ["ok", "error"])
+            self.assertEqual(read_case_metadata(first)["Novedades SISFE sin ver"], "2")
+            window.close()
+
+    def test_only_one_long_task_and_close_requests_safe_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            task = LongTask("Importando casos", 2)
+            window.begin_long_task(task, "import")
+            task.start()
+
+            with patch.object(QMessageBox, "information") as information:
+                window.import_cases_from_spreadsheet()
+                information.assert_called_once()
+                self.assertIn("proceso en curso", information.call_args.args[2].casefold())
+
+            event = MagicMock()
+            with patch.object(window, "confirm_stop_long_task_and_exit", return_value=True):
+                window.closeEvent(event)
+            event.ignore.assert_called_once()
+            self.assertEqual(task.state, TaskState.CANCELLING)
+            self.assertTrue(window._close_after_long_task)
+            task.cancelled()
+            self.app.processEvents()
+
+    def test_mass_import_runs_in_background_without_per_case_dialogs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            row = ImportRow(2, "Caso en segundo plano")
+            started = Event()
+            release = Event()
+
+            def slow_import(_root, rows, **_kwargs):
+                started.set()
+                release.wait(2)
+                return [ImportOutcome(rows[0], case=create_case(study, rows[0].actor))]
+
+            with (
+                patch("gestor_documental.app.CaseSpreadsheetImportDialog") as dialog_class,
+                patch("gestor_documental.app.import_rows", side_effect=slow_import),
+                patch.object(QMessageBox, "exec") as popup_exec,
+            ):
+                dialog = dialog_class.return_value
+                dialog.exec.return_value = QDialog.DialogCode.Accepted
+                dialog.rows = [row]
+                window.import_cases_from_spreadsheet()
+                self.assertTrue(started.wait(1))
+                self.assertTrue(window.long_task_active())
+                self.assertTrue(window.isEnabled())
+                popup_exec.assert_not_called()
+                release.set()
+                for _ in range(200):
+                    self.app.processEvents()
+                    if window._long_task is None and window._long_task_thread is None:
+                        break
+                    QTest.qWait(5)
+
+            self.assertIsNone(window._long_task)
+            self.assertIsNone(window._long_task_thread)
+            self.assertTrue((study / "Caso en segundo plano").is_dir())
             window.close()
 
     def test_case_badges_use_each_case_metadata_and_can_all_be_marked_read(self):

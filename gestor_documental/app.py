@@ -44,6 +44,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QProgressDialog,
     QPlainTextEdit,
     QScrollArea,
@@ -60,7 +61,14 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from . import __version__
-from .background_workers import CedulaExtractionWorker, CompileWorker, StudyBackupWorker
+from .background_workers import (
+    CedulaExtractionWorker,
+    CompileWorker,
+    SisfeSnapshotImportWorker,
+    StudyBackupWorker,
+)
+from .case_spreadsheet_import import ImportRow, import_rows
+from .long_tasks import BatchTaskWorker, LongTask, TaskDetail, TaskState
 from .case_documents import rename_document_entry
 from .activity_center import build_case_activity
 from .ui.document_recovery import DocumentRecoveryWorker
@@ -1644,6 +1652,8 @@ class SignPdfDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
+    sisfe_snapshot_import_requested = pyqtSignal(object, object)
+
     def __init__(self, store: SettingsStore | None = None):
         super().__init__()
         self.store = store or SettingsStore()
@@ -1688,8 +1698,16 @@ class MainWindow(QMainWindow):
         self._sisfe_download_active = False
         self._cut_paths: list[Path] = []
         self._restoring_layout = True
-        self._sync_all_queue: list[Case] = []
-        self._sync_all_active = False
+        self._long_task: LongTask | None = None
+        self._long_task_kind = ""
+        self._long_task_thread: QThread | None = None
+        self._long_task_worker: BatchTaskWorker | None = None
+        self._task_result_message: QMessageBox | None = None
+        self._close_after_long_task = False
+        self._long_task_omitted = 0
+        self._sync_all_cases: list[Case] = []
+        self._sync_all_index = 0
+        self._sync_unit_active = False
         self._visible_workspace_sizes = [780, 440]
         self._layout_save_timer = QTimer(self)
         self._layout_save_timer.setSingleShot(True)
@@ -2548,10 +2566,28 @@ class MainWindow(QMainWindow):
         )
         self.sisfe_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sisfe_indicator.mousePressEvent = lambda _event: self.open_sisfe_session()
-        bar.addWidget(self.sisfe_indicator)
+        bar.addPermanentWidget(self.sisfe_indicator)
+        self.status_activity = QWidget()
+        activity_layout = QHBoxLayout(self.status_activity)
+        activity_layout.setContentsMargins(18, 0, 18, 0)
+        activity_layout.setSpacing(8)
         self.status_center = QLabel("")
         self.status_center.setObjectName("muted")
-        bar.addWidget(self.status_center, 1)
+        self.task_progress = QProgressBar()
+        self.task_progress.setFixedWidth(170)
+        self.task_progress.setTextVisible(False)
+        self.task_pause_button = QPushButton("Pausar")
+        self.task_pause_button.setToolTip("Pausar al terminar la unidad actual")
+        self.task_pause_button.clicked.connect(self.toggle_long_task_pause)
+        self.task_stop_button = QPushButton("Detener")
+        self.task_stop_button.setToolTip("Detener de forma segura")
+        self.task_stop_button.clicked.connect(self.stop_long_task)
+        activity_layout.addWidget(self.status_center)
+        activity_layout.addWidget(self.task_progress)
+        activity_layout.addWidget(self.task_pause_button)
+        activity_layout.addWidget(self.task_stop_button)
+        self.status_activity.hide()
+        bar.addPermanentWidget(self.status_activity, 1)
         self.sync_all_button = QPushButton("Sincronizar todos")
         decorate_button(self.sync_all_button, "refresh")
         self.sync_all_button.setToolTip("Sincronizar todos los expedientes")
@@ -3681,6 +3717,9 @@ class MainWindow(QMainWindow):
             self.update_sisfe_indicator(OperationState.ERROR, "SISFE desconectado")
 
     def sync_sisfe(self):
+        if self.long_task_active():
+            self.warn_long_task_active()
+            return
         if not self.require_case():
             return
         case = self.case
@@ -3760,7 +3799,7 @@ class MainWindow(QMainWindow):
         except (OSError, RuntimeError, sqlite3.Error):
             return ()
 
-    def record_unseen_sisfe(self, case: Case, count: int):
+    def record_unseen_sisfe(self, case: Case, count: int, *, reload_tree: bool = True):
         if not isinstance(count, int):
             return
         if count <= 0:
@@ -3771,7 +3810,8 @@ class MainWindow(QMainWindow):
         previous = int(metadata.get("Novedades SISFE sin ver", "0") or 0)
         metadata["Novedades SISFE sin ver"] = str(previous + count)
         save_case_metadata(case, metadata)
-        self.reload_cases(self.case.path if self.case else None)
+        if reload_tree:
+            self.reload_cases(self.case.path if self.case else None)
 
     def case_tab_changed(self, index: int):
         if index != self.portal_tab_index or not self.case:
@@ -3861,12 +3901,172 @@ class MainWindow(QMainWindow):
                     cases.append(candidate)
         return cases
 
+    def long_task_active(self) -> bool:
+        return bool(
+            (self._long_task is not None and self._long_task.active)
+            or (self._long_task_thread is not None and self._long_task_thread.isRunning())
+        )
+
+    def warn_long_task_active(self):
+        QMessageBox.information(
+            self,
+            "Proceso en curso",
+            "Hay un proceso en curso. Esperá a que termine o detenelo.",
+        )
+
+    def begin_long_task(self, task: LongTask, kind: str):
+        self._long_task = task
+        self._long_task_kind = kind
+        task.state_changed.connect(self._long_task_state_changed)
+        task.progress_changed.connect(self._long_task_progress_changed)
+        task.finished.connect(self._long_task_finished)
+        self.task_progress.setRange(0, task.total)
+        self.task_progress.setValue(0)
+        self.status_center.setText(f"{task.name} 0 de {task.total}")
+        self.task_pause_button.setText("Pausar")
+        self.task_pause_button.setEnabled(True)
+        self.task_stop_button.setEnabled(True)
+        self.status_activity.show()
+        self.sync_all_button.setEnabled(False)
+
+    def _long_task_progress_changed(self, current: int, total: int, name: str):
+        self.task_progress.setRange(0, total)
+        self.task_progress.setValue(current)
+        self.status_center.setText(f"{name} {current} de {total}")
+
+    def _long_task_state_changed(self, state: TaskState):
+        if state is TaskState.PAUSED:
+            self.task_pause_button.setText("Reanudar")
+            self.status_center.setText(
+                f"{self._long_task.name} en pausa · "
+                f"{self._long_task.current} de {self._long_task.total}"
+            )
+        elif state is TaskState.RUNNING:
+            self.task_pause_button.setText("Pausar")
+            if (
+                self._long_task_kind == "sync"
+                and self._sync_all_index
+                and not self._sync_unit_active
+            ):
+                QTimer.singleShot(0, self._sync_next_expediente)
+        elif state is TaskState.CANCELLING:
+            self.status_center.setText("Deteniendo de forma segura…")
+            self.task_pause_button.setEnabled(False)
+            self.task_stop_button.setEnabled(False)
+
+    def toggle_long_task_pause(self):
+        task = self._long_task
+        if task is None:
+            return
+        if task.state is TaskState.PAUSED:
+            task.resume()
+        elif task.state is TaskState.RUNNING:
+            task.pause()
+
+    def stop_long_task(self):
+        task = self._long_task
+        if task is None or not task.active:
+            return
+        task.cancel()
+        if self._long_task_kind == "sync":
+            QTimer.singleShot(0, self._sync_next_expediente)
+
+    @staticmethod
+    def _task_details_text(details: tuple[TaskDetail, ...]) -> str:
+        return "\n".join(
+            f"{detail.item}: {detail.message or detail.result}"
+            for detail in details
+        )
+
+    def _long_task_finished(self, summary: dict):
+        kind = self._long_task_kind
+        details = summary["details"]
+        state = summary["state"]
+        self.status_activity.hide()
+        thread = self._long_task_thread
+        if kind == "sync" and thread is not None and thread.isRunning():
+            thread.quit()
+        self.sync_all_button.setEnabled(thread is None or not thread.isRunning())
+        if kind == "sync":
+            self.update_sisfe_indicator(
+                OperationState.ERROR if state is TaskState.ERROR else OperationState.SUCCESS,
+                "SISFE desconectado" if state is TaskState.ERROR else "Sesión SISFE activa",
+            )
+            selected = self.case.path if self.case else None
+            self.reload_cases(selected)
+            if self.case:
+                self.reload_novedades()
+                self.reload_case_files()
+            changed = sum(detail.result == "ok" for detail in details)
+            unchanged = sum(detail.result == "sin_cambios" for detail in details)
+            errors = sum(detail.result == "error" for detail in details)
+            title = (
+                "Sincronización completada"
+                if state is TaskState.COMPLETED
+                else "Sincronización detenida"
+                if state is TaskState.CANCELLED
+                else "Sincronización interrumpida"
+            )
+            text = (
+                f"{summary['current']} de {summary['total']} expedientes procesados\n"
+                f"{changed} con novedades\n{unchanged} sin cambios\n{errors} con errores"
+            )
+        else:
+            imported = sum(detail.result == "ok" for detail in details)
+            errors = sum(detail.result == "error" for detail in details)
+            title = (
+                "Importación finalizada"
+                if state is TaskState.COMPLETED
+                else "Importación detenida"
+                if state is TaskState.CANCELLED
+                else "Importación interrumpida"
+            )
+            text = (
+                f"{imported} importados\n"
+                f"{self._long_task_omitted} omitidos\n"
+                f"{summary['total'] - summary['current']} sin procesar\n{errors} con error"
+            )
+            selected = next(
+                (
+                    detail.payload.case.path
+                    for detail in reversed(details)
+                    if detail.result == "ok" and detail.payload is not None
+                ),
+                self.case.path if self.case else None,
+            )
+            self.reload_cases(selected)
+        if summary.get("error"):
+            text += f"\n\n{summary['error']}"
+        message = QMessageBox(self)
+        message.setWindowTitle(title)
+        message.setText(text)
+        detail_text = self._task_details_text(details)
+        if detail_text:
+            message.setDetailedText(detail_text)
+        closing = self._close_after_long_task
+        if not closing:
+            self._task_result_message = message
+            message.finished.connect(
+                lambda _result: setattr(self, "_task_result_message", None)
+            )
+        self._long_task = None
+        self._long_task_kind = ""
+        self._sync_all_cases = []
+        self._sync_all_index = 0
+        self._sync_unit_active = False
+        self._long_task_omitted = 0
+        if not closing:
+            message.show()
+        if self._close_after_long_task and (
+            self._long_task_thread is None or not self._long_task_thread.isRunning()
+        ):
+            self._close_after_long_task = False
+            QTimer.singleShot(0, self.close)
+
     def sync_all_expedientes(self):
         """Acción global, separada de la sincronización del expediente abierto."""
-        if self._sync_all_active:
-            QMessageBox.information(
-                self, "Sincronización en curso", "Ya hay una sincronización masiva en curso."
-            )
+        if self.long_task_active():
+            self.warn_long_task_active()
             return
         if not self.require_study():
             return
@@ -3899,50 +4099,100 @@ class MainWindow(QMainWindow):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self._sync_all_queue = list(cases)
-        self._sync_all_active = True
+        self._sync_all_cases = list(cases)
+        self._sync_all_index = 0
+        task = LongTask("Sincronizando expedientes", len(cases))
+        self.begin_long_task(task, "sync")
+        thread = QThread(self)
+        worker = SisfeSnapshotImportWorker(self.sisfe_portal)
+        worker.moveToThread(thread)
+        self.sisfe_snapshot_import_requested.connect(worker.process)
+        worker.completed.connect(self._sync_snapshot_imported)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._long_task_thread_finished)
+        self._long_task_thread = thread
+        self._long_task_worker = worker
+        task.start()
+        thread.start()
         self.update_sisfe_indicator(
             OperationState.RUNNING, f"Sincronizando {len(cases)} expedientes…"
         )
         self._sync_next_expediente()
 
     def _sync_next_expediente(self):
-        if not self._sync_all_queue:
-            self._sync_all_active = False
-            self.update_sisfe_indicator(
-                OperationState.SUCCESS, "Sesión SISFE activa"
-            )
-            self.statusBar().showMessage("Sincronización de expedientes finalizada", 6000)
-            if self.case:
-                self.reload_novedades()
-                self.reload_case_files()
+        task = self._long_task
+        if task is None or self._long_task_kind != "sync":
             return
-        case = self._sync_all_queue.pop(0)
+        if self._sync_unit_active:
+            return
+        if task.state is TaskState.CANCELLING:
+            task.cancelled()
+            return
+        if task.state is TaskState.PAUSED:
+            return
+        if not self.sisfe_session.active or not self._sisfe_login_dialog:
+            task.fail("La sesión SISFE dejó de estar activa.")
+            return
+        if not self._sisfe_login_dialog.ready_for_sync:
+            task.fail("SISFE dejó de estar disponible para consultas.")
+            return
+        if self._sync_all_index >= len(self._sync_all_cases):
+            task.complete()
+            return
+        case = self._sync_all_cases[self._sync_all_index]
+        self._sync_all_index += 1
+        self._sync_unit_active = True
         cuij = str(read_case_metadata(case).get("CUIJ", "")).strip()
-        remaining = len(self._sync_all_queue)
-        self.statusBar().showMessage(
-            f"Sincronizando {case.name}… ({remaining} restantes)"
-        )
 
         def completed(snapshot, error):
+            current_task = self._long_task
+            if current_task is not task:
+                return
             if not error:
-                try:
-                    result = self.sisfe_portal.import_snapshot(
-                        case, snapshot, case.path / "Documentos SISFE"
-                    )
-                    self.record_case_sync(case)
-                    self.record_unseen_sisfe(case, result.movements_registered)
-                except Exception as import_error:
-                    self.statusBar().showMessage(
-                        f"{case.name}: no se pudo importar ({import_error})", 6000
-                    )
+                self.sisfe_snapshot_import_requested.emit(case, snapshot)
+                return
             else:
-                self.statusBar().showMessage(f"{case.name}: {error}", 6000)
+                self._sync_unit_active = False
+                error_text = str(error)
+                if (
+                    not self.sisfe_session.active
+                    or any(
+                        marker in error_text.casefold()
+                        for marker in ("sesión", "login", "autoriz")
+                    )
+                ):
+                    task.fail(error_text)
+                    return
+                task.complete_unit(case.name, "error", error_text)
             QTimer.singleShot(0, self._sync_next_expediente)
 
         self._sisfe_login_dialog.request_snapshot(
             cuij, completed, self.known_sisfe_movement_ids(case)
         )
+
+    def _sync_snapshot_imported(self, case: Case, result, error: str):
+        task = self._long_task
+        if task is None or self._long_task_kind != "sync":
+            return
+        self._sync_unit_active = False
+        if error:
+            task.complete_unit(case.name, "error", error)
+        else:
+            self.record_case_sync(case)
+            self.record_unseen_sisfe(
+                case, result.movements_registered, reload_tree=False
+            )
+            message = (
+                f"{result.movements_registered} novedades · "
+                f"{result.documents_registered} PDF"
+            )
+            task.complete_unit(
+                case.name,
+                "ok" if result.movements_registered else "sin_cambios",
+                message,
+                result,
+            )
+        QTimer.singleShot(0, self._sync_next_expediente)
 
     def case_activity_items(self, case: Case, *, show_completed: bool = False):
         metadata = read_case_metadata(case)
@@ -5165,6 +5415,9 @@ class MainWindow(QMainWindow):
         self.new_case_in_root(self.store.settings.study_root)
 
     def import_cases_from_spreadsheet(self):
+        if self.long_task_active():
+            self.warn_long_task_active()
+            return
         if not self.require_study():
             return
         root = self.store.settings.study_root
@@ -5181,12 +5434,43 @@ class MainWindow(QMainWindow):
         dialog = CaseSpreadsheetImportDialog(root, professional, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        imported = [outcome.case for outcome in dialog.outcomes if outcome.case is not None]
-        selected = imported[-1].path if imported else (self.case.path if self.case else None)
-        self.reload_cases(selected)
-        if imported:
-            self.set_case(imported[-1])
-        self.statusBar().showMessage(f"Casos importados: {len(imported)}", 5000)
+        rows = [row for row in dialog.rows if row.selected]
+        if not rows:
+            return
+        self._long_task_omitted = len(dialog.rows) - len(rows)
+        task = LongTask("Importando casos", len(rows))
+        self.begin_long_task(task, "import")
+
+        def process(row: ImportRow):
+            outcome = import_rows(root, [row], professional=professional)[0]
+            if outcome.error:
+                return "error", outcome.error, outcome
+            return "ok", "Importado", outcome
+
+        thread = QThread(self)
+        worker = BatchTaskWorker(
+            task,
+            rows,
+            process,
+            lambda row: row.actor or f"Fila {row.source_row}",
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.stopped.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._long_task_thread_finished)
+        self._long_task_thread = thread
+        self._long_task_worker = worker
+        task.start()
+        thread.start()
+
+    def _long_task_thread_finished(self):
+        self._long_task_thread = None
+        self._long_task_worker = None
+        self.sync_all_button.setEnabled(True)
+        if self._close_after_long_task and self._long_task is None:
+            self._close_after_long_task = False
+            QTimer.singleShot(0, self.close)
 
     def import_external_case(self, study_root: Path | None = None):
         if not self.require_study():
@@ -6976,7 +7260,25 @@ class MainWindow(QMainWindow):
             self._close_after_compile = False
             QTimer.singleShot(0, self.close)
 
+    def confirm_stop_long_task_and_exit(self) -> bool:
+        message = QMessageBox(self)
+        message.setWindowTitle("Hay un proceso en curso")
+        message.setText("Hay un proceso en curso.")
+        message.setInformativeText(
+            "Podés volver a FORO o detener el proceso de forma segura antes de salir."
+        )
+        message.addButton("Volver", QMessageBox.ButtonRole.RejectRole)
+        stop = message.addButton("Detener y salir", QMessageBox.ButtonRole.DestructiveRole)
+        message.exec()
+        return message.clickedButton() is stop
+
     def closeEvent(self, event):
+        if self.long_task_active():
+            if self.confirm_stop_long_task_and_exit():
+                self._close_after_long_task = True
+                self.stop_long_task()
+            event.ignore()
+            return
         if self._study_backup_thread is not None:
             self.statusBar().showMessage(
                 "Esperá a que termine el respaldo o la restauración antes de cerrar.", 7000

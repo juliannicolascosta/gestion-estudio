@@ -92,3 +92,23 @@ class StudyBackupWorker(QObject):
             self.completed.emit(result)
         except Exception as error:
             self.failed.emit(str(error))
+
+
+class SisfeSnapshotImportWorker(QObject):
+    """Persists SISFE snapshots off the UI thread, one case at a time."""
+
+    completed = pyqtSignal(object, object, str)
+
+    def __init__(self, portal):
+        super().__init__()
+        self.portal = portal
+
+    @pyqtSlot(object, object)
+    def process(self, case: Case, snapshot):
+        try:
+            result = self.portal.import_snapshot(
+                case, snapshot, case.path / "Documentos SISFE"
+            )
+            self.completed.emit(case, result, "")
+        except Exception as error:
+            self.completed.emit(case, None, str(error))
