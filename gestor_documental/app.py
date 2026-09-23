@@ -182,7 +182,12 @@ from .services import (
     study_library_path,
     unique_path,
 )
-from .study_backup import BackupResult, RestoreResult
+from .study_backup import (
+    BackupResult,
+    RestoreResult,
+    StudyBackupError,
+    inspect_study_backup,
+)
 from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationHistoryDialog, CompilationList
 from .ui.case_files import (
@@ -3016,17 +3021,17 @@ class MainWindow(QMainWindow):
         if self._study_backup_thread is not None:
             self.statusBar().showMessage("Ya hay una operación de respaldo en curso.", 5000)
             return
-        default_name = f"Respaldo {root.name} {date.today().isoformat()}.zip"
+        default_name = f"FORO-Backup-{date.today().isoformat()}.foro-backup"
         filename, _ = QFileDialog.getSaveFileName(
             self,
-            "Guardar respaldo verificable",
+            "Crear copia de seguridad del Estudio",
             str(root.parent / default_name),
-            "Respaldo del Gestor (*.zip)",
+            "Copia de seguridad de FORO (*.foro-backup)",
         )
         if filename:
             target = Path(filename)
-            if target.suffix.casefold() != ".zip":
-                target = target.with_suffix(".zip")
+            if not target.name.casefold().endswith(".foro-backup"):
+                target = target.with_name(target.name + ".foro-backup")
             self._start_study_backup_operation("backup", root, target)
 
     def restore_study_from_backup(self):
@@ -3036,49 +3041,119 @@ class MainWindow(QMainWindow):
         initial = self.store.settings.study_root
         backup_name, _ = QFileDialog.getOpenFileName(
             self,
-            "Elegir respaldo del Estudio",
+            "Restaurar copia de seguridad del Estudio",
             str(initial.parent if initial else Path.home()),
-            "Respaldo del Gestor (*.zip)",
+            "Copia de seguridad de FORO (*.foro-backup);;Copias anteriores (*.zip)",
         )
         if not backup_name:
             return
-        destination = QFileDialog.getExistingDirectory(
-            self,
-            "Elegí o creá una carpeta vacía para restaurar",
-            str(initial.parent if initial else Path.home()),
-        )
-        if not destination:
+        try:
+            summary = inspect_study_backup(Path(backup_name))
+        except StudyBackupError as error:
+            QMessageBox.warning(self, "Copia no válida", str(error))
             return
-        target = Path(destination)
-        if any(target.iterdir()):
-            QMessageBox.warning(
-                self,
-                "La carpeta no está vacía",
-                "Para proteger tus archivos, el respaldo sólo se restaura en una carpeta nueva o vacía.",
-            )
-            return
-        self._start_study_backup_operation("restore", Path(backup_name), target)
 
-    def _start_study_backup_operation(self, operation: str, source: Path, destination: Path):
+        created = summary.created_at[:10] if summary.created_at else "Sin información"
+        choice = QMessageBox(self)
+        choice.setWindowTitle("Confirmar restauración")
+        choice.setIcon(QMessageBox.Icon.Warning)
+        choice.setText("FORO Backup")
+        choice.setInformativeText(
+            f"Fecha: {created}\nVersión FORO: {summary.foro_version or 'anterior'}\n"
+            f"Casos: {summary.case_count}\nArchivos: {summary.file_count}\n"
+            f"Tamaño: {human_size(summary.total_bytes)}\n\n"
+            "Antes de restaurar se creará automáticamente una copia del estado actual. "
+            "El archivo contiene documentación sensible: guardalo en un lugar seguro."
+        )
+        current_button = choice.addButton("Restaurar en la ubicación actual", QMessageBox.ButtonRole.AcceptRole)
+        new_button = choice.addButton("Restaurar en otra ubicación", QMessageBox.ButtonRole.ActionRole)
+        choice.addButton(QMessageBox.StandardButton.Cancel)
+        choice.exec()
+        clicked = choice.clickedButton()
+        if clicked is not current_button and clicked is not new_button:
+            return
+
+        if clicked == current_button:
+            if initial is None or not initial.is_dir():
+                QMessageBox.warning(self, "Falta la ubicación", "No hay una ubicación actual disponible para reemplazar.")
+                return
+            target = initial
+            replace_existing = True
+        else:
+            destination = QFileDialog.getExistingDirectory(
+                self,
+                "Elegí o creá una carpeta vacía para restaurar",
+                str(initial.parent if initial else Path.home()),
+            )
+            if not destination:
+                return
+            target = Path(destination)
+            if any(target.iterdir()):
+                QMessageBox.warning(
+                    self,
+                    "La carpeta no está vacía",
+                    "Para proteger tus archivos, elegí una carpeta nueva o vacía.",
+                )
+                return
+            replace_existing = False
+
+        stamp = datetime.now().strftime("%Y-%m-%d-%H%M")
+        safety = (initial.parent if initial else target.parent) / f"FORO-Antes-de-restaurar-{stamp}.foro-backup"
+        self._start_study_backup_operation(
+            "restore", Path(backup_name), target,
+            current_study_root=initial,
+            safety_backup_path=safety,
+            replace_existing=replace_existing,
+        )
+
+    def _start_study_backup_operation(
+        self,
+        operation: str,
+        source: Path,
+        destination: Path,
+        *,
+        current_study_root: Path | None = None,
+        safety_backup_path: Path | None = None,
+        replace_existing: bool = False,
+    ):
         thread = QThread(self)
-        worker = StudyBackupWorker(operation, source, destination)
+        worker = StudyBackupWorker(
+            operation,
+            source,
+            destination,
+            app_dir=self.store.app_dir,
+            current_study_root=current_study_root,
+            safety_backup_path=safety_backup_path,
+            replace_existing=replace_existing,
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._update_study_backup_progress)
         worker.completed.connect(self._study_backup_completed)
         worker.failed.connect(self._study_backup_failed)
+        worker.cancelled.connect(self._study_backup_cancelled)
         worker.completed.connect(thread.quit)
         worker.failed.connect(thread.quit)
+        worker.cancelled.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._study_backup_cleanup)
         self._study_backup_thread = thread
         self._study_backup_worker = worker
-        title = "Creando respaldo" if operation == "backup" else "Restaurando respaldo"
-        progress = QProgressDialog(title + "…", "", 0, 0, self)
+        title = "Creando copia de seguridad" if operation == "backup" else "Restaurando copia de seguridad"
+        progress = QProgressDialog(title + "…", "Detener", 0, 0, self)
         progress.setWindowTitle(title)
-        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
-        progress.setCancelButton(None)
+        progress.setWindowModality(
+            Qt.WindowModality.NonModal
+            if operation == "backup"
+            else Qt.WindowModality.ApplicationModal
+        )
+        # Sólo modifica un threading.Event: la conexión directa permite detener
+        # el trabajo aunque el event loop del hilo esté ocupado copiando.
+        progress.canceled.connect(
+            worker.cancel,
+            Qt.ConnectionType.DirectConnection,
+        )
         progress.setMinimumDuration(0)
         progress.setAutoClose(False)
         progress.show()
@@ -3091,31 +3166,47 @@ class MainWindow(QMainWindow):
             return
         progress.setMaximum(max(1, total))
         progress.setValue(current)
-        progress.setLabelText(f"Procesando {relative}")
+        if relative == "Verificando copia":
+            label = relative
+        elif relative.startswith("study/"):
+            label = "Copiando documentos"
+        elif relative.startswith("models/"):
+            label = "Copiando modelos"
+        elif relative.startswith("settings/"):
+            label = "Preparando configuración"
+        else:
+            label = "Verificando y restaurando"
+        progress.setLabelText(label)
 
     def _study_backup_completed(self, result: object):
         if isinstance(result, BackupResult):
             QMessageBox.information(
                 self,
-                "Respaldo verificado",
-                f"Se respaldaron {result.file_count} archivos ({human_size(result.total_bytes)}).\n\n"
-                f"Archivo: {result.path}\n\n"
-                f"Huella del respaldo: {result.archive_sha256}",
+                "Copia creada correctamente",
+                f"{datetime.now().strftime('%d/%m/%Y · %H:%M')}\n"
+                f"{result.case_count} casos\n{result.file_count} archivos\n"
+                f"{human_size(result.total_bytes)}\n\nArchivo: {result.path}\n\n"
+                "Esta copia contiene documentación sensible. Guardala en un lugar seguro.",
             )
         elif isinstance(result, RestoreResult):
+            self.store = SettingsStore(self.store.app_dir)
             self.store.add_study_root(result.root)
+            self.reload_professionals()
             self.case = None
             self.reload_cases()
             QMessageBox.information(
                 self,
-                "Restauración terminada",
-                f"Se verificaron y restauraron {result.file_count} archivos "
-                f"({human_size(result.total_bytes)}).\n\n"
-                "La ubicación restaurada ya quedó agregada al Gestor.",
+                "Estudio restaurado correctamente",
+                f"{result.case_count} casos\n{result.file_count} archivos\n"
+                f"{human_size(result.total_bytes)}\n\n"
+                f"Copia previa: {result.safety_backup or 'No fue necesaria'}",
             )
 
     def _study_backup_failed(self, message: str):
         QMessageBox.warning(self, "No pudimos completar la operación", message)
+
+    def _study_backup_cancelled(self):
+        self.statusBar().showMessage("Operación cancelada sin modificar el Estudio.", 5000)
 
     def _study_backup_cleanup(self):
         if self._study_backup_progress is not None:
