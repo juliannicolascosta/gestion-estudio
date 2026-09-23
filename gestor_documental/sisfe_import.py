@@ -37,6 +37,9 @@ class SisfeMovementPayload:
     documents: tuple[SisfeDocumentPayload, ...] = ()
     movement_kind: str = "otro"
     document_available: bool = False
+    observation: str = ""
+    presenter: str = ""
+    cargo_number: str = ""
 
 
 @dataclass(frozen=True)
@@ -116,8 +119,14 @@ class SisfeImportService:
             metadata = read_case_metadata(case)
             if snapshot.case_status.strip():
                 metadata["Estado SISFE"] = snapshot.case_status.strip()
+                metadata["Ubicación actual SISFE"] = snapshot.case_status.strip()
+            else:
+                metadata.pop("Estado SISFE", None)
+                metadata.pop("Ubicación actual SISFE", None)
             if snapshot.case_status_since.strip():
                 metadata["Estado SISFE desde"] = snapshot.case_status_since.strip()
+            else:
+                metadata.pop("Estado SISFE desde", None)
             # Se registra sólo al importar un resultado válido. Si la consulta
             # falla antes, el último estado y hora exitosos se conservan.
             metadata["Última sincronización SISFE"] = datetime.now().astimezone().isoformat(timespec="seconds")
@@ -137,6 +146,9 @@ class SisfeImportService:
                     logical_key=self._movement_key(movement),
                     movement_kind=movement.movement_kind,
                     document_available=movement.document_available,
+                    observation=movement.observation,
+                    presenter=movement.presenter,
+                    cargo_number=movement.cargo_number,
                 )
                 if database.connection.total_changes > before:
                     movements_registered += 1

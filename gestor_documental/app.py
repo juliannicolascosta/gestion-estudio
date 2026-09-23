@@ -130,6 +130,7 @@ from .compilation_draft import (
     save_compilation_draft as persist_compilation_draft,
 )
 from .sisfe_session import ManualSisfeSession
+from .sisfe_browser import classify_sisfe_movement
 from .sisfe_sync import SisfePortalService
 from .icons import badged_icon, file_icon_name, foro_application_icon, foro_mark, ui_icon
 from .signing import (
@@ -233,6 +234,13 @@ def _format_sisfe_date(value: object) -> str:
     return text
 
 
+def _timeline_date_label(value: datetime | None) -> str:
+    if value is None:
+        return "SIN FECHA"
+    months = ("ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC")
+    return f"{value.day:02d} {months[value.month - 1]} {value.year}"
+
+
 def _comparable_text(value: str) -> str:
     """Clave estable para no duplicar valores por mayúsculas, acentos o espacios."""
     normalized = unicodedata.normalize("NFKD", value.casefold())
@@ -315,6 +323,11 @@ QListWidget#modelList::item { background: #FFFFFF; border: 1px solid transparent
 QListWidget#modelList::item:hover { background: #F2F5EE; color: #2B5748; border-color: #D8E2D2; }
 QListWidget#modelList::item:selected { background: #2B5748; color: #F9F4E9; border-color: #23483C; }
 QListWidget#modelList::item:selected:hover { background: #23483C; color: #F9F4E9; border-color: #1B3A30; }
+QListWidget#novedadesList::item { padding: 9px 8px; margin: 0; border-radius: 0; }
+QListWidget#novedadesList::item:hover { background: #F7F5EC; }
+QListWidget#novedadesList::item:selected { background: #EDF3EC; color: #1F4034; }
+QProgressBar#taskProgress { max-height: 5px; min-height: 5px; border: 0; border-radius: 2px; background: #E3DED0; }
+QProgressBar#taskProgress::chunk { background: #698D05; border-radius: 2px; }
 QSplitter::handle { background: #E4DFD0; width: 6px; height: 6px; }
 QSplitter::handle:hover { background: #698D05; }
 QScrollArea { border: 0; background: transparent; }
@@ -2243,7 +2256,7 @@ class MainWindow(QMainWindow):
         header.addWidget(self.novedades_count)
         layout.addLayout(header)
 
-        self.portal_case_status = QLabel("Trámite interno / ubicación actual: todavía no sincronizado")
+        self.portal_case_status = QLabel("UBICACIÓN ACTUAL · Sin información")
         self.portal_case_status.setObjectName("caseBadge")
         self.portal_case_status.setWordWrap(True)
         layout.addWidget(self.portal_case_status)
@@ -2251,6 +2264,8 @@ class MainWindow(QMainWindow):
         self.novedades_list = QListWidget()
         self.novedades_list.setObjectName("novedadesList")
         self.novedades_list.setMinimumHeight(200)
+        self.novedades_list.setWordWrap(True)
+        self.novedades_list.setIconSize(QSize(24, 24))
         self.novedades_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.novedades_list.itemSelectionChanged.connect(self.update_novedad_actions)
         self.novedades_list.itemDoubleClicked.connect(lambda _: self.open_selected_novedad())
@@ -2560,6 +2575,30 @@ class MainWindow(QMainWindow):
     def _build_status_bar(self):
         bar = QStatusBar()
         bar.setSizeGripEnabled(False)
+        self.status_activity = QWidget()
+        activity_layout = QHBoxLayout(self.status_activity)
+        activity_layout.setContentsMargins(18, 0, 18, 0)
+        activity_layout.setSpacing(8)
+        self.status_center = QLabel("")
+        self.status_center.setObjectName("muted")
+        self.task_progress = QProgressBar()
+        self.task_progress.setObjectName("taskProgress")
+        self.task_progress.setFixedWidth(170)
+        self.task_progress.setTextVisible(False)
+        self.task_stop_button = icon_button(
+            "stop", "Detener sincronización", self.stop_long_task, color="#6C7A6D"
+        )
+        activity_layout.addWidget(self.status_center)
+        activity_layout.addWidget(self.task_progress)
+        activity_layout.addWidget(self.task_stop_button)
+        self.status_activity.hide()
+        bar.addWidget(self.status_activity, 1)
+        self.sync_all_button = QPushButton("Sincronizar todos")
+        decorate_button(self.sync_all_button, "refresh")
+        self.sync_all_button.setToolTip("Sincronizar todos los expedientes")
+        self.sync_all_button.clicked.connect(self.sync_all_expedientes)
+        self.sync_all_button.setObjectName("statusAction")
+        bar.addPermanentWidget(self.sync_all_button)
         self.sisfe_indicator = OperationStatusIndicator("SISFE sin confirmar", compact=True)
         self.sisfe_status = self.sisfe_indicator
         self.sisfe_indicator.setToolTip(
@@ -2568,33 +2607,6 @@ class MainWindow(QMainWindow):
         self.sisfe_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sisfe_indicator.mousePressEvent = lambda _event: self.open_sisfe_session()
         bar.addPermanentWidget(self.sisfe_indicator)
-        self.status_activity = QWidget()
-        activity_layout = QHBoxLayout(self.status_activity)
-        activity_layout.setContentsMargins(18, 0, 18, 0)
-        activity_layout.setSpacing(8)
-        self.status_center = QLabel("")
-        self.status_center.setObjectName("muted")
-        self.task_progress = QProgressBar()
-        self.task_progress.setFixedWidth(170)
-        self.task_progress.setTextVisible(False)
-        self.task_pause_button = QPushButton("Pausar")
-        self.task_pause_button.setToolTip("Pausar al terminar la unidad actual")
-        self.task_pause_button.clicked.connect(self.toggle_long_task_pause)
-        self.task_stop_button = QPushButton("Detener")
-        self.task_stop_button.setToolTip("Detener de forma segura")
-        self.task_stop_button.clicked.connect(self.stop_long_task)
-        activity_layout.addWidget(self.status_center)
-        activity_layout.addWidget(self.task_progress)
-        activity_layout.addWidget(self.task_pause_button)
-        activity_layout.addWidget(self.task_stop_button)
-        self.status_activity.hide()
-        bar.addPermanentWidget(self.status_activity, 1)
-        self.sync_all_button = QPushButton("Sincronizar todos")
-        decorate_button(self.sync_all_button, "refresh")
-        self.sync_all_button.setToolTip("Sincronizar todos los expedientes")
-        self.sync_all_button.clicked.connect(self.sync_all_expedientes)
-        self.sync_all_button.setObjectName("statusAction")
-        bar.addPermanentWidget(self.sync_all_button)
         self.case_sync_label = OperationStatusIndicator("", compact=False)
         self.case_sync_label.hide()
         self.setStatusBar(bar)
@@ -3835,10 +3847,20 @@ class MainWindow(QMainWindow):
 
     def update_sisfe_indicator(self, state: OperationState, message: str):
         """Un único estado técnico, replicado en la barra inferior."""
+        if state is OperationState.SUCCESS:
+            visible_state, visible_text = OperationState.SUCCESS, "SISFE conectado"
+        elif state is OperationState.ERROR:
+            visible_state, visible_text = OperationState.ERROR, "SISFE desconectado"
+        elif state is OperationState.RUNNING and self.sisfe_session.active:
+            visible_state, visible_text = OperationState.SUCCESS, "SISFE conectado"
+        else:
+            visible_state, visible_text = OperationState.IDLE, "SISFE sin confirmar"
         if hasattr(self, "sisfe_status"):
-            self.sisfe_status.set_state(state, message)
+            self.sisfe_status.set_state(visible_state, visible_text)
+            self.sisfe_status.setToolTip(message)
         if hasattr(self, "sisfe_indicator"):
-            self.sisfe_indicator.set_state(state, message)
+            self.sisfe_indicator.set_state(visible_state, visible_text)
+            self.sisfe_indicator.setToolTip(message)
 
     def record_case_sync(self, case: Case):
         moment = datetime.now()
@@ -3885,6 +3907,11 @@ class MainWindow(QMainWindow):
     def open_selected_novedad(self):
         """Doble clic: si el movimiento tiene PDF descargado, se abre."""
         movement = self.selected_novedad_data() or {}
+        cedulas = [Path(path) for path in movement.get("cedula_documents", [])]
+        for cedula in cedulas:
+            if cedula.is_file():
+                open_file(cedula)
+                return
         documents = [Path(path) for path in movement.get("local_documents", [])]
         for document in documents:
             if document.is_file():
@@ -3924,8 +3951,6 @@ class MainWindow(QMainWindow):
         self.task_progress.setRange(0, task.total)
         self.task_progress.setValue(0)
         self.status_center.setText(f"{task.name} 0 de {task.total}")
-        self.task_pause_button.setText("Pausar")
-        self.task_pause_button.setEnabled(True)
         self.task_stop_button.setEnabled(True)
         self.status_activity.show()
         self.sync_all_button.setEnabled(False)
@@ -3936,14 +3961,7 @@ class MainWindow(QMainWindow):
         self.status_center.setText(f"{name} {current} de {total}")
 
     def _long_task_state_changed(self, state: TaskState):
-        if state is TaskState.PAUSED:
-            self.task_pause_button.setText("Reanudar")
-            self.status_center.setText(
-                f"{self._long_task.name} en pausa · "
-                f"{self._long_task.current} de {self._long_task.total}"
-            )
-        elif state is TaskState.RUNNING:
-            self.task_pause_button.setText("Pausar")
+        if state is TaskState.RUNNING:
             if (
                 self._long_task_kind == "sync"
                 and self._sync_all_index
@@ -3952,17 +3970,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._sync_next_expediente)
         elif state is TaskState.CANCELLING:
             self.status_center.setText("Deteniendo de forma segura…")
-            self.task_pause_button.setEnabled(False)
             self.task_stop_button.setEnabled(False)
-
-    def toggle_long_task_pause(self):
-        task = self._long_task
-        if task is None:
-            return
-        if task.state is TaskState.PAUSED:
-            task.resume()
-        elif task.state is TaskState.RUNNING:
-            task.pause()
 
     def stop_long_task(self):
         task = self._long_task
@@ -4593,7 +4601,7 @@ class MainWindow(QMainWindow):
         self.update_novedad_actions()
         if not self.case:
             self.novedades_count.setText("Sin novedades")
-            self.portal_case_status.setText("Trámite interno / ubicación actual: seleccioná un caso")
+            self.portal_case_status.setText("UBICACIÓN ACTUAL · Sin información")
             if hasattr(self, "work_tabs"):
                 self.work_tabs.setTabText(self.portal_tab_index, "Expediente · 0")
             self.reload_activity()
@@ -4601,16 +4609,13 @@ class MainWindow(QMainWindow):
         try:
             movements = recent_case_novedades(self.case)
             metadata = read_case_metadata(self.case)
-            status = str(metadata.get("Estado SISFE", "")).strip()
-            raw_since = str(metadata.get("Estado SISFE desde", "")).strip()
-            since = _format_sisfe_date(raw_since) if raw_since else ""
+            status = str(metadata.get("Ubicación actual SISFE", "")).strip()
             raw_synced_at = str(metadata.get("Última sincronización SISFE", "")).strip()
             synced_at = _format_sisfe_date(raw_synced_at) if raw_synced_at else ""
             status_text = status or "Sin información"
-            since_text = f" · desde {since}" if since else ""
-            synced_text = f"\nÚltima sincronización: {synced_at}" if synced_at else ""
-            self.portal_case_status.setText(
-                f"Trámite interno / ubicación actual: {status_text}{since_text}{synced_text}"
+            self.portal_case_status.setText(f"UBICACIÓN ACTUAL · {status_text}")
+            self.portal_case_status.setToolTip(
+                f"Última sincronización: {synced_at}" if synced_at else "Todavía no sincronizado"
             )
         except (OSError, RuntimeError, sqlite3.Error) as error:
             self.novedades_count.setText("No disponibles")
@@ -4619,10 +4624,14 @@ class MainWindow(QMainWindow):
                 self.work_tabs.setTabText(self.portal_tab_index, "Portal jurídico")
             self.reload_activity()
             return
+        previous_date = object()
         for movement in movements:
-            stamp = movement.occurred_at.strftime("%d/%m/%Y %H:%M") if movement.occurred_at else "Sin fecha"
+            movement_date = movement.occurred_at.date() if movement.occurred_at else None
+            date_heading = ""
+            if movement_date != previous_date:
+                date_heading = _timeline_date_label(movement.occurred_at) + "\n"
+                previous_date = movement_date
             interpretation = _interpretation_summary(movement.title)
-            detail_line = f"\nDETECCIÓN · {interpretation}" if interpretation else ""
             local_documents = self.movement_local_documents(movement.external_id, movement.source)
             cedula_documents = [
                 path for path in local_documents if "CEDULA" in _comparable_text(path.stem).upper()
@@ -4640,23 +4649,29 @@ class MainWindow(QMainWindow):
                 "running": "\nDESCARGANDO · SISFE en segundo plano",
                 "failed": "\nERROR · clic derecho para reintentar",
             }.get(download_state, "")
-            kind = movement.movement_kind or "otro"
-            judicial = kind in {"judicial", "cedula"} or self.is_judicial_movement(movement.title)
+            kind = classify_sisfe_movement(movement.title, movement.movement_kind or "otro")
+            judicial = kind in {"judicial", "cedula"}
             available = bool(movement.document_available)
             icon_color = (
                 "#2B7A55" if local_documents
                 else "#C9493C" if available
                 else "#768681"
             )
-            cedula_line = "\nCÉDULA ASOCIADA" if cedula_documents else ""
+            details = [movement.title]
+            if movement.observation.strip():
+                details.append(movement.observation.strip())
+            if movement.presenter.strip():
+                details.append(movement.presenter.strip())
+            if movement.cargo_number.strip():
+                details.append(f"CARGO {movement.cargo_number.strip()}")
+            if cedula_documents:
+                details.append("✉ Cédula asociada")
             item = QListWidgetItem(
                 ui_icon(
-                    "notification" if kind == "cedula" else "judicial" if judicial else "party-filing",
+                    "notification" if kind == "cedula" else "judicial" if judicial else "party-filing" if kind == "parte" else "file",
                     icon_color,
                 ),
-                f"{stamp}\n{kind.upper() if kind != 'otro' else ('ACTUACIÓN JUDICIAL' if judicial else 'ESCRITO DE PARTE')}"
-                f" · {'JUZGADO' if judicial else 'PARTE'}\n{movement.title}"
-                f"{detail_line}{document_line}{state_line}{cedula_line}",
+                date_heading + "│  " + "\n│  ".join(details) + f"{document_line}{state_line}",
             )
             if "CARGO A VERIFICAR" in f"{movement.title} {interpretation}".upper():
                 item.setForeground(QColor("#B42318"))
@@ -4683,6 +4698,9 @@ class MainWindow(QMainWindow):
                     "judicial": judicial,
                     "movement_kind": kind,
                     "document_available": available,
+                    "observation": movement.observation,
+                    "presenter": movement.presenter,
+                    "cargo_number": movement.cargo_number,
                 },
             )
             self.novedades_list.addItem(item)

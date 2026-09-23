@@ -2,6 +2,7 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -39,6 +40,7 @@ from gestor_documental.study_database import StudyDatabase, study_database_path
 from gestor_documental.sisfe_downloads import SisfeDownloadRegistry
 from gestor_documental.ui.operation_status import OperationState
 from gestor_documental.long_tasks import LongTask, TaskState
+from gestor_documental.icons import ui_icon
 
 
 class AppSmokeTests(unittest.TestCase):
@@ -389,7 +391,7 @@ class AppSmokeTests(unittest.TestCase):
 
             self.assertEqual(window.novedades_list.count(), 1)
             self.assertIn("Se fija audiencia", window.novedades_list.item(0).text())
-            self.assertIn("DETECCIÓN · Audiencia: 15/09/2026 09:30", window.novedades_list.item(0).text())
+            self.assertNotIn("DETECCIÓN", window.novedades_list.item(0).text())
             self.assertEqual(window.novedades_count.text(), "1 novedad")
             self.assertGreaterEqual(window.novedades_list.minimumHeight(), 200)
             self.assertEqual(
@@ -399,6 +401,74 @@ class AppSmokeTests(unittest.TestCase):
             window.novedades_list.setCurrentRow(0)
             self.app.processEvents()
             self.assertIsNotNone(window.selected_novedad_data())
+            window.close()
+
+    def test_expediente_timeline_groups_dates_and_hides_internal_classification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            save_case_metadata(case, {"Ubicación actual SISFE": "TRÁMITE INTERNO"})
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.import_case(case)
+                database.add_movement(
+                    expediente.id,
+                    "Contestación de demanda",
+                    occurred_at=datetime(2026, 9, 22, 18, 45),
+                    source="sisfe",
+                    external_id="timeline-1",
+                    movement_kind="parte",
+                    document_available=True,
+                    observation="Contesta demanda y ofrece prueba",
+                    presenter="SIJAM S.A.",
+                    cargo_number="12345678",
+                )
+                database.add_movement(
+                    expediente.id,
+                    "Decreto",
+                    occurred_at=datetime(2026, 9, 22, 9, 30),
+                    source="sisfe",
+                    external_id="timeline-2",
+                    movement_kind="judicial",
+                )
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            texts = [window.novedades_list.item(index).text() for index in range(2)]
+            combined = "\n".join(texts)
+            self.assertEqual(combined.count("22 SEP 2026"), 1)
+            self.assertNotIn("18:45", combined)
+            self.assertNotIn("09:30", combined)
+            self.assertNotIn("ESCRITO DE PARTE", combined)
+            self.assertNotIn("ACTUACIÓN JUDICIAL", combined)
+            self.assertIn("Contesta demanda y ofrece prueba", combined)
+            self.assertIn("SIJAM S.A.", combined)
+            self.assertIn("CARGO 12345678", combined)
+            self.assertEqual(window.portal_case_status.text(), "UBICACIÓN ACTUAL · TRÁMITE INTERNO")
+
+            party_item = next(
+                window.novedades_list.item(index)
+                for index in range(2)
+                if "Contestación" in window.novedades_list.item(index).text()
+            )
+            judicial_item = next(
+                window.novedades_list.item(index)
+                for index in range(2)
+                if "Decreto" in window.novedades_list.item(index).text()
+            )
+            self.assertEqual(
+                party_item.icon().cacheKey(), ui_icon("party-filing", "#C9493C").cacheKey()
+            )
+            self.assertEqual(
+                judicial_item.icon().cacheKey(), ui_icon("judicial", "#768681").cacheKey()
+            )
+            self.assertFalse(hasattr(window, "task_pause_button"))
+            self.assertEqual(window.task_stop_button.toolTip(), "Detener sincronización")
+            window.show()
+            self.app.processEvents()
+            self.assertLess(window.sync_all_button.x(), window.sisfe_indicator.x())
             window.close()
 
     def test_layout_can_collapse_restore_and_persist_per_computer(self):
@@ -559,7 +629,7 @@ class AppSmokeTests(unittest.TestCase):
                 window.open_sisfe_session()
 
             self.assertTrue(window.sisfe_session.active)
-            self.assertIn("activa", window.sisfe_status.text().lower())
+            self.assertEqual(window.sisfe_status.text(), "SISFE conectado")
             self.assertEqual(window.sisfe_status.state, OperationState.SUCCESS)
             self.assertNotIn("password", vars(window.sisfe_session))
             dialog_class.assert_called_once_with(
@@ -1252,7 +1322,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(case))
             window.close()
 
-    def test_mass_sync_is_sequential_and_pause_waits_before_next_case(self):
+    def test_mass_sync_is_sequential_and_continues_after_individual_error(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             study = root / "Estudio"
@@ -1280,13 +1350,8 @@ class AppSmokeTests(unittest.TestCase):
                 portal.prepare_background_sync.assert_called_once_with()
                 self.assertFalse(window.status_activity.isHidden())
                 self.assertEqual(portal.request_snapshot.call_count, 1)
-                window.toggle_long_task_pause()
                 callback = portal.request_snapshot.call_args.args[1]
                 callback(object(), None)
-                self.app.processEvents()
-                self.assertEqual(portal.request_snapshot.call_count, 1)
-                self.assertEqual(task.state, TaskState.PAUSED)
-                window.toggle_long_task_pause()
                 for _ in range(200):
                     self.app.processEvents()
                     if portal.request_snapshot.call_count == 2:
@@ -1297,6 +1362,7 @@ class AppSmokeTests(unittest.TestCase):
                 self.app.processEvents()
                 self.app.processEvents()
                 case_browser.assert_not_called()
+                self.assertFalse(hasattr(window, "task_pause_button"))
 
             self.assertEqual(task.state, TaskState.COMPLETED)
             self.assertEqual(task.current, 2)

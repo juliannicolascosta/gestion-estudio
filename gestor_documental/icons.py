@@ -56,6 +56,7 @@ _SHAPES = {
     "bell": '<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 19a2 2 0 0 0 4 0"/>',
     "judicial": '<path class="soft" d="M5 20h14M8 16h8M10 7h4v9h-4Z"/><path d="m5 8 5-5 4 4-5 5ZM14 5l5 5M4 21h16"/>',
     "party-filing": '<path class="soft" d="M6 3h8l4 4v14H6Z"/><path d="M14 3v5h4M9 12h6M9 16h3M11.5 19l6-6 2 2-6 6H11Z"/>',
+    "stop": '<rect class="soft" x="6" y="6" width="12" height="12" rx="1.5"/><rect x="7" y="7" width="10" height="10" rx="1"/>',
 }
 
 

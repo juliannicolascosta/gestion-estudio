@@ -53,6 +53,9 @@ class Movimiento:
     external_id: str = ""
     movement_kind: str = "otro"
     document_available: bool = False
+    observation: str = ""
+    presenter: str = ""
+    cargo_number: str = ""
 
 
 @dataclass(frozen=True)

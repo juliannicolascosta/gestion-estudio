@@ -104,6 +104,31 @@ class SisfeImportTests(unittest.TestCase):
                 SisfeImportService().import_snapshot(case, snapshot, case.path / "SISFE")
             self.assertFalse((case.path / "SISFE").exists())
 
+    def test_current_location_is_updated_and_cleared_from_each_valid_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            study = Path(directory) / "Estudio"
+            case = create_case(study, "Caso")
+            save_case_metadata(case, {"CUIJ": "21-12345678-9"})
+            service = SisfeImportService()
+            service.import_snapshot(
+                case,
+                SisfeCaseSnapshot(cuij="21-12345678-9", case_status="TRÁMITE INTERNO"),
+                case.path,
+            )
+            self.assertEqual(read_case_metadata(case)["Ubicación actual SISFE"], "TRÁMITE INTERNO")
+
+            service.import_snapshot(
+                case,
+                SisfeCaseSnapshot(cuij="21-12345678-9", case_status="CASILLERO"),
+                case.path,
+            )
+            self.assertEqual(read_case_metadata(case)["Ubicación actual SISFE"], "CASILLERO")
+
+            service.import_snapshot(
+                case, SisfeCaseSnapshot(cuij="21-12345678-9"), case.path
+            )
+            self.assertNotIn("Ubicación actual SISFE", read_case_metadata(case))
+
 
 if __name__ == "__main__":
     unittest.main()

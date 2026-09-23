@@ -12,6 +12,7 @@ from gestor_documental.sisfe_browser import (
     browser_sync_script,
     browser_validation_script,
     snapshot_from_browser_payload,
+    classify_sisfe_movement,
 )
 
 
@@ -25,6 +26,7 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertIn("findPaged", script)
         self.assertIn("collectPaged", script)
         self.assertIn("details.ubicacionActual", script)
+        self.assertIn("deepValue(context, ['ubicacionactual', 'expubicacionactual'])", script)
         self.assertIn("fechaUbicacionActual", script)
         self.assertIn("page += 1", script)
         self.assertIn("al consultar", script)
@@ -42,7 +44,15 @@ class SisfeBrowserTests(unittest.TestCase):
         script = browser_sync_script("21-12345678-9")
         self.assertIn("row.adjunto1 != null", script)
         self.assertIn("row.adjunto3 != null", script)
-        self.assertIn("'cedula' : 'judicial'", script)
+        self.assertIn("movementKind(row)", script)
+        self.assertIn("return 'judicial'", script)
+        self.assertIn("return 'parte'", script)
+
+    def test_cedula_has_priority_over_both_structural_origins(self):
+        self.assertEqual(classify_sisfe_movement("CÉDULA electrónica", "parte"), "cedula")
+        self.assertEqual(classify_sisfe_movement("Se libra cedula", "judicial"), "cedula")
+        self.assertEqual(classify_sisfe_movement("Resolución", "judicial"), "judicial")
+        self.assertEqual(classify_sisfe_movement("Contestación", "parte"), "parte")
 
     def test_validation_uses_sisfe_bearer_token_only_inside_browser(self):
         script = browser_validation_script()
@@ -105,6 +115,9 @@ class SisfeBrowserTests(unittest.TestCase):
                         "internal_id": "9", "title": "Cédula",
                         "occurred_at": "2026-08-31T12:00:00",
                         "movement_kind": "cedula", "document_available": True,
+                        "observation": "Notificación electrónica",
+                        "presenter": "Juzgado Laboral",
+                        "cargo_number": "12345678",
                     }
                 ],
             }
@@ -116,6 +129,13 @@ class SisfeBrowserTests(unittest.TestCase):
         self.assertEqual(snapshot.movements[0].occurred_at.year, 2026)
         self.assertEqual(snapshot.movements[0].movement_kind, "cedula")
         self.assertTrue(snapshot.movements[0].document_available)
+        self.assertEqual(snapshot.movements[0].observation, "Notificación electrónica")
+        self.assertEqual(snapshot.movements[0].presenter, "Juzgado Laboral")
+        self.assertEqual(snapshot.movements[0].cargo_number, "12345678")
+
+    def test_missing_current_location_is_not_invented(self):
+        snapshot = snapshot_from_browser_payload({"ok": True, "cuij": "21123456789"})
+        self.assertEqual(snapshot.case_status, "")
 
     def test_combined_internal_status_is_split_from_its_since_date(self):
         snapshot = snapshot_from_browser_payload(

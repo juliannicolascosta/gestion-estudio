@@ -582,6 +582,7 @@ SYSTEM_METADATA_KEYS = {
     "Documentación recibida",
     "Estado SISFE",
     "Estado SISFE desde",
+    "Ubicación actual SISFE",
     "Última sincronización SISFE",
     # Compatibilidad con fichas creadas antes de habilitar la carga textual.
     "Estado de acceso ARCA/AFIP",

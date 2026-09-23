@@ -8,11 +8,21 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from base64 import b64decode
 from binascii import Error as Base64Error
 from datetime import datetime
 
 from .sisfe_import import SisfeCaseSnapshot, SisfeDocumentPayload, SisfeMovementPayload
+
+
+def classify_sisfe_movement(title: str, structural_kind: str = "otro") -> str:
+    """Cédula has priority; otherwise keep the structural attachment-column signal."""
+    normalized = unicodedata.normalize("NFKD", str(title).casefold())
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    if re.search(r"\bcedula\b", normalized):
+        return "cedula"
+    return structural_kind if structural_kind in {"judicial", "parte"} else "otro"
 
 
 _PAGINATION_HELPERS = """
@@ -194,6 +204,8 @@ def browser_movement_detail_script(cuij: str, movement_id: str) -> str:
               title: String(movement.novedad || movement.tipoActuacion || 'Movimiento SISFE'),
               occurred_at: movement.fecha || null,
               observation: String(movement.observacion || ''),
+              presenter: String(movement.presentante || movement.nombrePresentante || movement.usuarioPresentante || ''),
+              cargo_number: String(movement.numeroCargo || movement.nroCargo || movement.cargo || ''),
               page_number: Math.floor(movementIndex / 25) + 1,
               row_number: movementIndex % 25,
               has_primary_document: movement.adjunto1 != null,
@@ -328,6 +340,19 @@ def browser_sync_script(cuij: str, known_ids: tuple[str, ...] = ()) -> str:
               return '';
             }};
             const context = {{details, selected}};
+            const currentLocation = scalar(details.ubicacionActual) ||
+              scalar(details.expUbicacionActual) || scalar(selected.ubicacionActual) ||
+              scalar(selected.expUbicacionActual) ||
+              deepValue(context, ['ubicacionactual', 'expubicacionactual']);
+            const movementKind = row => {{
+              const news = String(row.novedad || row.tipoActuacion || '');
+              const normalized = news.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+              if (/(^|\\s)cedula(\\s|$)/.test(normalized)) return 'cedula';
+              if (row.adjunto1 != null) return 'judicial';
+              if (row.adjunto3 != null) return 'parte';
+              return 'otro';
+            }};
             const news = await collectPagedUntilKnown((page, size) => getJson(
               '/iol/expedientes/findNovedadesById?idExpediente=' + encodeURIComponent(selected.id) +
               '&page=' + page + '&size=' + size
@@ -337,8 +362,7 @@ def browser_sync_script(cuij: str, known_ids: tuple[str, ...] = ()) -> str:
               cuij: target,
               title: details.expCaratula || selected.expCaratula || '',
               tribunal: details.radicado || selected.radicacionActual || '',
-              case_status: scalar(details.ubicacionActual) || scalar(details.expUbicacionActual) ||
-                scalar(selected.ubicacionActual) || scalar(selected.expUbicacionActual),
+              case_status: currentLocation,
               case_status_since: scalar(details.fechaEstado) || scalar(details.fechaEstadoActual) ||
                 scalar(details.fechaUbicacionActual) || scalar(details.expFechaUbicacion) ||
                 scalar(selected.fechaUbicacionActual) || scalar(selected.expFechaUbicacion),
@@ -346,9 +370,10 @@ def browser_sync_script(cuij: str, known_ids: tuple[str, ...] = ()) -> str:
                 internal_id: String(row.id || ''),
                 title: String(row.novedad || row.tipoActuacion || 'Movimiento SISFE'),
                 occurred_at: row.fecha || null,
-                movement_kind: row.adjunto1 != null
-                  ? (/cedula/i.test(String(row.novedad || '')) ? 'cedula' : 'judicial')
-                  : (row.adjunto3 != null ? 'parte' : 'otro'),
+                observation: String(row.observacion || ''),
+                presenter: String(row.presentante || row.nombrePresentante || row.usuarioPresentante || ''),
+                cargo_number: String(row.numeroCargo || row.nroCargo || row.cargo || ''),
+                movement_kind: movementKind(row),
                 document_available: row.adjunto1 != null || row.adjunto3 != null
               }}))
             }};
@@ -369,8 +394,13 @@ def snapshot_from_browser_payload(payload: dict) -> SisfeCaseSnapshot:
             internal_id=str(row.get("internal_id", "")),
             title=str(row.get("title", "Movimiento SISFE")),
             occurred_at=_parse_date(row.get("occurred_at")),
-            movement_kind=str(row.get("movement_kind", "otro")),
+            movement_kind=classify_sisfe_movement(
+                str(row.get("title", "")), str(row.get("movement_kind", "otro"))
+            ),
             document_available=bool(row.get("document_available", False)),
+            observation=str(row.get("observation", "")),
+            presenter=str(row.get("presenter", "")),
+            cargo_number=str(row.get("cargo_number", "")),
             documents=_documents_from_browser_row(row),
         )
         for row in payload.get("movements", [])

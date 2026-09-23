@@ -19,7 +19,7 @@ from .models import Case
 from .services import read_case_metadata, save_case_metadata
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 DATABASE_NAME = ".gestor-estudio.sqlite3"
 CASE_IDENTITY_FIELD = "Identificación interna del expediente"
 
@@ -93,6 +93,10 @@ class StudyDatabase:
         if current < 8:
             self._migrate_to_8()
             self.connection.execute("PRAGMA user_version = 8")
+            current = 8
+        if current < 9:
+            self._migrate_to_9()
+            self.connection.execute("PRAGMA user_version = 9")
         self.connection.commit()
 
     def _migrate_to_1(self):
@@ -241,6 +245,24 @@ class StudyDatabase:
             self.connection.execute("ALTER TABLE movimientos ADD COLUMN movement_kind TEXT NOT NULL DEFAULT 'otro'")
         if "document_available" not in columns:
             self.connection.execute("ALTER TABLE movimientos ADD COLUMN document_available INTEGER NOT NULL DEFAULT 0")
+
+    def _migrate_to_9(self):
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(movimientos)")}
+        for name in ("observation", "presenter", "cargo_number"):
+            if name not in columns:
+                self.connection.execute(
+                    f"ALTER TABLE movimientos ADD COLUMN {name} TEXT NOT NULL DEFAULT ''"
+                )
+        for row in self.connection.execute("SELECT id, title FROM movimientos").fetchall():
+            normalized = unicodedata.normalize("NFKD", str(row["title"]).casefold())
+            normalized = "".join(
+                char for char in normalized if not unicodedata.combining(char)
+            )
+            if re.search(r"\bcedula\b", normalized):
+                self.connection.execute(
+                    "UPDATE movimientos SET movement_kind = 'cedula' WHERE id = ?",
+                    (row["id"],),
+                )
 
     @staticmethod
     def _client_values(metadata: dict[str, str]) -> dict[str, str]:
@@ -518,6 +540,9 @@ class StudyDatabase:
         logical_key: str = "",
         movement_kind: str = "otro",
         document_available: bool = False,
+        observation: str = "",
+        presenter: str = "",
+        cargo_number: str = "",
     ) -> Movimiento:
         """Add a movement, or return the existing one for an external ID."""
         title = title.strip()
@@ -532,15 +557,22 @@ class StudyDatabase:
                 (source, external_id),
             ).fetchone()
             if row:
-                if movement_kind != "otro" or document_available:
+                if movement_kind != "otro" or document_available or observation or presenter or cargo_number:
                     self.connection.execute(
                         """
                         UPDATE movimientos
                         SET movement_kind = CASE WHEN ? <> 'otro' THEN ? ELSE movement_kind END,
-                            document_available = MAX(document_available, ?)
+                            document_available = MAX(document_available, ?),
+                            observation = CASE WHEN ? <> '' THEN ? ELSE observation END,
+                            presenter = CASE WHEN ? <> '' THEN ? ELSE presenter END,
+                            cargo_number = CASE WHEN ? <> '' THEN ? ELSE cargo_number END
                         WHERE id = ?
                         """,
-                        (movement_kind, movement_kind, int(document_available), row["id"]),
+                        (
+                            movement_kind, movement_kind, int(document_available),
+                            observation, observation, presenter, presenter,
+                            cargo_number, cargo_number, row["id"],
+                        ),
                     )
                     self.connection.commit()
                     row = self.connection.execute(
@@ -567,12 +599,16 @@ class StudyDatabase:
             external_id=external_id,
             movement_kind=movement_kind,
             document_available=document_available,
+            observation=observation.strip(),
+            presenter=presenter.strip(),
+            cargo_number=cargo_number.strip(),
         )
         self.connection.execute(
             """
             INSERT INTO movimientos
-                (id, expediente_id, title, occurred_at, source, external_id, logical_key, movement_kind, document_available, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, expediente_id, title, occurred_at, source, external_id, logical_key,
+                 movement_kind, document_available, observation, presenter, cargo_number, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -584,6 +620,9 @@ class StudyDatabase:
                 logical_key,
                 record.movement_kind,
                 int(record.document_available),
+                record.observation,
+                record.presenter,
+                record.cargo_number,
                 now,
             ),
         )
@@ -985,6 +1024,9 @@ class StudyDatabase:
             external_id=row["external_id"],
             movement_kind=row["movement_kind"] if "movement_kind" in row.keys() else "otro",
             document_available=bool(row["document_available"]) if "document_available" in row.keys() else False,
+            observation=row["observation"] if "observation" in row.keys() else "",
+            presenter=row["presenter"] if "presenter" in row.keys() else "",
+            cargo_number=row["cargo_number"] if "cargo_number" in row.keys() else "",
         )
 
     @staticmethod

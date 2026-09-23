@@ -74,6 +74,12 @@ class StudyDatabaseTests(unittest.TestCase):
                 <= tables
             )
             self.assertIn("case_identity", columns)
+            with StudyDatabase(database_path) as database:
+                movement_columns = {
+                    row["name"]
+                    for row in database.connection.execute("PRAGMA table_info(movimientos)")
+                }
+            self.assertTrue({"observation", "presenter", "cargo_number"} <= movement_columns)
 
     def test_import_is_idempotent_and_only_adds_portable_identity_to_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -246,6 +252,31 @@ class StudyDatabaseTests(unittest.TestCase):
 
             self.assertEqual(first.id, second.id)
             self.assertNotEqual(manual_a.id, manual_b.id)
+
+    def test_schema_migration_recognizes_existing_cedula_titles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = Path(directory) / "legacy.sqlite3"
+            with StudyDatabase(database_path) as database:
+                database.connection.execute("PRAGMA user_version = 8")
+                database.connection.execute(
+                    "INSERT INTO expedientes "
+                    "(id, folder_path, title, client_name, case_number, status, created_at, updated_at, "
+                    "tribunal, client_id, case_identity) VALUES (?, ?, ?, '', '', 'activo', ?, ?, '', '', '')",
+                    ("case-1", str(Path(directory) / "Caso"), "Caso", "2026-09-23", "2026-09-23"),
+                )
+                database.connection.execute(
+                    "INSERT INTO movimientos "
+                    "(id, expediente_id, title, occurred_at, source, external_id, created_at, logical_key, "
+                    "movement_kind, document_available) VALUES (?, ?, ?, NULL, 'sisfe', ?, ?, '', 'parte', 1)",
+                    ("movement-1", "case-1", "CÉDULA electrónica", "remote-1", "2026-09-23"),
+                )
+                database.connection.commit()
+
+            with StudyDatabase(database_path) as database:
+                kind = database.connection.execute(
+                    "SELECT movement_kind FROM movimientos WHERE id = 'movement-1'"
+                ).fetchone()[0]
+            self.assertEqual(kind, "cedula")
 
     def test_logical_movement_identity_deduplicates_when_external_id_is_missing(self):
         with tempfile.TemporaryDirectory() as directory:
