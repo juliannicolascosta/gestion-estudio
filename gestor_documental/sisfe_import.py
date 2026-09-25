@@ -135,8 +135,11 @@ class SisfeImportService:
             movements_registered = 0
             documents_registered = 0
             documents_skipped = 0
+            known_movement_ids = {
+                movement.id
+                for movement in database.list_recent_movements(expediente.id, None)
+            }
             for movement in snapshot.movements:
-                before = database.connection.total_changes
                 movement_record = database.add_movement(
                     expediente.id,
                     movement.title,
@@ -149,9 +152,11 @@ class SisfeImportService:
                     observation=movement.observation,
                     presenter=movement.presenter,
                     cargo_number=movement.cargo_number,
+                    unread=True,
                 )
-                if database.connection.total_changes > before:
+                if movement_record.id not in known_movement_ids:
                     movements_registered += 1
+                    known_movement_ids.add(movement_record.id)
                 for document in movement.documents:
                     digest = hashlib.sha256(document.content).hexdigest()
                     expected = document.sha256.strip().lower()

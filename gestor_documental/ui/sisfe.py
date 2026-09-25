@@ -84,7 +84,6 @@ class SisfeLoginDialog(QDialog):
         self.ready_for_sync = False
         self.browser = QWebEngineView()
         self.portal_page = QWebEnginePage(self.profile, self)
-        self.idle_page = QWebEnginePage(self.profile, self.browser)
         self.browser.setPage(self.portal_page)
         layout.addWidget(self.browser, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
@@ -108,13 +107,11 @@ class SisfeLoginDialog(QDialog):
         self.browser.show()
 
     def _detach_portal_page(self):
-        """Keep the authenticated page alive without a native visible surface."""
+        """Hide the surface while keeping one stable page and renderer alive."""
         self.browser.hide()
-        if self.browser.page() is self.portal_page:
-            self.browser.setPage(self.idle_page)
 
     def prepare_background_sync(self):
-        """Run batch queries in the persistent page without showing or focusing a window."""
+        """Run batch queries in one persistent hidden WebEngine surface."""
         self._detach_portal_page()
 
     def prepare_for_open(self):

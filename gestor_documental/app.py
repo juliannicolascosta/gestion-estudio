@@ -114,7 +114,12 @@ from .case_data import (
     raeo_missing_fields,
     sections_for_case_type,
 )
-from .case_registry import recent_case_novedades, register_case_as_expediente
+from .case_registry import (
+    mark_case_novedades_read,
+    recent_case_novedades,
+    register_case_as_expediente,
+    unread_case_novedades,
+)
 from .movement_interpretation import interpret_movement
 from .case_activity import (
     case_activities,
@@ -132,7 +137,14 @@ from .compilation_draft import (
 from .sisfe_session import ManualSisfeSession
 from .sisfe_browser import classify_sisfe_movement
 from .sisfe_sync import SisfePortalService
-from .icons import badged_icon, file_icon_name, foro_application_icon, foro_mark, ui_icon
+from .icons import (
+    badged_icon,
+    file_icon_name,
+    foro_application_icon,
+    foro_mark,
+    movement_icon,
+    ui_icon,
+)
 from .signing import (
     DigitalSignatureSession,
     SigningCertificate,
@@ -328,9 +340,10 @@ QListWidget#modelList::item { background: #FFFFFF; border: 1px solid transparent
 QListWidget#modelList::item:hover { background: #F2F5EE; color: #2B5748; border-color: #D8E2D2; }
 QListWidget#modelList::item:selected { background: #2B5748; color: #F9F4E9; border-color: #23483C; }
 QListWidget#modelList::item:selected:hover { background: #23483C; color: #F9F4E9; border-color: #1B3A30; }
-QListWidget#novedadesList::item { padding: 9px 8px; margin: 0; border-radius: 0; }
-QListWidget#novedadesList::item:hover { background: #F7F5EC; }
-QListWidget#novedadesList::item:selected { background: #EDF3EC; color: #1F4034; }
+QListWidget#novedadesList { border: 0; background: #FFFFFF; padding: 2px 10px 8px 4px; }
+QListWidget#novedadesList::item { padding: 13px 10px 14px 8px; margin: 0; border: 0; border-bottom: 1px solid #E7EAE7; }
+QListWidget#novedadesList::item:hover { background: #F8FAF8; }
+QListWidget#novedadesList::item:selected { background: #EEF5F1; color: #183D32; }
 QProgressBar#taskProgress { max-height: 5px; min-height: 5px; border: 0; border-radius: 2px; background: #E3DED0; }
 QProgressBar#taskProgress::chunk { background: #698D05; border-radius: 2px; }
 QSplitter::handle { background: #E4DFD0; width: 6px; height: 6px; }
@@ -1726,6 +1739,8 @@ class MainWindow(QMainWindow):
         self._sync_all_cases: list[Case] = []
         self._sync_all_index = 0
         self._sync_unit_active = False
+        self._visible_unread_case: Case | None = None
+        self._visible_unread_movement_ids: tuple[str, ...] = ()
         self._visible_workspace_sizes = [780, 440]
         self._layout_save_timer = QTimer(self)
         self._layout_save_timer.setSingleShot(True)
@@ -2580,9 +2595,18 @@ class MainWindow(QMainWindow):
     def _build_status_bar(self):
         bar = QStatusBar()
         bar.setSizeGripEnabled(False)
+        self.case_sync_label = OperationStatusIndicator("", compact=False)
+        self.case_sync_label.hide()
+        bar.addWidget(self.case_sync_label)
+
+        middle = QWidget()
+        middle.setObjectName("statusMiddle")
+        middle_layout = QHBoxLayout(middle)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.addStretch(1)
         self.status_activity = QWidget()
         activity_layout = QHBoxLayout(self.status_activity)
-        activity_layout.setContentsMargins(18, 0, 18, 0)
+        activity_layout.setContentsMargins(12, 0, 12, 0)
         activity_layout.setSpacing(8)
         self.status_center = QLabel("")
         self.status_center.setObjectName("muted")
@@ -2597,13 +2621,21 @@ class MainWindow(QMainWindow):
         activity_layout.addWidget(self.task_progress)
         activity_layout.addWidget(self.task_stop_button)
         self.status_activity.hide()
-        bar.addWidget(self.status_activity, 1)
+        middle_layout.addWidget(self.status_activity)
+        middle_layout.addStretch(1)
+        bar.addWidget(middle, 1)
+
+        self.status_right = QWidget()
+        self.status_right.setObjectName("statusRight")
+        right_layout = QHBoxLayout(self.status_right)
+        right_layout.setContentsMargins(8, 0, 6, 0)
+        right_layout.setSpacing(8)
         self.sync_all_button = QPushButton("Sincronizar todos")
         decorate_button(self.sync_all_button, "refresh")
         self.sync_all_button.setToolTip("Sincronizar todos los expedientes")
         self.sync_all_button.clicked.connect(self.sync_all_expedientes)
         self.sync_all_button.setObjectName("statusAction")
-        bar.addPermanentWidget(self.sync_all_button)
+        right_layout.addWidget(self.sync_all_button)
         self.sisfe_indicator = OperationStatusIndicator("SISFE sin confirmar", compact=True)
         self.sisfe_status = self.sisfe_indicator
         self.sisfe_indicator.setToolTip(
@@ -2611,9 +2643,8 @@ class MainWindow(QMainWindow):
         )
         self.sisfe_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sisfe_indicator.mousePressEvent = lambda _event: self.open_sisfe_session()
-        bar.addPermanentWidget(self.sisfe_indicator)
-        self.case_sync_label = OperationStatusIndicator("", compact=False)
-        self.case_sync_label.hide()
+        right_layout.addWidget(self.sisfe_indicator)
+        bar.addPermanentWidget(self.status_right)
         self.setStatusBar(bar)
         self.statusBar().showMessage("Listo")
 
@@ -3298,7 +3329,10 @@ class MainWindow(QMainWindow):
                         "red": "red_color",
                         "archived": "archived_color",
                     }[activity.status]
-                    unseen = int(metadata.get("Novedades SISFE sin ver", "0") or 0)
+                    try:
+                        unseen = len(unread_case_novedades(case))
+                    except (OSError, RuntimeError, sqlite3.Error):
+                        unseen = 0
                     item.setIcon(0, badged_icon("folder", str(policy[color_key]), unseen))
                     item.setData(0, PATH_ROLE, str(case.path))
                     state_label = {
@@ -3437,10 +3471,14 @@ class MainWindow(QMainWindow):
             if not root.is_dir():
                 continue
             for case in list_cases(root):
-                metadata = read_case_metadata(case)
-                if metadata.pop("Novedades SISFE sin ver", None) is not None:
-                    save_case_metadata(case, metadata)
-                    changed += 1
+                try:
+                    changed += mark_case_novedades_read(case)
+                except (OSError, RuntimeError, sqlite3.Error):
+                    continue
+        self._visible_unread_case = None
+        self._visible_unread_movement_ids = ()
+        if self.case:
+            self.reload_novedades()
         self.reload_cases(self.case.path if self.case else None)
         self.statusBar().showMessage(
             "Todas las novedades quedaron marcadas como leídas"
@@ -3541,6 +3579,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No pudimos renombrar el caso", str(error))
 
     def set_case(self, case: Case | None):
+        if self.case and (case is None or self.case.path != case.path):
+            self.finish_unread_view_cycle(refresh=False)
         self.save_compilation_draft()
         self._loading_compilation = True
         self.case = case
@@ -3904,28 +3944,32 @@ class MainWindow(QMainWindow):
             return ()
 
     def record_unseen_sisfe(self, case: Case, count: int, *, reload_tree: bool = True):
-        if not isinstance(count, int):
-            return
-        if count <= 0:
-            return
-        if self.case == case and self.work_tabs.currentIndex() == self.portal_tab_index:
-            return
-        metadata = read_case_metadata(case)
-        previous = int(metadata.get("Novedades SISFE sin ver", "0") or 0)
-        metadata["Novedades SISFE sin ver"] = str(previous + count)
-        save_case_metadata(case, metadata)
-        if reload_tree:
+        # La importación ya marca cada fila nueva en SQLite. Este método sólo
+        # actualiza la proyección visual; no mantiene un segundo contador.
+        if isinstance(count, int) and count > 0 and reload_tree:
             self.reload_cases(self.case.path if self.case else None)
 
     def case_tab_changed(self, index: int):
-        if index != self.portal_tab_index or not self.case:
+        if index == self.portal_tab_index and self.case:
+            self.reload_novedades()
             return
-        metadata = read_case_metadata(self.case)
-        if not metadata.get("Novedades SISFE sin ver"):
+        self.finish_unread_view_cycle()
+
+    def finish_unread_view_cycle(self, *, refresh: bool = True):
+        case = self._visible_unread_case
+        movement_ids = self._visible_unread_movement_ids
+        if not case or not movement_ids:
             return
-        metadata.pop("Novedades SISFE sin ver", None)
-        save_case_metadata(self.case, metadata)
-        self.reload_cases(self.case.path)
+        self._visible_unread_case = None
+        self._visible_unread_movement_ids = ()
+        try:
+            mark_case_novedades_read(case, movement_ids)
+        except (OSError, RuntimeError, sqlite3.Error):
+            return
+        if refresh and self.case == case:
+            self.reload_novedades()
+        if refresh:
+            self.reload_cases(self.case.path if self.case else None)
 
     # ------------------------------------------------------------------
     # Estado del caso y de los portales
@@ -4699,6 +4743,7 @@ class MainWindow(QMainWindow):
             return
         try:
             movements = recent_case_novedades(self.case)
+            unread_ids = set(unread_case_novedades(self.case))
             metadata = read_case_metadata(self.case)
             status = str(metadata.get("Ubicación actual SISFE", "")).strip()
             raw_synced_at = str(metadata.get("Última sincronización SISFE", "")).strip()
@@ -4715,6 +4760,9 @@ class MainWindow(QMainWindow):
                 self.work_tabs.setTabText(self.portal_tab_index, "Portal jurídico")
             self.reload_activity()
             return
+        if self.work_tabs.currentIndex() == self.portal_tab_index and unread_ids:
+            self._visible_unread_case = self.case
+            self._visible_unread_movement_ids = tuple(unread_ids)
         previous_date = object()
         for movement in movements:
             movement_date = movement.occurred_at.date() if movement.occurred_at else None
@@ -4748,22 +4796,31 @@ class MainWindow(QMainWindow):
                 else "#C9493C" if available
                 else "#768681"
             )
+            is_unread = movement.id in unread_ids
             details = [movement.title]
             if movement.observation.strip():
                 details.append(movement.observation.strip())
+            secondary = []
             if movement.presenter.strip():
-                details.append(movement.presenter.strip())
+                secondary.append(movement.presenter.strip())
             if movement.cargo_number.strip():
-                details.append(f"CARGO {movement.cargo_number.strip()}")
+                secondary.append(f"CARGO {movement.cargo_number.strip()}")
+            if secondary:
+                details.append("   ·   ".join(secondary))
             if cedula_documents:
                 details.append("✉ Cédula asociada")
-            item = QListWidgetItem(
-                ui_icon(
-                    "notification" if kind == "cedula" else "judicial" if judicial else "party-filing" if kind == "parte" else "file",
-                    icon_color,
-                ),
-                date_heading + "│  " + "\n│  ".join(details) + f"{document_line}{state_line}",
+            icon_name = (
+                "notification" if kind == "cedula"
+                else "judicial" if judicial
+                else "party-filing" if kind == "parte"
+                else "file"
             )
+            item = QListWidgetItem(
+                movement_icon(icon_name, icon_color, is_unread),
+                date_heading + "\n".join(details) + f"{document_line}{state_line}",
+            )
+            line_count = len(details) + bool(date_heading) + bool(document_line) + bool(state_line)
+            item.setSizeHint(QSize(0, max(66, 24 + line_count * 20)))
             if "CARGO A VERIFICAR" in f"{movement.title} {interpretation}".upper():
                 item.setForeground(QColor("#B42318"))
                 font = QFont(item.font())
@@ -4792,6 +4849,7 @@ class MainWindow(QMainWindow):
                     "observation": movement.observation,
                     "presenter": movement.presenter,
                     "cargo_number": movement.cargo_number,
+                    "is_unread": is_unread,
                 },
             )
             self.novedades_list.addItem(item)

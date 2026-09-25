@@ -19,7 +19,7 @@ from .models import Case
 from .services import read_case_metadata, save_case_metadata
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 DATABASE_NAME = ".gestor-estudio.sqlite3"
 CASE_IDENTITY_FIELD = "Identificación interna del expediente"
 
@@ -97,6 +97,10 @@ class StudyDatabase:
         if current < 9:
             self._migrate_to_9()
             self.connection.execute("PRAGMA user_version = 9")
+            current = 9
+        if current < 10:
+            self._migrate_to_10()
+            self.connection.execute("PRAGMA user_version = 10")
         self.connection.commit()
 
     def _migrate_to_1(self):
@@ -263,6 +267,17 @@ class StudyDatabase:
                     "UPDATE movimientos SET movement_kind = 'cedula' WHERE id = ?",
                     (row["id"],),
                 )
+
+    def _migrate_to_10(self):
+        """Persist unread SISFE movements as the sole source for UI badges."""
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(movimientos)")}
+        if "is_unread" not in columns:
+            self.connection.execute(
+                "ALTER TABLE movimientos ADD COLUMN is_unread INTEGER NOT NULL DEFAULT 0"
+            )
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS movimientos_unread ON movimientos(expediente_id, is_unread)"
+        )
 
     @staticmethod
     def _client_values(metadata: dict[str, str]) -> dict[str, str]:
@@ -543,6 +558,7 @@ class StudyDatabase:
         observation: str = "",
         presenter: str = "",
         cargo_number: str = "",
+        unread: bool = False,
     ) -> Movimiento:
         """Add a movement, or return the existing one for an external ID."""
         title = title.strip()
@@ -602,13 +618,15 @@ class StudyDatabase:
             observation=observation.strip(),
             presenter=presenter.strip(),
             cargo_number=cargo_number.strip(),
+            is_unread=bool(unread),
         )
         self.connection.execute(
             """
             INSERT INTO movimientos
                 (id, expediente_id, title, occurred_at, source, external_id, logical_key,
-                 movement_kind, document_available, observation, presenter, cargo_number, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 movement_kind, document_available, observation, presenter, cargo_number,
+                 is_unread, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -623,6 +641,7 @@ class StudyDatabase:
                 record.observation,
                 record.presenter,
                 record.cargo_number,
+                int(record.is_unread),
                 now,
             ),
         )
@@ -697,6 +716,62 @@ class StudyDatabase:
             parameters += (max(1, int(limit)),)
         rows = self.connection.execute(sql, parameters).fetchall()
         return [self._movimiento_from_row(row) for row in rows]
+
+    def unread_movement_count(self, expediente_id: str) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) FROM movimientos WHERE expediente_id = ? AND is_unread = 1",
+            (expediente_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def unread_movement_ids(self, expediente_id: str) -> tuple[str, ...]:
+        rows = self.connection.execute(
+            "SELECT id FROM movimientos WHERE expediente_id = ? AND is_unread = 1",
+            (expediente_id,),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    def mark_movements_read(self, expediente_id: str, movement_ids: tuple[str, ...] | None = None) -> int:
+        if movement_ids is not None and not movement_ids:
+            return 0
+        if movement_ids is None:
+            cursor = self.connection.execute(
+                "UPDATE movimientos SET is_unread = 0 WHERE expediente_id = ? AND is_unread = 1",
+                (expediente_id,),
+            )
+        else:
+            placeholders = ",".join("?" for _ in movement_ids)
+            cursor = self.connection.execute(
+                f"UPDATE movimientos SET is_unread = 0 "
+                f"WHERE expediente_id = ? AND is_unread = 1 AND id IN ({placeholders})",
+                (expediente_id, *movement_ids),
+            )
+        self.connection.commit()
+        return max(0, int(cursor.rowcount))
+
+    def migrate_legacy_unread_count(self, expediente_id: str, count: int) -> int:
+        """Map the old aggregate counter to the newest SISFE rows once."""
+        count = max(0, int(count))
+        if count <= 0 or self.unread_movement_count(expediente_id):
+            return 0
+        rows = self.connection.execute(
+            """
+            SELECT id FROM movimientos
+            WHERE expediente_id = ? AND source = 'sisfe'
+            ORDER BY COALESCE(occurred_at, created_at) DESC, created_at DESC
+            LIMIT ?
+            """,
+            (expediente_id, count),
+        ).fetchall()
+        ids = tuple(str(row[0]) for row in rows)
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        self.connection.execute(
+            f"UPDATE movimientos SET is_unread = 1 WHERE id IN ({placeholders})", ids
+        )
+        self.connection.commit()
+        return len(ids)
 
     def relocate_documents(self, expediente_id: str, previous: Path, current: Path) -> int:
         """Move registered paths without changing document identity or links."""
@@ -1027,6 +1102,7 @@ class StudyDatabase:
             observation=row["observation"] if "observation" in row.keys() else "",
             presenter=row["presenter"] if "presenter" in row.keys() else "",
             cargo_number=row["cargo_number"] if "cargo_number" in row.keys() else "",
+            is_unread=bool(row["is_unread"]) if "is_unread" in row.keys() else False,
         )
 
     @staticmethod

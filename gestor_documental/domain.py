@@ -56,6 +56,7 @@ class Movimiento:
     observation: str = ""
     presenter: str = ""
     cargo_number: str = ""
+    is_unread: bool = False
 
 
 @dataclass(frozen=True)

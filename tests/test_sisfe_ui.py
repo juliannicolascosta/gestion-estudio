@@ -6,21 +6,20 @@ from gestor_documental.ui.sisfe import SisfeLoginDialog
 
 
 class SisfeBackgroundBrowserTests(unittest.TestCase):
-    def test_background_sync_detaches_authenticated_page_from_visible_webview(self):
+    def test_background_sync_hides_without_replacing_authenticated_page(self):
         portal_page = object()
-        idle_page = object()
         browser = MagicMock()
         browser.page.return_value = portal_page
         dialog = SimpleNamespace(
             browser=browser,
             portal_page=portal_page,
-            idle_page=idle_page,
         )
 
         SisfeLoginDialog._detach_portal_page(dialog)
 
         browser.hide.assert_called_once_with()
-        browser.setPage.assert_called_once_with(idle_page)
+        browser.setPage.assert_not_called()
+        browser.show.assert_not_called()
 
     def test_interactive_login_reattaches_the_same_authenticated_page(self):
         portal_page = object()

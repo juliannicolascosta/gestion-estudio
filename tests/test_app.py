@@ -27,6 +27,7 @@ from gestor_documental.app import (
 )
 from gestor_documental.compilation_draft import load_compilation_history
 from gestor_documental.case_spreadsheet_import import ImportOutcome, ImportRow, import_rows
+from gestor_documental.case_registry import unread_case_novedades
 from gestor_documental.ui.roles import ACTIVITY_ROLE, MOVEMENT_ROLE
 from gestor_documental.services import (
     CompilationCancelled,
@@ -193,6 +194,11 @@ class AppSmokeTests(unittest.TestCase):
                 "audiencia-1",
             )
             window.work_tabs.setCurrentIndex(window.activity_tab_index)
+            portal_item = next(
+                window.activity_list.item(index)
+                for index in range(window.activity_list.count())
+                if window.activity_list.item(index).data(ACTIVITY_ROLE)["target"] == "portal"
+            )
             window.activity_list.setCurrentItem(portal_item)
             self.assertTrue(window.confirm_activity_button.isEnabled())
             with patch.object(
@@ -459,10 +465,12 @@ class AppSmokeTests(unittest.TestCase):
                 if "Decreto" in window.novedades_list.item(index).text()
             )
             self.assertEqual(
-                party_item.icon().cacheKey(), ui_icon("party-filing", "#C9493C").cacheKey()
+                party_item.icon().pixmap(24, 24).toImage(),
+                ui_icon("party-filing", "#C9493C").pixmap(24, 24).toImage(),
             )
             self.assertEqual(
-                judicial_item.icon().cacheKey(), ui_icon("judicial", "#768681").cacheKey()
+                judicial_item.icon().pixmap(24, 24).toImage(),
+                ui_icon("judicial", "#768681").pixmap(24, 24).toImage(),
             )
             self.assertFalse(hasattr(window, "task_pause_button"))
             self.assertEqual(window.task_stop_button.toolTip(), "Detener sincronización")
@@ -1314,12 +1322,31 @@ class AppSmokeTests(unittest.TestCase):
             window = MainWindow(store)
             window.reload_cases(case.path)
             window.work_tabs.setCurrentIndex(window.files_tab_index)
+            with StudyDatabase(study_database_path(study)) as database:
+                expediente = database.find_expediente_by_folder(case.path)
+                for index in range(4):
+                    database.add_movement(
+                        expediente.id, f"Movimiento {index}", source="sisfe",
+                        external_id=f"nuevo-{index}", unread=True,
+                    )
+            window.reload_cases(case.path)
+            window.close()
 
-            window.record_unseen_sisfe(case, 4)
-            self.assertEqual(read_case_metadata(case)["Novedades SISFE sin ver"], "4")
+            window = MainWindow(SettingsStore(root / "appdata"))
+            window.reload_cases(case.path)
+            self.assertEqual(len(unread_case_novedades(case)), 4)
             window.work_tabs.setCurrentIndex(window.portal_tab_index)
             self.app.processEvents()
-            self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(case))
+            self.assertEqual(len(unread_case_novedades(case)), 4)
+            self.assertTrue(
+                all(
+                    window.novedades_list.item(index).data(MOVEMENT_ROLE)["is_unread"]
+                    for index in range(4)
+                )
+            )
+            window.work_tabs.setCurrentIndex(window.files_tab_index)
+            self.app.processEvents()
+            self.assertEqual(unread_case_novedades(case), ())
             window.close()
 
     def test_mass_sync_is_sequential_and_continues_after_individual_error(self):
@@ -1340,9 +1367,19 @@ class AppSmokeTests(unittest.TestCase):
             window._sisfe_login_dialog = portal
             result = SimpleNamespace(movements_registered=2, documents_registered=1)
 
+            def import_with_unread(target_case, _snapshot, _directory):
+                with StudyDatabase(study_database_path(study)) as database:
+                    expediente = database.import_case(target_case)
+                    for index in range(2):
+                        database.add_movement(
+                            expediente.id, f"Novedad {index}", source="sisfe",
+                            external_id=f"batch-{index}", unread=True,
+                        )
+                return result
+
             with (
                 patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes),
-                patch.object(window.sisfe_portal, "import_snapshot", return_value=result),
+                patch.object(window.sisfe_portal, "import_snapshot", side_effect=import_with_unread),
                 patch("gestor_documental.app.SisfeCaseBrowserDialog") as case_browser,
             ):
                 window.sync_all_expedientes()
@@ -1367,7 +1404,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(task.state, TaskState.COMPLETED)
             self.assertEqual(task.current, 2)
             self.assertEqual([detail.result for detail in task.details], ["ok", "error"])
-            self.assertEqual(read_case_metadata(first)["Novedades SISFE sin ver"], "2")
+            self.assertEqual(len(unread_case_novedades(first)), 2)
             window.close()
 
     def test_only_one_long_task_and_close_requests_safe_stop(self):
@@ -1444,7 +1481,14 @@ class AppSmokeTests(unittest.TestCase):
             study = root / "Estudio"
             first = create_case(study, "Primero")
             second = create_case(study, "Segundo")
-            save_case_metadata(first, {"Novedades SISFE sin ver": "120"})
+            with StudyDatabase(study_database_path(study)) as database:
+                first_record = database.import_case(first)
+                database.import_case(second)
+                for index in range(120):
+                    database.add_movement(
+                        first_record.id, f"Novedad {index}", source="sisfe",
+                        external_id=f"badge-{index}", unread=True,
+                    )
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
             counts = []
@@ -1458,8 +1502,8 @@ class AppSmokeTests(unittest.TestCase):
                 window = MainWindow(store)
             self.assertEqual(sorted(counts), [0, 120])
             window.mark_all_sisfe_news_read()
-            self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(first))
-            self.assertNotIn("Novedades SISFE sin ver", read_case_metadata(second))
+            self.assertEqual(unread_case_novedades(first), ())
+            self.assertEqual(unread_case_novedades(second), ())
             window.close()
 
     def test_sisfe_movement_shows_its_existing_local_document_without_copying_it(self):
@@ -2024,3 +2068,4 @@ class AppSmokeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

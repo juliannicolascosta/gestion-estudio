@@ -41,7 +41,7 @@ _SHAPES = {
     "check": '<path d="m5 12 4 4L19 6"/>',
     "refresh": '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.5 12a7 7 0 0 0-12-4.5L4 10M5.5 12a7 7 0 0 0 12 4.5L20 14"/>',
     "download": '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
-    "notification": '<path class="soft" d="M3 6h18v12H3Z"/><path d="m3 7 9 7 9-7"/>',
+    "notification": '<rect class="soft" x="3" y="6" width="18" height="12" rx="1.5"/><path d="m4 7 8 6 8-6M4 17l5.5-5M20 17l-5.5-5"/>',
     "search": '<circle cx="11" cy="11" r="6"/><path d="m15.5 15.5 4.5 4.5"/>',
     "sort": '<path d="M7 5v14M4 8l3-3 3 3M17 19V5M14 16l3 3 3-3"/>',
     "dot": '<circle class="solid" cx="12" cy="12" r="5.5" stroke="none"/>',
@@ -54,8 +54,8 @@ _SHAPES = {
     "history": '<path d="M4 12a8 8 0 1 0 2.4-5.7M4 5v4h4"/><path d="M12 8v4.5l3 1.8"/>',
     "person": '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
     "bell": '<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 19a2 2 0 0 0 4 0"/>',
-    "judicial": '<path class="soft" d="M5 20h14M8 16h8M10 7h4v9h-4Z"/><path d="m5 8 5-5 4 4-5 5ZM14 5l5 5M4 21h16"/>',
-    "party-filing": '<path class="soft" d="M6 3h8l4 4v14H6Z"/><path d="M14 3v5h4M9 12h6M9 16h3M11.5 19l6-6 2 2-6 6H11Z"/>',
+    "judicial": '<path class="soft" d="m8 9 5-5 4 4-5 5Z"/><path d="m7 8 6 6M12 3l6 6M10 11l-6 6M5 20h14M8 17h8"/>',
+    "party-filing": '<path class="soft" d="M6 3h8l4 4v14H6Z"/><path d="M14 3v5h4M9 12h6M9 16h6M9 19h4"/>',
     "stop": '<rect class="soft" x="6" y="6" width="12" height="12" rx="1.5"/><rect x="7" y="7" width="10" height="10" rx="1"/>',
 }
 
@@ -103,6 +103,24 @@ def badged_icon(name: str, color: str, count: int, size: int = 24) -> QIcon:
         canvas.width() - diameter, 0, diameter, diameter,
         int(Qt.AlignmentFlag.AlignCenter), "99+" if count > 99 else str(count),
     )
+    painter.end()
+    canvas.setDevicePixelRatio(scale)
+    return QIcon(canvas)
+
+
+def movement_icon(name: str, color: str, unread: bool, size: int = 24) -> QIcon:
+    """Tipo por forma, estado documental por color y no leído por punto rojo."""
+    if not unread:
+        return ui_icon(name, color, size)
+    scale = 2
+    canvas = ui_icon(name, color, size).pixmap(size * scale, size * scale)
+    canvas.setDevicePixelRatio(1)
+    painter = QPainter(canvas)
+    diameter = 6 * scale
+    margin = scale
+    painter.setPen(QColor("#FFFFFF"))
+    painter.setBrush(QColor("#C83F35"))
+    painter.drawEllipse(canvas.width() - diameter - margin, margin, diameter, diameter)
     painter.end()
     canvas.setDevicePixelRatio(scale)
     return QIcon(canvas)
