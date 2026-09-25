@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .models import Case
 from .services import normalize_filename, read_case_metadata, save_case_metadata, unique_path
-from .study_database import StudyDatabase, study_database_path
+from .case_registry import open_case_database
 
 
 class SisfeImportMismatch(ValueError):
@@ -112,7 +112,7 @@ class SisfeImportService:
         if directory != case_root and case_root not in directory.parents:
             raise ValueError("La carpeta de documentos SISFE debe pertenecer al caso seleccionado.")
 
-        with StudyDatabase(study_database_path(case.path.parent)) as database:
+        with open_case_database(case) as database:
             expediente = database.import_case(case)
             self._ensure_matching_case(expediente.case_number, snapshot.cuij)
             expediente = database.fill_sisfe_context(expediente.id, snapshot.cuij, snapshot.tribunal)

@@ -28,6 +28,9 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 
 
+BUSY_TIMEOUT_SECONDS = 10.0
+
+
 def study_database_path(study_root: Path) -> Path:
     """Return the hidden study-level database path without creating anything."""
     return Path(study_root) / DATABASE_NAME
@@ -38,9 +41,11 @@ class StudyDatabase:
 
     def __init__(self, path: Path):
         self.path = Path(path)
-        self.connection = sqlite3.connect(self.path)
+        # Espera locks transitorios antes de fallar con "database is locked".
+        self.connection = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_SECONDS)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
+        self.connection.execute(f"PRAGMA busy_timeout = {int(BUSY_TIMEOUT_SECONDS * 1000)}")
         try:
             self.migrate()
         except Exception:

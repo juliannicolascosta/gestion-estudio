@@ -588,6 +588,29 @@ class ServiceTests(unittest.TestCase):
                 os.environ.pop("FORO_DATA_DIR", None)
                 self.assertIsNone(services.portable_data_dir())
 
+    def test_word_export_never_interpolates_file_names_into_the_script(self):
+        import base64 as _b64
+        hostile = Path("C:/Casos/O'Neil `whoami` $(Remove-Item x).docx")
+        output = Path("C:/Casos/salida $(calc).pdf")
+        command = services.word_export_command(hostile, output)
+        self.assertIn("-EncodedCommand", command)
+        self.assertNotIn("-Command", command)
+        script = _b64.b64decode(command[-1]).decode("utf-16-le")
+        self.assertNotIn("whoami", script)
+        self.assertNotIn("Remove-Item", script)
+        self.assertIn("$env:FORO_WORD_SOURCE", script)
+        environment = services.word_export_environment(hostile, output)
+        self.assertIn("whoami", environment["FORO_WORD_SOURCE"])
+        self.assertIn("calc", environment["FORO_WORD_TARGET"])
+
+    def test_universal_search_reaches_pending_documents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Juarez c/ Prevención")
+            save_case_metadata(case, {"Documentación pendiente": "Recibo de sueldo\nDNI"})
+            self.assertTrue(case_matches(case, "recibo sueldo"))
+            self.assertTrue(case_matches(case, "juarez dni"))
+            self.assertFalse(case_matches(case, "partida nacimiento"))
+
     def test_compile_can_be_cancelled_without_creating_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

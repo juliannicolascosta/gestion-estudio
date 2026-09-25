@@ -5,7 +5,6 @@ import re
 import sqlite3
 import shutil
 import unicodedata
-import json
 from datetime import date, datetime
 from pathlib import Path
 
@@ -116,6 +115,7 @@ from .case_data import (
 )
 from .case_registry import (
     mark_case_novedades_read,
+    open_case_database,
     recent_case_novedades,
     register_case_as_expediente,
     unread_case_novedades,
@@ -200,7 +200,6 @@ from .study_backup import (
     StudyBackupError,
     inspect_study_backup,
 )
-from .study_database import StudyDatabase, study_database_path
 from .ui.compilation import CompilationHistoryDialog, CompilationList
 from .ui.case_files import (
     DATE_COLUMN_WIDTH,
@@ -209,6 +208,12 @@ from .ui.case_files import (
     QuickAccessList,
 )
 from .ui.case_import import ExternalCaseImportDialog
+from .ui.empty_state_list import EmptyStateList
+from .ui.pending_documents import (
+    CardHelpers,
+    PendingDocumentsTab,
+    pending_document_due_dates,
+)
 from .ui.case_spreadsheet_import import CaseSpreadsheetImportDialog
 from .ui.operation_status import OperationState, OperationStatusIndicator
 from .ui.roles import (
@@ -216,7 +221,6 @@ from .ui.roles import (
     MODIFIED_ROLE,
     MOVEMENT_ROLE,
     PATH_ROLE,
-    PENDING_DUE_ROLE,
     ROOT_ROLE,
     SIZE_ROLE,
     TYPE_ROLE,
@@ -1701,7 +1705,6 @@ class MainWindow(QMainWindow):
         self._loading_quick = False
         self._loading_metadata = False
         self._loading_compilation = False
-        self._loading_pending = False
         self._metadata_editing = False
         self._metadata_dirty = False
         self._loaded_metadata: dict[str, str] = {}
@@ -2281,7 +2284,7 @@ class MainWindow(QMainWindow):
         self.portal_case_status.setWordWrap(True)
         layout.addWidget(self.portal_case_status)
 
-        self.novedades_list = QListWidget()
+        self.novedades_list = EmptyStateList()
         self.novedades_list.setObjectName("novedadesList")
         self.novedades_list.setMinimumHeight(200)
         self.novedades_list.setWordWrap(True)
@@ -2374,61 +2377,16 @@ class MainWindow(QMainWindow):
     # Pestaña Pendientes (fuera de alcance en esta revisión)
     # ------------------------------------------------------------------
     def _build_pending_tab(self) -> QFrame:
-        card, layout = make_card()
-        header = QHBoxLayout()
-        header.addLayout(
-            section_heading(
-                "Documentación pendiente",
-                "Checklist de lo solicitado al cliente y todavía no recibido",
-            )
+        # La pestaña vive en ui/pending_documents.py; acá sólo se monta.
+        self.pending_tab = PendingDocumentsTab(
+            self, CardHelpers(make_card, section_heading, decorate_button, icon_button)
         )
-        header.addStretch()
-        self.pending_documents_count = QLabel("Sin pendientes")
-        self.pending_documents_count.setObjectName("muted")
-        header.addWidget(self.pending_documents_count)
-        layout.addLayout(header)
-        self.pending_documents_list = QListWidget()
-        self.pending_documents_list.setObjectName("pendingDocumentsList")
-        self.pending_documents_list.setSelectionMode(
-            QAbstractItemView.SelectionMode.ExtendedSelection
-        )
-        self.pending_documents_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.pending_documents_list.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.pending_documents_list.model().rowsMoved.connect(
-            lambda: QTimer.singleShot(0, self.persist_pending_document_order)
-        )
-        self.pending_documents_list.itemSelectionChanged.connect(
-            self.update_pending_document_actions
-        )
-        self.pending_documents_list.itemChanged.connect(self.pending_document_changed)
-        layout.addWidget(self.pending_documents_list, 1)
-        actions = QHBoxLayout()
-        pending_add = QPushButton("Agregar pendiente")
-        decorate_button(pending_add, "plus")
-        pending_add.clicked.connect(self.add_pending_document)
-        self.pending_rename_button = icon_button("edit", "Renombrar pendiente", self.rename_pending_document)
-        self.pending_due_button = icon_button(
-            "bell", "Definir fecha objetivo y recordatorio", self.set_pending_document_due_date
-        )
-        self.pending_delete_button = icon_button("trash", "Borrar pendientes seleccionados", self.delete_pending_documents)
-        self.pending_clear_button = icon_button("clear", "Vaciar la lista de pendientes", self.clear_pending_documents)
-        self.pending_up_button = icon_button("arrow-up", "Subir en el orden", lambda: self.move_pending_document(-1))
-        self.pending_down_button = icon_button("arrow-down", "Bajar en el orden", lambda: self.move_pending_document(1))
-        self.pending_received_button = QPushButton("Marcar como recibido")
-        self.pending_received_button.setObjectName("green")
-        decorate_button(self.pending_received_button, "check", "#FFFFFF")
-        self.pending_received_button.clicked.connect(self.complete_pending_documents)
-        self.pending_received_button.setEnabled(False)
-        actions.addWidget(pending_add)
-        actions.addWidget(self.pending_rename_button)
-        actions.addWidget(self.pending_due_button)
-        actions.addWidget(self.pending_delete_button)
-        actions.addWidget(self.pending_clear_button)
-        actions.addWidget(self.pending_up_button)
-        actions.addWidget(self.pending_down_button)
-        actions.addStretch()
-        actions.addWidget(self.pending_received_button)
-        layout.addLayout(actions)
+        card = self.pending_tab.build()
+        # Nombres públicos de siempre, para el resto de la ventana y las pruebas.
+        self.pending_documents_list = self.pending_tab.list
+        self.pending_documents_count = self.pending_tab.count_label
+        self.pending_delete_button = self.pending_tab.delete_button
+        self.pending_received_button = self.pending_tab.received_button
         return card
 
     # ------------------------------------------------------------------
@@ -3561,7 +3519,7 @@ class MainWindow(QMainWindow):
             renamed = rename_case(case, name)
             database_warning = ""
             try:
-                with StudyDatabase(study_database_path(renamed.path.parent)) as database:
+                with open_case_database(renamed) as database:
                     database.relocate_case(previous_path, renamed)
             except (OSError, RuntimeError, sqlite3.Error) as database_error:
                 database_warning = str(database_error)
@@ -3629,7 +3587,7 @@ class MainWindow(QMainWindow):
         if not self.case:
             return []
         try:
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+            with open_case_database(self.case) as database:
                 expediente = database.find_expediente_by_folder(self.case.path)
                 if not expediente:
                     return []
@@ -3931,7 +3889,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def known_sisfe_movement_ids(case: Case) -> tuple[str, ...]:
         try:
-            with StudyDatabase(study_database_path(case.path.parent)) as database:
+            with open_case_database(case) as database:
                 expediente = database.find_expediente_by_folder(case.path)
                 if not expediente:
                     return ()
@@ -4354,7 +4312,7 @@ class MainWindow(QMainWindow):
         pending_due_dates = self.pending_document_due_dates(metadata)
         task_statuses: dict[str, str] = {}
         case_tasks = []
-        with StudyDatabase(study_database_path(case.path.parent)) as database:
+        with open_case_database(case) as database:
             expediente = database.find_expediente_by_folder(case.path)
             if expediente:
                 case_tasks = database.list_tasks(expediente.id)
@@ -4551,7 +4509,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Falta el profesional", "Seleccioná el profesional responsable.")
             return
         try:
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+            with open_case_database(self.case) as database:
                 expediente = database.find_expediente_by_folder(self.case.path)
                 if not expediente:
                     raise RuntimeError("No encontramos el expediente en la base operativa.")
@@ -4618,7 +4576,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Falta el profesional", "Seleccioná el profesional responsable.")
             return
         try:
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+            with open_case_database(self.case) as database:
                 expediente = database.find_expediente_by_folder(self.case.path)
                 if not expediente:
                     raise RuntimeError("No encontramos el expediente en la base operativa.")
@@ -4637,7 +4595,7 @@ class MainWindow(QMainWindow):
             return
         professional = self.professional_combo.currentText().strip()
         try:
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+            with open_case_database(self.case) as database:
                 database.complete_task(task_id, professional)
             self.reload_activity()
             self.statusBar().showMessage("Tarea completada", 4500)
@@ -4679,7 +4637,7 @@ class MainWindow(QMainWindow):
                 return
         professional = self.professional_combo.currentText().strip()
         try:
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+            with open_case_database(self.case) as database:
                 database.update_manual_task(
                     str(data.get("task_id", "")), title, professional, due_at=due_at
                 )
@@ -4732,6 +4690,13 @@ class MainWindow(QMainWindow):
                 break
 
     def reload_novedades(self):
+        if self.case:
+            self.novedades_list.set_empty_state(
+                "Todavía no hay movimientos para este expediente",
+                "Sincronizar expediente trae los movimientos desde el portal",
+            )
+        else:
+            self.novedades_list.set_empty_state("Elegí un caso para ver su expediente")
         self.novedades_list.clear()
         self.update_novedad_actions()
         if not self.case:
@@ -4861,234 +4826,55 @@ class MainWindow(QMainWindow):
             self.work_tabs.setTabText(self.portal_tab_index, f"Expediente · {count}")
         self.reload_activity()
 
+    # ------------------------------------------------------------------
+    # Pendientes: delegados estables hacia ui/pending_documents.py
+    # ------------------------------------------------------------------
     def reload_pending_documents(self):
-        if not hasattr(self, "pending_documents_list"):
-            return
-        self._loading_pending = True
-        self.pending_documents_list.clear()
-        values = []
-        received = set()
-        due_dates = {}
-        if self.case:
-            metadata = read_case_metadata(self.case)
-            raw = str(metadata.get("Documentación pendiente", ""))
-            values = [" ".join(line.split()) for line in raw.splitlines() if line.strip()]
-            received = {
-                " ".join(line.split())
-                for line in str(metadata.get("Documentación recibida", "")).splitlines()
-                if line.strip()
-            }
-            due_dates = self.pending_document_due_dates(metadata)
-        for value in values:
-            is_received = value in received
-            color = "#2B7564" if is_received else "#8A5B12"
-            item = QListWidgetItem(ui_icon("check" if is_received else "file", color), value)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if is_received else Qt.CheckState.Unchecked)
-            item.setToolTip("Recibido" if is_received else "Pendiente de recibir")
-            due_at = due_dates.get(value.casefold())
-            item.setData(PENDING_DUE_ROLE, due_at.isoformat() if due_at else "")
-            if due_at:
-                item.setToolTip(
-                    item.toolTip()
-                    + f" · recordatorio para el {due_at.strftime('%d/%m/%Y')}"
-                )
-            self.pending_documents_list.addItem(item)
-        self._loading_pending = False
-        pending_count = sum(value not in received for value in values)
-        received_count = len(values) - pending_count
-        self.pending_documents_count.setText(
-            "Sin documentos solicitados"
-            if not values
-            else f"{pending_count} pendientes · {received_count} recibidos"
-        )
-        if hasattr(self, "work_tabs"):
-            if self.pending_tab_index >= 0:
-                self.work_tabs.setTabText(
-                    self.pending_tab_index,
-                    f"Pendientes · {pending_count}",
-                )
-        self.update_pending_document_actions()
-        self.reload_activity()
+        tab = getattr(self, "pending_tab", None)
+        if tab is not None:
+            tab.reload()
 
     def update_pending_document_actions(self):
-        if hasattr(self, "pending_received_button"):
-            selected = self.pending_documents_list.selectedItems()
-            enabled = bool(selected) and self.case is not None
-            self.pending_received_button.setEnabled(enabled)
-            self.pending_rename_button.setEnabled(len(selected) == 1 and self.case is not None)
-            self.pending_due_button.setEnabled(len(selected) == 1 and self.case is not None)
-            self.pending_delete_button.setEnabled(enabled)
-            self.pending_clear_button.setEnabled(self.pending_documents_list.count() > 0 and self.case is not None)
-            current = self.pending_documents_list.currentRow()
-            self.pending_up_button.setEnabled(enabled and current > 0)
-            self.pending_down_button.setEnabled(enabled and current < self.pending_documents_list.count() - 1)
+        tab = getattr(self, "pending_tab", None)
+        if tab is not None:
+            tab.update_actions()
+
+    def show_pending_menu(self, position):
+        self.pending_tab.show_menu(position)
 
     def add_pending_document(self):
-        if not self.require_case():
-            return
-        description, accepted = QInputDialog.getText(
-            self,
-            "Documentación pendiente",
-            "Documento solicitado al cliente:",
-        )
-        normalized = " ".join(description.split()).strip()
-        if not accepted or not normalized:
-            return
-        current = [
-            self.pending_documents_list.item(index).text()
-            for index in range(self.pending_documents_list.count())
-        ]
-        if normalized.casefold() in {value.casefold() for value in current}:
-            QMessageBox.information(
-                self,
-                "Documentación pendiente",
-                "Ese documento ya figura como pendiente.",
-            )
-            return
-        current.append(normalized)
-        self.save_pending_documents(current)
-        self.work_tabs.setCurrentIndex(self.files_tab_index)
+        self.pending_tab.add()
 
     def complete_pending_documents(self):
-        selected = self.pending_documents_list.selectedItems()
-        if not selected or not self.case:
-            return
-        received = {item.text() for item in selected}
-        metadata = read_case_metadata(self.case)
-        stored_received = {
-            " ".join(line.split())
-            for line in str(metadata.get("Documentación recibida", "")).splitlines()
-            if line.strip()
-        }
-        stored_received.update(received)
-        values = [
-            self.pending_documents_list.item(index).text()
-            for index in range(self.pending_documents_list.count())
-        ]
-        self.save_pending_documents(values, stored_received)
-        label = next(iter(received)) if len(received) == 1 else f"{len(received)} documentos"
-        self.statusBar().showMessage(f"Documentación recibida: {label}", 4500)
+        self.pending_tab.complete()
 
     def _pending_values_and_received(self) -> tuple[list[str], set[str]]:
-        values = []
-        received = set()
-        for index in range(self.pending_documents_list.count()):
-            item = self.pending_documents_list.item(index)
-            values.append(item.text())
-            if item.checkState() == Qt.CheckState.Checked:
-                received.add(item.text())
-        return values, received
+        return self.pending_tab.values_and_received()
 
     def rename_pending_document(self):
-        selected = self.pending_documents_list.selectedItems()
-        if len(selected) != 1 or not self.case:
-            return
-        item = selected[0]
-        description, accepted = QInputDialog.getText(self, "Renombrar pendiente", "Nuevo nombre:", text=item.text())
-        normalized = " ".join(description.split()).strip()
-        if not accepted or not normalized or normalized == item.text():
-            return
-        values, received = self._pending_values_and_received()
-        if normalized.casefold() in {value.casefold() for value in values if value != item.text()}:
-            QMessageBox.information(self, "Documentación pendiente", "Ese documento ya figura en la lista.")
-            return
-        old = item.text()
-        metadata = read_case_metadata(self.case)
-        due_dates = self.pending_document_due_dates(metadata)
-        values[values.index(old)] = normalized
-        if old in received:
-            received.remove(old)
-            received.add(normalized)
-        due = due_dates.pop(old.casefold(), None)
-        if due:
-            due_dates[normalized.casefold()] = due
-        self.save_pending_documents(values, received, due_dates)
+        self.pending_tab.rename()
 
     @staticmethod
     def pending_document_due_dates(metadata: dict[str, str]) -> dict[str, datetime]:
-        try:
-            raw = json.loads(str(metadata.get("Fechas de documentación pendiente", "{}")))
-        except (json.JSONDecodeError, TypeError):
-            return {}
-        result = {}
-        if isinstance(raw, dict):
-            for key, value in raw.items():
-                try:
-                    result[str(key).casefold()] = datetime.fromisoformat(str(value))
-                except ValueError:
-                    continue
-        return result
+        return pending_document_due_dates(metadata)
 
     def set_pending_document_due_date(self):
-        selected = self.pending_documents_list.selectedItems()
-        if len(selected) != 1 or not self.case:
-            return
-        item = selected[0]
-        current = str(item.data(PENDING_DUE_ROLE) or "")
-        initial = datetime.fromisoformat(current).strftime("%d/%m/%Y") if current else ""
-        raw, accepted = QInputDialog.getText(
-            self,
-            "Recordatorio de documentación",
-            "Recordar en esta fecha (dd/mm/aaaa; vacío para quitar):",
-            text=initial,
-        )
-        if not accepted:
-            return
-        due_at = None
-        if raw.strip():
-            try:
-                due_at = datetime.strptime(raw.strip(), "%d/%m/%Y")
-            except ValueError:
-                QMessageBox.information(self, "Fecha inválida", "Usá el formato dd/mm/aaaa.")
-                return
-        values, received = self._pending_values_and_received()
-        due_dates = self.pending_document_due_dates(read_case_metadata(self.case))
-        if due_at:
-            due_dates[item.text().casefold()] = due_at
-        else:
-            due_dates.pop(item.text().casefold(), None)
-        self.save_pending_documents(values, received, due_dates)
+        self.pending_tab.set_due_date()
 
     def delete_pending_documents(self):
-        selected = self.pending_documents_list.selectedItems()
-        if not selected or not self.case:
-            return
-        if QMessageBox.question(self, "Borrar pendientes", "¿Querés borrar los pendientes seleccionados?") != QMessageBox.StandardButton.Yes:
-            return
-        removed = {item.text() for item in selected}
-        values, received = self._pending_values_and_received()
-        self.save_pending_documents([value for value in values if value not in removed], received - removed)
+        self.pending_tab.delete()
 
     def clear_pending_documents(self):
-        if not self.case or not self.pending_documents_list.count():
-            return
-        if QMessageBox.question(self, "Vaciar pendientes", "¿Querés vaciar toda la lista de documentación?") == QMessageBox.StandardButton.Yes:
-            self.save_pending_documents([], set())
+        self.pending_tab.clear()
 
     def move_pending_document(self, offset: int):
-        row = self.pending_documents_list.currentRow()
-        target = row + offset
-        if row < 0 or target < 0 or target >= self.pending_documents_list.count():
-            return
-        self._loading_pending = True
-        item = self.pending_documents_list.takeItem(row)
-        self.pending_documents_list.insertItem(target, item)
-        self.pending_documents_list.setCurrentRow(target)
-        self._loading_pending = False
-        self.persist_pending_document_order()
+        self.pending_tab.move(offset)
 
     def persist_pending_document_order(self):
-        if self._loading_pending or not self.case:
-            return
-        values, received = self._pending_values_and_received()
-        self.save_pending_documents(values, received)
+        self.pending_tab.persist_order()
 
-    def pending_document_changed(self, _item: QListWidgetItem):
-        if self._loading_pending or not self.case:
-            return
-        values, received = self._pending_values_and_received()
-        self.save_pending_documents(values, received)
+    def pending_document_changed(self, item: QListWidgetItem):
+        self.pending_tab.item_changed(item)
 
     def save_pending_documents(
         self,
@@ -5096,43 +4882,7 @@ class MainWindow(QMainWindow):
         received: set[str] | None = None,
         due_dates: dict[str, datetime] | None = None,
     ):
-        if not self.case:
-            return
-        metadata = read_case_metadata(self.case)
-        if values:
-            metadata["Documentación pendiente"] = "\n".join(values)
-        else:
-            metadata.pop("Documentación pendiente", None)
-        if received is not None:
-            ordered_received = [value for value in values if value in received]
-            if ordered_received:
-                metadata["Documentación recibida"] = "\n".join(ordered_received)
-            else:
-                metadata.pop("Documentación recibida", None)
-        stored_dates = due_dates if due_dates is not None else self.pending_document_due_dates(metadata)
-        allowed = {value.casefold() for value in values}
-        stored_dates = {key.casefold(): value for key, value in stored_dates.items() if key.casefold() in allowed}
-        if stored_dates:
-            metadata["Fechas de documentación pendiente"] = json.dumps(
-                {key: value.isoformat() for key, value in stored_dates.items()},
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-        else:
-            metadata.pop("Fechas de documentación pendiente", None)
-        try:
-            save_case_metadata(self.case, metadata)
-            self._loaded_metadata = read_case_metadata(self.case)
-            self.sync_case_projection()
-            self.update_more_metadata_count()
-            self.update_case_badge()
-            self.reload_pending_documents()
-        except Exception as error:
-            QMessageBox.warning(
-                self,
-                "No pudimos actualizar la documentación pendiente",
-                str(error),
-            )
+        self.pending_tab.save(values, received, due_dates)
 
     def update_novedad_actions(self):
         if hasattr(self, "novedad_detail_button"):
@@ -5148,7 +4898,7 @@ class MainWindow(QMainWindow):
         if not self.case or not external_id:
             return []
         try:
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+            with open_case_database(self.case) as database:
                 expediente = database.find_expediente_by_folder(self.case.path)
                 movement = (
                     database.find_movement_by_external_id(
@@ -6017,7 +5767,7 @@ class MainWindow(QMainWindow):
         if not self.case:
             return dict(metadata)
         try:
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+            with open_case_database(self.case) as database:
                 client = database.find_client_by_case_folder(self.case.path)
         except (OSError, RuntimeError, sqlite3.Error):
             client = None
@@ -6179,7 +5929,7 @@ class MainWindow(QMainWindow):
         if self.case:
             document_categories: dict[Path, str] = {}
             try:
-                with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+                with open_case_database(self.case) as database:
                     expediente = database.find_expediente_by_folder(self.case.path)
                     if expediente:
                         document_categories = {
@@ -6670,7 +6420,7 @@ class MainWindow(QMainWindow):
         if not self.case:
             return
         try:
-            with StudyDatabase(study_database_path(self.case.path.parent)) as database:
+            with open_case_database(self.case) as database:
                 expediente = database.import_case(self.case)
                 database.add_document(expediente.id, path.relative_to(self.case.path), source="local")
                 database.set_document_category(expediente.id, path.relative_to(self.case.path), category)
@@ -6741,7 +6491,7 @@ class MainWindow(QMainWindow):
                 external_id = str(context.get("movement_external_id") or "")
                 if external_id:
                     try:
-                        with StudyDatabase(study_database_path(case.path.parent)) as database:
+                        with open_case_database(case) as database:
                             expediente = database.find_expediente_by_folder(case.path)
                             movement = database.find_movement_by_external_id(
                                 expediente.id, external_id,

@@ -1506,6 +1506,84 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(unread_case_novedades(second), ())
             window.close()
 
+    def test_pending_tab_keeps_three_visible_actions_and_moves_the_rest_to_the_menu(self):
+        from PyQt6.QtWidgets import QMenu
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            save_case_metadata(case, {"Documentación pendiente": "DNI\nRecibo de sueldo"})
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+
+            for removed in (
+                "pending_rename_button", "pending_due_button", "pending_clear_button",
+                "pending_up_button", "pending_down_button",
+            ):
+                self.assertFalse(hasattr(window, removed), removed)
+            visible = {
+                button.toolTip() or button.text()
+                for button in window.pending_delete_button.parentWidget().findChildren(QPushButton)
+                if button in (window.pending_delete_button, window.pending_received_button)
+                or button.text() == "Agregar pendiente"
+            }
+            self.assertEqual(len(visible), 3)
+
+            window.pending_documents_list.setCurrentRow(1)
+            captured = []
+            with patch.object(QMenu, "exec", lambda menu, *a, **k: captured.append(
+                {action.text(): action.isEnabled() for action in menu.actions() if action.text()}
+            )):
+                item = window.pending_documents_list.item(1)
+                window.show_pending_menu(window.pending_documents_list.visualItemRect(item).center())
+            actions = captured[0]
+            self.assertEqual(
+                list(actions),
+                [
+                    "Marcar como recibido", "Renombrar…", "Fecha objetivo y recordatorio…",
+                    "Subir", "Bajar", "Borrar", "Vaciar la lista…",
+                ],
+            )
+            self.assertTrue(actions["Subir"])
+            self.assertFalse(actions["Bajar"])
+
+            window.work_tabs.setCurrentIndex(window.work_tabs.indexOf(
+                window.pending_documents_list.parentWidget()
+            ) if window.pending_tab_index < 0 else window.pending_tab_index)
+            before = window.work_tabs.currentIndex()
+            with patch("gestor_documental.app.QInputDialog.getText", return_value=("Poder", True)):
+                window.add_pending_document()
+            # Agregar no saca a la persona de la lista que está completando.
+            self.assertEqual(window.work_tabs.currentIndex(), before)
+            self.assertEqual(window.pending_documents_list.currentItem().text(), "Poder")
+            window.close()
+
+    def test_empty_lists_point_to_the_action_that_fills_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+
+            window.case = None
+            window.reload_pending_documents()
+            window.reload_novedades()
+            self.assertIn("Elegí un caso", window.pending_documents_list.empty_state()[0])
+            self.assertIn("Elegí un caso", window.novedades_list.empty_state()[0])
+
+            window.reload_cases(case.path)
+            self.assertEqual(window.pending_documents_list.count(), 0)
+            self.assertIn("Agregar pendiente", window.pending_documents_list.empty_state()[1])
+            self.assertIn("Sincronizar expediente", window.novedades_list.empty_state()[1])
+            window.pending_documents_list.repaint()
+            window.novedades_list.repaint()
+            window.close()
+
     def test_sisfe_movement_shows_its_existing_local_document_without_copying_it(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

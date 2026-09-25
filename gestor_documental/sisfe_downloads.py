@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .models import Case
 from .services import move_to_recycle_bin
-from .study_database import StudyDatabase, study_database_path
+from .case_registry import open_case_database
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class SisfeDownloadRegistry:
         duplicate = False
         linked = False
         saved_path = target
-        with StudyDatabase(study_database_path(case.path.parent)) as database:
+        with open_case_database(case) as database:
             expediente = database.import_case(case)
             movement = None
             if movement_external_id.strip():

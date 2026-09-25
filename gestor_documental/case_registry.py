@@ -1,6 +1,16 @@
-"""Puente transitorio entre las carpetas del gestor y el modelo relacional."""
+"""Punto único de acceso a la base del Estudio desde un caso.
+
+Cada caso vive en una carpeta dentro de la Ubicación del Estudio y comparte
+con los demás casos de esa ubicación una sola base SQLite. Todo el código
+que necesita esa base parte de un caso: abrirla siempre desde aquí permite
+cambiar la política de conexión (bloqueos, journal, reutilización) en un
+solo lugar, sin recorrer la interfaz.
+"""
 
 from __future__ import annotations
+
+from contextlib import contextmanager
+from typing import Iterator
 
 from .domain import Expediente, Movimiento
 from .models import Case
@@ -8,15 +18,22 @@ from .study_database import StudyDatabase, study_database_path
 from .services import read_case_metadata, save_case_metadata
 
 
+@contextmanager
+def open_case_database(case: Case) -> Iterator[StudyDatabase]:
+    """Abrir la base del Estudio al que pertenece ``case`` y cerrarla al salir."""
+    with StudyDatabase(study_database_path(case.path.parent)) as database:
+        yield database
+
+
 def register_case_as_expediente(case: Case) -> Expediente:
     """Register a selected case folder without changing its files or metadata."""
-    with StudyDatabase(study_database_path(case.path.parent)) as database:
+    with open_case_database(case) as database:
         return database.import_case(case)
 
 
 def recent_case_novedades(case: Case, limit: int | None = None) -> list[Movimiento]:
     """Read the expediente movements; by default the inbox shows them all."""
-    with StudyDatabase(study_database_path(case.path.parent)) as database:
+    with open_case_database(case) as database:
         expediente = database.find_expediente_by_folder(case.path)
         return database.list_recent_movements(expediente.id, limit) if expediente else []
 

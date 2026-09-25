@@ -5,10 +5,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from gestor_documental.services import create_case, read_case_metadata, save_case_metadata
-from gestor_documental.study_database import SCHEMA_VERSION, StudyDatabase, study_database_path
+from gestor_documental.study_database import (
+    BUSY_TIMEOUT_SECONDS,
+    SCHEMA_VERSION,
+    StudyDatabase,
+    study_database_path,
+)
 
 
 class StudyDatabaseTests(unittest.TestCase):
+
+    def test_study_database_configures_busy_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "estudio.db"
+            with StudyDatabase(path) as database:
+                timeout = database.connection.execute(
+                    "PRAGMA busy_timeout"
+                ).fetchone()[0]
+            self.assertEqual(timeout, int(BUSY_TIMEOUT_SECONDS * 1000))
 
     def test_cases_with_the_same_person_share_a_client_and_receive_distinct_identities(self):
         with tempfile.TemporaryDirectory() as directory:

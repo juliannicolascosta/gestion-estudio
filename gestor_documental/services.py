@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import shutil
+import base64
 import subprocess
 import tempfile
 import time
@@ -1173,12 +1174,14 @@ def _run_cancellable_process(
     command: list[str],
     timeout: float,
     cancelled: Callable[[], bool],
+    env: dict[str, str] | None = None,
 ) -> None:
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=env,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     deadline = time.monotonic() + timeout
@@ -1196,6 +1199,40 @@ def _run_cancellable_process(
         raise
 
 
+def word_export_command(source: Path, output: Path) -> list[str]:
+    """Comando para exportar un documento Word a PDF mediante COM.
+
+    Las rutas no se interpolan en el script: viajan como variables de
+    entorno que PowerShell lee como texto literal, y el script se envía
+    codificado. Así ningún nombre de archivo (comillas, backticks, $(...))
+    puede alterar el código que se ejecuta.
+    """
+    script = (
+        "$ErrorActionPreference='Stop'; $word=$null; $doc=$null; "
+        "$source=$env:FORO_WORD_SOURCE; $target=$env:FORO_WORD_TARGET; "
+        "try { $word=New-Object -ComObject Word.Application; $word.Visible=$false; "
+        "$doc=$word.Documents.Open($source, $false, $true); "
+        "$doc.ExportAsFixedFormat($target, 17); "
+        "} finally { if($doc -ne $null){$doc.Close($false)}; "
+        "if($word -ne $null){$word.Quit()} }"
+    )
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        encoded,
+    ]
+
+
+def word_export_environment(source: Path, output: Path) -> dict[str, str]:
+    environment = dict(os.environ)
+    environment["FORO_WORD_SOURCE"] = str(Path(source).resolve())
+    environment["FORO_WORD_TARGET"] = str(Path(output).resolve())
+    return environment
+
+
 def _office_to_pdf(
     source: Path,
     destination: Path,
@@ -1208,22 +1245,12 @@ def _office_to_pdf(
         return output
 
     if os.name == "nt":
-        def quote(path: Path) -> str:
-            return "'" + str(path.resolve()).replace("'", "''") + "'"
-
-        script = (
-            "$ErrorActionPreference='Stop'; $word=$null; $doc=$null; "
-            "try { $word=New-Object -ComObject Word.Application; $word.Visible=$false; "
-            f"$doc=$word.Documents.Open({quote(source)}, $false, $true); "
-            f"$doc.ExportAsFixedFormat({quote(output)}, 17); "
-            "} finally { if($doc -ne $null){$doc.Close($false)}; "
-            "if($word -ne $null){$word.Quit()} }"
-        )
         try:
             _run_cancellable_process(
-                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                word_export_command(source, output),
                 45,
                 cancelled,
+                env=word_export_environment(source, output),
             )
             if output.exists():
                 _store_office_cache(source, output)
