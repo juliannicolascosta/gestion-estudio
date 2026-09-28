@@ -33,6 +33,10 @@ class ManualSisfeSession:
             raise RuntimeError("Primero abrí SISFE e iniciá sesión manualmente.")
         self.confirmed_at = datetime.now(timezone.utc)
 
+    def invalidate(self):
+        """Forget only the expired confirmation; the browser/profile remain reusable."""
+        self.confirmed_at = None
+
     def close(self):
         self.portal_opened_at = None
         self.confirmed_at = None

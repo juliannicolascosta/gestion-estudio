@@ -2585,6 +2585,10 @@ class MainWindow(QMainWindow):
 
         self.status_right = QWidget()
         self.status_right.setObjectName("statusRight")
+        self.status_right.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Preferred,
+        )
         right_layout = QHBoxLayout(self.status_right)
         right_layout.setContentsMargins(8, 0, 6, 0)
         right_layout.setSpacing(8)
@@ -2602,7 +2606,7 @@ class MainWindow(QMainWindow):
         self.sisfe_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sisfe_indicator.mousePressEvent = lambda _event: self.open_sisfe_session()
         right_layout.addWidget(self.sisfe_indicator)
-        bar.addPermanentWidget(self.status_right)
+        bar.addPermanentWidget(self.status_right, 0)
         self.setStatusBar(bar)
         self.statusBar().showMessage("Listo")
 

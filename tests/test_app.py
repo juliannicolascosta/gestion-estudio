@@ -13,7 +13,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QMimeData, Qt, QUrl
 from PyQt6.QtGui import QPalette
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QDialog, QInputDialog, QMessageBox, QPushButton
+from PyQt6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QInputDialog,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+)
 from pypdf import PdfWriter
 
 from gestor_documental.app import (
@@ -477,6 +484,12 @@ class AppSmokeTests(unittest.TestCase):
             window.show()
             self.app.processEvents()
             self.assertLess(window.sync_all_button.x(), window.sisfe_indicator.x())
+            self.assertIs(window.sync_all_button.parentWidget(), window.status_right)
+            self.assertIs(window.sisfe_indicator.parentWidget(), window.status_right)
+            self.assertEqual(
+                window.status_right.sizePolicy().horizontalPolicy(),
+                QSizePolicy.Policy.Fixed,
+            )
             window.close()
 
     def test_layout_can_collapse_restore_and_persist_per_computer(self):
@@ -649,6 +662,36 @@ class AppSmokeTests(unittest.TestCase):
                 },
                 profile_dir=store.app_dir / "SISFE" / "BrowserProfile",
             )
+            window.close()
+
+    def test_expired_sisfe_session_is_revalidated_instead_of_reused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            case = create_case(study, "Caso")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            window = MainWindow(store)
+            window.reload_cases(case.path)
+            window.sisfe_session.mark_portal_opened()
+            window.sisfe_session.confirm_manual_login()
+            dialog = MagicMock()
+            dialog.ready_for_sync = False
+            window._sisfe_login_dialog = dialog
+
+            def confirm_again():
+                window.sisfe_session.confirm_manual_login()
+                dialog.ready_for_sync = True
+                return QDialog.DialogCode.Accepted
+
+            window.sisfe_session.invalidate()
+            dialog.exec.side_effect = confirm_again
+            window.open_sisfe_session()
+
+            dialog.prepare_for_open.assert_called_once_with()
+            dialog.exec.assert_called_once_with()
+            self.assertTrue(window.sisfe_session.active)
+            self.assertEqual(window.sisfe_status.text(), "SISFE conectado")
             window.close()
 
     def test_official_sisfe_download_receives_the_selected_movement_context(self):

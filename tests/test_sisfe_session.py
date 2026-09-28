@@ -20,6 +20,12 @@ class SisfeSessionTests(unittest.TestCase):
         self.assertTrue(session.active)
         self.assertNotIn("password", vars(session))
         self.assertNotIn("cookie", vars(session))
+        opened_at = session.portal_opened_at
+        session.invalidate()
+        self.assertFalse(session.active)
+        self.assertEqual(session.portal_opened_at, opened_at)
+        session.confirm_manual_login()
+        self.assertTrue(session.active)
         session.close()
         self.assertFalse(session.active)
         self.assertNotIn("http_session", vars(session))

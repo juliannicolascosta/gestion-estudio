@@ -122,7 +122,30 @@ class SisfeLoginDialog(QDialog):
         self._checking_saved_session = True
         self._prefill_attempts = 0
         self.validation_status.setText("Comprobando la sesión SISFE guardada…")
-        self.portal_page.setUrl(QUrl(f"{SISFE_ORIGIN}/buscar-expediente"))
+        target = QUrl(f"{SISFE_ORIGIN}/buscar-expediente")
+        current = self.portal_page.url()
+        if current.host() == target.host() and current.path().rstrip("/") == "/buscar-expediente":
+            # A 401 can leave WebEngine at the same visible URL.  Setting that
+            # URL again is not guaranteed to navigate, whereas Reload always
+            # asks SISFE to validate the persistent browser session anew.
+            self.portal_page.triggerAction(QWebEnginePage.WebAction.Reload)
+        else:
+            self.portal_page.setUrl(target)
+
+    @staticmethod
+    def is_authentication_error(error: object) -> bool:
+        text = str(error or "").casefold()
+        return any(
+            marker in text
+            for marker in ("401", "403", "sesión", "sesion", "login", "autoriz")
+        )
+
+    def invalidate_authentication(self):
+        """Keep the persistent profile but require a real SISFE validation again."""
+        self.ready_for_sync = False
+        self._checking_saved_session = False
+        self._validating_saved_session = False
+        self.session.invalidate()
 
     def portal_loaded(self, ok: bool):
         path = self.portal_page.url().path().rstrip("/")
@@ -132,6 +155,7 @@ class SisfeLoginDialog(QDialog):
             self.validate_loaded_session()
             return
         if ok and path == "/login-matriculado":
+            self.invalidate_authentication()
             self._checking_saved_session = False
             self._prefill_attempts = 0
             self._try_prefill()
@@ -221,6 +245,9 @@ class SisfeLoginDialog(QDialog):
                 self.accept()
                 return
             detail = result.get("status") or result.get("error") or "sin detalle"
+            if self.is_authentication_error(detail):
+                self.ready_for_sync = False
+                self.session.invalidate()
             if self._validating_saved_session:
                 self._validating_saved_session = False
                 self.validation_status.setText("La sesión anterior venció. Abriendo el acceso SISFE…")
@@ -270,6 +297,8 @@ class SisfeLoginDialog(QDialog):
                 payload = json.loads(str(value))
                 completed(snapshot_from_browser_payload(payload), None)
             except Exception as error:
+                if self.is_authentication_error(error):
+                    self.invalidate_authentication()
                 completed(None, error)
 
         timer.timeout.connect(poll)
@@ -321,11 +350,14 @@ class SisfeLoginDialog(QDialog):
                 completed(None, RuntimeError("SISFE devolvió una respuesta inválida."))
                 return
             if not payload.get("ok"):
+                error = RuntimeError(
+                    str(payload.get("error") or "SISFE no pudo completar la consulta.")
+                )
+                if self.is_authentication_error(error):
+                    self.invalidate_authentication()
                 completed(
                     None,
-                    RuntimeError(
-                        str(payload.get("error") or "SISFE no pudo completar la consulta.")
-                    ),
+                    error,
                 )
                 return
             completed(payload, None)
