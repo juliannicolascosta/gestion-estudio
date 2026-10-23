@@ -9,7 +9,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from pyhanko.pdf_utils.reader import PdfFileReader
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import signers
+from pyhanko.sign.fields import MDPPerm
 from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko_certvalidator import ValidationContext
 from pypdf import PdfWriter
@@ -18,6 +20,8 @@ from gestor_documental.signing import (
     DigitalSignatureSession,
     SigningCertificate,
     VisibleSignature,
+    SigningError,
+    inspect_pdf_for_signing,
     select_current_certificates,
     signed_output_path,
     visible_signature_box,
@@ -113,7 +117,12 @@ class SigningTests(unittest.TestCase):
     def test_pades_signature_is_valid_and_session_can_sign_twice(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            signer, certificate = make_software_signer(root)
+            first_signer_dir = root / "primer-firmante"
+            second_signer_dir = root / "segundo-firmante"
+            first_signer_dir.mkdir()
+            second_signer_dir.mkdir()
+            signer, certificate = make_software_signer(first_signer_dir)
+            second_signer, second_certificate = make_software_signer(second_signer_dir)
             source = root / "documento.pdf"
             writer = PdfWriter()
             writer.add_blank_page(width=595, height=842)
@@ -128,6 +137,7 @@ class SigningTests(unittest.TestCase):
                 source,
                 visible_signature=VisibleSignature(True, -1, "bottom_right"),
             )
+            session._signer = second_signer
             second = session.sign_pdf(first)
 
             with second.open("rb") as stream:
@@ -141,7 +151,14 @@ class SigningTests(unittest.TestCase):
                     "/ETSI.CAdES.detached",
                 )
                 validation_context = ValidationContext(
-                    trust_roots=[asn1_x509.Certificate.load(certificate.public_bytes(serialization.Encoding.DER))],
+                    trust_roots=[
+                        asn1_x509.Certificate.load(
+                            certificate.public_bytes(serialization.Encoding.DER)
+                        ),
+                        asn1_x509.Certificate.load(
+                            second_certificate.public_bytes(serialization.Encoding.DER)
+                        ),
+                    ],
                     allow_fetching=False,
                     revocation_mode="soft-fail",
                 )
@@ -149,16 +166,41 @@ class SigningTests(unittest.TestCase):
                     validate_pdf_signature(
                         embedded,
                         signer_validation_context=validation_context,
-                        skip_diff=True,
+                        skip_diff=False,
                     )
                     for embedded in reader.embedded_signatures
                 ]
                 self.assertTrue(all(status.intact and status.valid for status in statuses))
+                self.assertTrue(all(status.docmdp_ok is not False for status in statuses))
 
             self.assertTrue(session.active)
             session.close()
             self.assertTrue(token_session.closed)
             self.assertFalse(session.active)
+
+    def test_certified_no_changes_pdf_is_rejected_before_signing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            signer, _certificate = make_software_signer(root)
+            source = root / "documento.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=595, height=842)
+            with source.open("wb") as stream:
+                writer.write(stream)
+            certified = root / "certificado.pdf"
+            metadata = signers.PdfSignatureMetadata(
+                field_name="Certification",
+                certify=True,
+                docmdp_permissions=MDPPerm.NO_CHANGES,
+            )
+            with source.open("rb") as input_stream, certified.open("wb") as output_stream:
+                incremental_writer = IncrementalPdfFileWriter(input_stream)
+                signers.PdfSigner(metadata, signer=signer).sign_pdf(
+                    incremental_writer, output=output_stream
+                )
+
+            with self.assertRaisesRegex(SigningError, "DocMDP"):
+                inspect_pdf_for_signing(certified)
 
     def test_visible_signature_positions_stay_inside_the_page(self):
         for position in (

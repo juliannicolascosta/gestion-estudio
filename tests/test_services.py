@@ -63,7 +63,89 @@ def make_pdf(path: Path, pages: int = 1):
         writer.write(stream)
 
 
+class CaseMetadataStorageTests(unittest.TestCase):
+    def test_hidden_attribute_normalization_preserves_other_bits(self):
+        archive = services._FILE_ATTRIBUTE_ARCHIVE
+        hidden = services._FILE_ATTRIBUTE_HIDDEN
+        normal = services._FILE_ATTRIBUTE_NORMAL
+        readonly = services._FILE_ATTRIBUTE_READONLY
+        self.assertEqual(services._with_hidden_attribute(normal, True), hidden)
+        self.assertEqual(services._with_hidden_attribute(hidden, False), normal)
+        self.assertEqual(
+            services._with_hidden_attribute(archive | readonly | hidden, False),
+            archive | readonly,
+        )
+
+    def test_metadata_replace_does_not_start_attrib_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            real_replace = os.replace
+            with (
+                patch.object(services, "_WINDOWS_FILE_ATTRIBUTES", False),
+                patch.object(services.os, "replace", wraps=real_replace) as replace,
+                patch.object(services.subprocess, "run") as run,
+            ):
+                save_case_metadata(case, {"Actor": "Muñoz & Cía."})
+            metadata_path = services.case_metadata_path(case)
+            replace.assert_called_once_with(
+                metadata_path.with_suffix(metadata_path.suffix + ".tmp"),
+                metadata_path,
+            )
+            run.assert_not_called()
+
+    def test_replace_failure_keeps_original_and_removes_temporary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            case = create_case(Path(directory), "Caso")
+            with patch.object(services, "_WINDOWS_FILE_ATTRIBUTES", False):
+                save_case_metadata(case, {"Actor": "Original"})
+            metadata_path = services.case_metadata_path(case)
+            temporary_path = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
+            original = metadata_path.read_bytes()
+            with (
+                patch.object(services, "_WINDOWS_FILE_ATTRIBUTES", True),
+                patch.object(
+                    services, "_windows_file_attributes",
+                    return_value=(
+                        services._FILE_ATTRIBUTE_ARCHIVE
+                        | services._FILE_ATTRIBUTE_HIDDEN
+                    ),
+                ),
+                patch.object(services, "_set_windows_file_attributes"),
+                patch.object(services.os, "replace", side_effect=PermissionError("bloqueado")),
+            ):
+                with self.assertRaises(PermissionError):
+                    save_case_metadata(case, {"Actor": "Nuevo"})
+            self.assertEqual(metadata_path.read_bytes(), original)
+            self.assertFalse(temporary_path.exists())
+
+
 class ServiceTests(unittest.TestCase):
+    def test_linked_case_registration_is_persistent_unique_and_non_destructive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            linked = root / "Caso externo"
+            linked.mkdir()
+            original = linked / "documento.txt"
+            original.write_text("original", encoding="utf-8")
+            appdata = root / "appdata"
+
+            store = SettingsStore(appdata)
+            store.set_study_root(study)
+            store.add_linked_case(study, linked)
+
+            reopened = SettingsStore(appdata)
+            linked_cases = reopened.linked_cases_for_root(study)
+            self.assertEqual([case.path for case in linked_cases], [linked])
+            self.assertEqual(linked_cases[0].database_root, study)
+            self.assertEqual(reopened.linked_case_owner(linked), study)
+            with self.assertRaises(FileExistsError):
+                reopened.add_linked_case(study, linked)
+            self.assertTrue(reopened.remove_linked_case(linked))
+            self.assertTrue(original.is_file())
+            self.assertEqual(original.read_text(encoding="utf-8"), "original")
+
     def test_contextual_model_ranking_keeps_the_live_catalog(self):
         models = [
             Path("Modelo general.docx"),

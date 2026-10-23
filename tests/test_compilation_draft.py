@@ -56,6 +56,7 @@ class CompilationDraftTests(unittest.TestCase):
                 (DraftItem(documentary), DraftItem(writing, "writing")),
                 current_writing=writing,
                 profile="SISFE demanda/contestación · 6 MB",
+                signing_files=(documentary,),
             )
             payload = json.loads(compilation_draft_path(case).read_text(encoding="utf-8"))
             self.assertEqual(payload["items"][0]["path"], "Documental/recibo.pdf")
@@ -68,6 +69,7 @@ class CompilationDraftTests(unittest.TestCase):
                     items=(DraftItem(documentary), DraftItem(writing, "writing")),
                     current_writing=writing,
                     profile="SISFE demanda/contestación · 6 MB",
+                    signing_files=(documentary,),
                 ),
             )
 

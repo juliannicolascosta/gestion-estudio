@@ -21,7 +21,7 @@ from .services import read_case_metadata, save_case_metadata
 @contextmanager
 def open_case_database(case: Case) -> Iterator[StudyDatabase]:
     """Abrir la base del Estudio al que pertenece ``case`` y cerrarla al salir."""
-    with StudyDatabase(study_database_path(case.path.parent)) as database:
+    with StudyDatabase(study_database_path(case.database_root)) as database:
         yield database
 
 
@@ -46,7 +46,7 @@ def unread_case_novedades(case: Case) -> tuple[str, ...]:
         legacy_count = max(0, int(raw_legacy or 0))
     except (TypeError, ValueError):
         legacy_count = 0
-    with StudyDatabase(study_database_path(case.path.parent)) as database:
+    with StudyDatabase(study_database_path(case.database_root)) as database:
         expediente = database.find_expediente_by_folder(case.path)
         if not expediente:
             return ()
@@ -64,7 +64,7 @@ def mark_case_novedades_read(
     movement_ids: tuple[str, ...] | None = None,
 ) -> int:
     """Mark the persisted unread state without modifying SISFE movements."""
-    with StudyDatabase(study_database_path(case.path.parent)) as database:
+    with StudyDatabase(study_database_path(case.database_root)) as database:
         expediente = database.find_expediente_by_folder(case.path)
         changed = database.mark_movements_read(expediente.id, movement_ids) if expediente else 0
     metadata = read_case_metadata(case)

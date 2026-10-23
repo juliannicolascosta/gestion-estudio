@@ -71,7 +71,7 @@ def latest_case_activity(
         if movement_at.tzinfo is None:
             movement_at = movement_at.replace(tzinfo=timezone.utc)
         timestamps.append(movement_at.astimezone(timezone.utc))
-    elif query_database and (database_path := study_database_path(case.path.parent)).is_file():
+    elif query_database and (database_path := study_database_path(case.database_root)).is_file():
         try:
             with StudyDatabase(database_path) as database:
                 expediente = database.find_expediente_by_folder(case.path)
@@ -122,7 +122,7 @@ def case_activities(
     """Calculate a directory with one shared database connection."""
     movement_dates: dict[Path, datetime] = {}
     if cases:
-        database_path = study_database_path(cases[0].path.parent)
+        database_path = study_database_path(cases[0].database_root)
         if database_path.is_file():
             try:
                 with StudyDatabase(database_path) as database:

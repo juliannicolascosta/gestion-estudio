@@ -118,6 +118,12 @@ class Case:
     """A case directory; nested folders are honored when the user created them."""
 
     path: Path
+    study_root: Path | None = field(default=None, compare=False, repr=False)
+
+    @property
+    def database_root(self) -> Path:
+        """Ubicación que conserva el índice, también para carpetas vinculadas."""
+        return self.study_root or self.path.parent
 
     @property
     def name(self) -> str:
@@ -160,6 +166,7 @@ class Case:
 class AppSettings:
     study_roots: list[Path] = field(default_factory=list)
     active_study_root: Path | None = None
+    linked_cases: dict[Path, Path] = field(default_factory=dict)
     professionals: list[str] = field(default_factory=list)
     professional_profiles: dict[str, dict[str, str]] = field(default_factory=dict)
     current_professional: str = ""

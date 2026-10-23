@@ -32,7 +32,7 @@ def _fingerprint(path: Path) -> tuple[str, tuple[int, int]]:
 def recover_document_links(case: Case) -> RecoveryResult:
     """Recover unique missing file references, never moving user files."""
     root = case.path.resolve()
-    database_path = study_database_path(case.path.parent)
+    database_path = study_database_path(case.database_root)
     if not database_path.is_file():
         return RecoveryResult()
     with StudyDatabase(database_path) as database:
@@ -95,7 +95,7 @@ def rename_document_entry(case: Case, source: Path, name: str) -> Path:
     relative = source.relative_to(root)
     if not relative.parts:
         raise ValueError("Usá la opción de renombrar caso para cambiar su carpeta principal.")
-    database_path = study_database_path(case.path.parent)
+    database_path = study_database_path(case.database_root)
     if not database_path.is_file():
         return rename_case_entry(source, name)
     with StudyDatabase(database_path) as database:

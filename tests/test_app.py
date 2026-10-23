@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -48,13 +48,22 @@ from gestor_documental.study_database import StudyDatabase, study_database_path
 from gestor_documental.sisfe_downloads import SisfeDownloadRegistry
 from gestor_documental.ui.operation_status import OperationState
 from gestor_documental.long_tasks import LongTask, TaskState
-from gestor_documental.icons import ui_icon
+from gestor_documental.icons import movement_icon, ui_icon
 
 
 class AppSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_expediente_icons_use_distinct_phosphor_shapes_with_transparent_corners(self):
+        icons = {
+            name: movement_icon(name, "#768681", False).pixmap(24, 24).toImage()
+            for name in ("judicial", "party-filing", "party-missing", "notification")
+        }
+        self.assertEqual(len({image.cacheKey() for image in icons.values()}), 4)
+        for image in icons.values():
+            self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
 
     def test_main_window_starts_with_study_tree_and_profiles(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -111,11 +120,16 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertEqual(window.pending_tab_index, -1)
             self.assertIs(window.compilation_card.parentWidget(), window.presentation_column)
-            self.assertIs(window.presentation_column.parentWidget(), window.workspace_splitter)
+            self.assertIs(window.presentation_scroll.widget(), window.presentation_column)
+            self.assertIs(window.presentation_scroll.parentWidget(), window.workspace_splitter)
             self.assertIs(window.workspace_splitter.widget(0), window.work_tabs)
             self.assertEqual(window.presentation_column.minimumWidth(), 250)
             self.assertGreaterEqual(window._visible_workspace_sizes[1], 400)
             self.assertEqual(window.compilation_count.text(), "0 elementos")
+            self.assertEqual(window.presentation_column.count(), 3)
+            self.assertIsNone(window.add_location_button.menu())
+            self.assertEqual(len(window.cases_add_menu.actions()), 2)
+            self.assertEqual(window.signing_queue_count.text(), "0 archivos")
             self.assertEqual(window.sisfe_status.state, OperationState.IDLE)
             self.assertIn("expediente", window.search.placeholderText().lower())
             self.assertEqual(window.case_tree.topLevelItem(0).childCount(), 1)
@@ -473,11 +487,11 @@ class AppSmokeTests(unittest.TestCase):
             )
             self.assertEqual(
                 party_item.icon().pixmap(24, 24).toImage(),
-                ui_icon("party-filing", "#C9493C").pixmap(24, 24).toImage(),
+                movement_icon("party-filing", "#C9493C", False).pixmap(24, 24).toImage(),
             )
             self.assertEqual(
                 judicial_item.icon().pixmap(24, 24).toImage(),
-                ui_icon("judicial", "#768681").pixmap(24, 24).toImage(),
+                movement_icon("judicial", "#768681", False).pixmap(24, 24).toImage(),
             )
             self.assertFalse(hasattr(window, "task_pause_button"))
             self.assertEqual(window.task_stop_button.toolTip(), "Detener sincronización")
@@ -1152,6 +1166,36 @@ class AppSmokeTests(unittest.TestCase):
             current = window.case_tree.currentItem()
             self.assertIsNotNone(current)
             self.assertEqual(Path(current.data(0, PATH_ROLE)), outcome.case.path)
+            window.close()
+
+    def test_linked_case_keeps_original_path_and_reports_unavailable_location(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            linked = root / "Caso externo"
+            linked.mkdir()
+            original = linked / "original.pdf"
+            original.write_bytes(b"%PDF-1.4\n")
+            store = SettingsStore(root / "appdata")
+            store.set_study_root(study)
+            store.add_linked_case(study, linked)
+
+            window = MainWindow(store)
+            window.reload_cases(linked)
+            self.assertEqual(window.case.path, linked)
+            self.assertEqual(window.case.database_root, study)
+            self.assertIn(original, window.case.files())
+            window.set_case(None)
+            disconnected = root / "Caso externo desconectado"
+            linked.rename(disconnected)
+            window.reload_cases()
+            labels = [
+                window.case_tree.topLevelItem(0).child(index).text(0)
+                for index in range(window.case_tree.topLevelItem(0).childCount())
+            ]
+            self.assertIn("Caso externo · No disponible", labels)
+            self.assertTrue((disconnected / "original.pdf").is_file())
             window.close()
 
     def test_case_files_can_be_copied_cut_pasted_and_refresh_from_disk(self):
@@ -2032,24 +2076,40 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(Path(reopened.compilation.item(0).data(PATH_ROLE)), renamed_pdf)
             reopened.close()
 
-    def test_primary_sign_button_uses_selected_or_last_compiled_pdf(self):
+    def test_primary_sign_button_uses_independent_signing_queue(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             study = root / "Estudio"
             study.mkdir()
             case = create_case(study, "Caso")
             pdf = case.path / "presentación.pdf"
-            pdf.touch()
+            writer = PdfWriter()
+            writer.add_blank_page(width=595, height=842)
+            with pdf.open("wb") as stream:
+                writer.write(stream)
+            second_pdf = case.path / "documental.pdf"
+            second_writer = PdfWriter()
+            second_writer.add_blank_page(width=595, height=842)
+            with second_pdf.open("wb") as stream:
+                second_writer.write(stream)
             store = SettingsStore(root / "appdata")
             store.set_study_root(study)
             window = MainWindow(store)
             window.set_case(case)
-            window.last_compiled = pdf
+            window.add_signing_path(pdf)
+            window.add_signing_path(pdf)
+            window.add_signing_path(second_pdf)
+            self.assertEqual(window.signing_queue_paths(), [pdf, second_pdf])
 
-            with patch.object(window, "sign_with_token") as sign:
+            with patch.object(
+                window,
+                "sign_with_token",
+                side_effect=[pdf.with_stem("firmado"), second_pdf.with_stem("firmado")],
+            ) as sign:
                 window.sign_current_pdf()
 
-            sign.assert_called_once_with(pdf)
+            self.assertEqual(sign.call_args_list, [call(pdf), call(second_pdf)])
+            self.assertEqual(window.signing_queue_paths(), [])
             self.assertEqual(window.sign_options_button.accessibleName(), "Otras opciones de firma")
             window.close()
 
@@ -2169,6 +2229,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIsNone(window._compile_thread)
             self.assertIsNotNone(window.last_compiled)
             self.assertTrue(window.last_compiled.is_file())
+            self.assertEqual(window.signing_queue_paths(), [window.last_compiled])
             self.assertTrue(source.is_file())
             self.assertEqual(window.compilation.count(), 0)
             self.assertIsNone(window.current_writing)
@@ -2184,6 +2245,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(reopened.compilation.count(), 0)
             self.assertIsNone(reopened.current_writing)
             self.assertEqual(reopened.last_compiled, saved_result)
+            self.assertEqual(reopened.signing_queue_paths(), [saved_result])
             reopened.close()
 
 

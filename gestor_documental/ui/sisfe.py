@@ -84,6 +84,10 @@ class SisfeLoginDialog(QDialog):
         self.ready_for_sync = False
         self.browser = QWebEngineView()
         self.portal_page = QWebEnginePage(self.profile, self)
+        # La vista posee una superficie nativa de Chromium. En Windows, ocultar
+        # solamente el widget permite que la actividad de la página vuelva a
+        # activar esa superficie y produzca el destello negro en primer plano.
+        self._parking_page = QWebEnginePage(self.profile, self)
         self.browser.setPage(self.portal_page)
         layout.addWidget(self.browser, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
@@ -107,8 +111,10 @@ class SisfeLoginDialog(QDialog):
         self.browser.show()
 
     def _detach_portal_page(self):
-        """Hide the surface while keeping one stable page and renderer alive."""
+        """Remove the authenticated page from every window-capable surface."""
         self.browser.hide()
+        if self.browser.page() is self.portal_page:
+            self.browser.setPage(self._parking_page)
 
     def prepare_background_sync(self):
         """Run batch queries in one persistent hidden WebEngine surface."""

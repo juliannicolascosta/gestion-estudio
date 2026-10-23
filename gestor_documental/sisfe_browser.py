@@ -17,11 +17,30 @@ from .sisfe_import import SisfeCaseSnapshot, SisfeDocumentPayload, SisfeMovement
 
 
 def classify_sisfe_movement(title: str, structural_kind: str = "otro") -> str:
-    """Cédula has priority; otherwise keep the structural attachment-column signal."""
+    """Combina el tipo informado por SISFE con denominaciones procesales inequívocas."""
     normalized = unicodedata.normalize("NFKD", str(title).casefold())
     normalized = "".join(char for char in normalized if not unicodedata.combining(char))
-    if re.search(r"\bcedula\b", normalized):
+    if re.search(r"\b(?:cedula|notificacion(?:es)?)\b", normalized):
         return "cedula"
+    judicial_terms = (
+        "decreto", "providencia", "proveido", "resolucion", "sentencia",
+        "auto interlocutorio", "auto definitivo", "despacho", "audiencia",
+    )
+    if any(term in normalized for term in judicial_terms) or re.search(r"\bauto\b", normalized):
+        return "judicial"
+    party_patterns = (
+        r"\bcontesta\s+demanda\b",
+        r"\bcontestacion(?:\s+de)?\s+demanda\b",
+        r"\binterpone\b",
+        r"\bpresenta\b",
+        r"\bsolicita\b",
+        r"\bacompana\b",
+        r"\bmanifiesta\b",
+        r"\balegato(?:s)?\b",
+        r"\bescrito\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in party_patterns):
+        return "parte"
     return structural_kind if structural_kind in {"judicial", "parte"} else "otro"
 
 

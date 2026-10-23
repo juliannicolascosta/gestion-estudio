@@ -76,6 +76,16 @@ def safe_name(value: str) -> str:
     return " ".join(cleaned.split()).strip(" .-")
 
 
+def physical_path_key(path: Path) -> str:
+    """Clave estable de una ruta física, exista o esté temporalmente fuera de línea."""
+    candidate = Path(path)
+    try:
+        candidate = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        candidate = Path(os.path.abspath(str(candidate)))
+    return os.path.normcase(os.path.normpath(str(candidate)))
+
+
 def repair_text(value: str) -> str:
     """Repair common UTF-8-as-Latin-1 mojibake left by early MVP builds."""
     if not any(marker in value for marker in ("Ã", "Â", "â")):
@@ -280,6 +290,25 @@ class SettingsStore:
         active = Path(active_value) if active_value else None
         if active not in roots:
             active = roots[0] if roots else None
+        roots_by_key = {physical_path_key(root): root for root in roots}
+        linked_cases: dict[Path, Path] = {}
+        seen_linked: set[str] = set()
+        raw_linked_cases = payload.get("linked_cases", [])
+        for row in raw_linked_cases if isinstance(raw_linked_cases, list) else []:
+            if not isinstance(row, dict):
+                continue
+            raw_path = row.get("path")
+            raw_root = row.get("study_root")
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                continue
+            if not isinstance(raw_root, str) or not raw_root.strip():
+                continue
+            owner = roots_by_key.get(physical_path_key(Path(raw_root)))
+            key = physical_path_key(Path(raw_path))
+            if owner is None or key in seen_linked:
+                continue
+            seen_linked.add(key)
+            linked_cases[Path(raw_path)] = owner
         signer = payload.get("signer_path")
         signer_output = payload.get("signer_output_dir")
         raw_layout = payload.get("layout_state", {})
@@ -293,6 +322,7 @@ class SettingsStore:
         return AppSettings(
             study_roots=roots,
             active_study_root=active,
+            linked_cases=linked_cases,
             professionals=professionals,
             professional_profiles=professional_profiles,
             current_professional=current,
@@ -329,6 +359,10 @@ class SettingsStore:
             "active_study_root": (
                 str(self.settings.study_root) if self.settings.study_root else None
             ),
+            "linked_cases": [
+                {"path": str(path), "study_root": str(root)}
+                for path, root in self.settings.linked_cases.items()
+            ],
             "professionals": self.settings.professionals,
             "professional_profiles": self.settings.professional_profiles,
             "current_professional": self.settings.current_professional,
@@ -377,11 +411,71 @@ class SettingsStore:
     def remove_study_root(self, path: Path):
         path = Path(path)
         self.settings.study_roots = [root for root in self.settings.study_roots if root != path]
+        root_key = physical_path_key(path)
+        self.settings.linked_cases = {
+            linked: owner
+            for linked, owner in self.settings.linked_cases.items()
+            if physical_path_key(owner) != root_key
+        }
         if self.settings.active_study_root == path:
             self.settings.active_study_root = (
                 self.settings.study_roots[0] if self.settings.study_roots else None
             )
         self.save()
+
+    def linked_cases_for_root(self, root: Path) -> list[Case]:
+        root_key = physical_path_key(root)
+        return [
+            Case(path, study_root=owner)
+            for path, owner in self.settings.linked_cases.items()
+            if physical_path_key(owner) == root_key
+        ]
+
+    def linked_case_owner(self, path: Path) -> Path | None:
+        key = physical_path_key(path)
+        for linked, owner in self.settings.linked_cases.items():
+            if physical_path_key(linked) == key:
+                return owner
+        return None
+
+    def add_linked_case(self, study_root: Path, path: Path) -> Case:
+        root = next(
+            (
+                candidate for candidate in self.settings.study_roots
+                if physical_path_key(candidate) == physical_path_key(study_root)
+            ),
+            None,
+        )
+        if root is None:
+            raise ValueError("La ubicación elegida no pertenece al Estudio.")
+        linked = Path(path)
+        if not linked.is_dir():
+            raise NotADirectoryError("La carpeta seleccionada no está disponible.")
+        key = physical_path_key(linked)
+        if self.linked_case_owner(linked) is not None:
+            raise FileExistsError("Esa carpeta ya está vinculada a CASOS.")
+        for candidate_root in self.settings.study_roots:
+            if physical_path_key(candidate_root) == key:
+                raise FileExistsError("Esa carpeta ya está registrada como ubicación del Estudio.")
+            for case in list_cases(candidate_root):
+                if physical_path_key(case.path) == key:
+                    raise FileExistsError("Esa carpeta ya está registrada como caso.")
+        self.settings.linked_cases[linked] = root
+        self.save()
+        return Case(linked, study_root=root)
+
+    def remove_linked_case(self, path: Path) -> bool:
+        key = physical_path_key(path)
+        previous = len(self.settings.linked_cases)
+        self.settings.linked_cases = {
+            linked: owner
+            for linked, owner in self.settings.linked_cases.items()
+            if physical_path_key(linked) != key
+        }
+        changed = len(self.settings.linked_cases) != previous
+        if changed:
+            self.save()
+        return changed
 
     def add_professional(self, name: str):
         name = " ".join(name.split()).strip()
@@ -629,6 +723,80 @@ def read_case_metadata(case: Case) -> dict[str, str]:
         return {}
 
 
+_WINDOWS_FILE_ATTRIBUTES = os.name == "nt"
+_FILE_ATTRIBUTE_READONLY = 0x00000001
+_FILE_ATTRIBUTE_HIDDEN = 0x00000002
+_FILE_ATTRIBUTE_SYSTEM = 0x00000004
+_FILE_ATTRIBUTE_ARCHIVE = 0x00000020
+_FILE_ATTRIBUTE_NORMAL = 0x00000080
+_FILE_ATTRIBUTE_TEMPORARY = 0x00000100
+_FILE_ATTRIBUTE_OFFLINE = 0x00001000
+_FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 0x00002000
+_INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
+_SETTABLE_FILE_ATTRIBUTES = (
+    _FILE_ATTRIBUTE_READONLY
+    | _FILE_ATTRIBUTE_HIDDEN
+    | _FILE_ATTRIBUTE_SYSTEM
+    | _FILE_ATTRIBUTE_ARCHIVE
+    | _FILE_ATTRIBUTE_NORMAL
+    | _FILE_ATTRIBUTE_TEMPORARY
+    | _FILE_ATTRIBUTE_OFFLINE
+    | _FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
+)
+
+
+def _windows_file_attributes(path: Path) -> int:
+    """Read settable Win32 attributes without starting a console process."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_attributes = kernel32.GetFileAttributesW
+    get_attributes.argtypes = [wintypes.LPCWSTR]
+    get_attributes.restype = wintypes.DWORD
+    attributes = int(get_attributes(str(path)))
+    if attributes == _INVALID_FILE_ATTRIBUTES:
+        raise ctypes.WinError(ctypes.get_last_error())
+    return attributes & _SETTABLE_FILE_ATTRIBUTES
+
+
+def _set_windows_file_attributes(path: Path, attributes: int) -> None:
+    """Set Win32 attributes without launching attrib.exe."""
+    import ctypes
+    from ctypes import wintypes
+
+    attributes &= _SETTABLE_FILE_ATTRIBUTES
+    if attributes == 0:
+        attributes = _FILE_ATTRIBUTE_NORMAL
+    elif attributes != _FILE_ATTRIBUTE_NORMAL:
+        attributes &= ~_FILE_ATTRIBUTE_NORMAL
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    set_attributes = kernel32.SetFileAttributesW
+    set_attributes.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
+    set_attributes.restype = wintypes.BOOL
+    if not set_attributes(str(path), attributes):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _with_hidden_attribute(attributes: int, hidden: bool) -> int:
+    attributes &= _SETTABLE_FILE_ATTRIBUTES
+    attributes &= ~_FILE_ATTRIBUTE_NORMAL
+    if hidden:
+        attributes |= _FILE_ATTRIBUTE_HIDDEN
+    else:
+        attributes &= ~_FILE_ATTRIBUTE_HIDDEN
+    return attributes or _FILE_ATTRIBUTE_NORMAL
+
+
+def _remove_temporary_metadata(path: Path) -> OSError | None:
+    try:
+        if path.exists():
+            path.unlink()
+    except OSError as error:
+        return error
+    return None
+
+
 def save_case_metadata(case: Case, metadata: dict[str, str]):
     case.ensure()
 
@@ -645,28 +813,55 @@ def save_case_metadata(case: Case, metadata: dict[str, str]):
     }
     metadata_path = case_metadata_path(case)
     temporary_path = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
-    if os.name == "nt" and metadata_path.exists():
-        # Windows rejects opening a hidden file for replacement. Temporarily
-        # clear the attribute, then restore it after the atomic write.
-        subprocess.run(
-            ["attrib", "-h", str(metadata_path)],
-            check=False,
-            capture_output=True,
-        )
+    original_attributes: int | None = None
+    if _WINDOWS_FILE_ATTRIBUTES and metadata_path.exists():
+        original_attributes = _windows_file_attributes(metadata_path)
+        if original_attributes & _FILE_ATTRIBUTE_HIDDEN:
+            _set_windows_file_attributes(
+                metadata_path,
+                _with_hidden_attribute(original_attributes, False),
+            )
     try:
         temporary_path.write_text(
             json.dumps(cleaned, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         os.replace(temporary_path, metadata_path)
-    finally:
-        if temporary_path.exists():
-            temporary_path.unlink()
-        if os.name == "nt" and metadata_path.exists():
-            subprocess.run(
-                ["attrib", "+h", str(metadata_path)],
-                check=False,
-                capture_output=True,
+    except Exception as error:
+        cleanup_error = _remove_temporary_metadata(temporary_path)
+        restore_error = None
+        if (
+            _WINDOWS_FILE_ATTRIBUTES
+            and original_attributes is not None
+            and metadata_path.exists()
+        ):
+            try:
+                _set_windows_file_attributes(metadata_path, original_attributes)
+            except OSError as attribute_error:
+                restore_error = attribute_error
+        if cleanup_error or restore_error:
+            details = []
+            if cleanup_error:
+                details.append(f"no se pudo retirar el temporal: {cleanup_error}")
+            if restore_error:
+                details.append(f"no se pudieron restaurar los atributos: {restore_error}")
+            raise OSError(
+                f"No se pudieron guardar los metadatos ({'; '.join(details)})."
+            ) from error
+        raise
+    else:
+        cleanup_error = _remove_temporary_metadata(temporary_path)
+        if cleanup_error:
+            raise cleanup_error
+        if _WINDOWS_FILE_ATTRIBUTES:
+            attributes = (
+                original_attributes
+                if original_attributes is not None
+                else _windows_file_attributes(metadata_path)
+            )
+            _set_windows_file_attributes(
+                metadata_path,
+                _with_hidden_attribute(attributes, True),
             )
 
 

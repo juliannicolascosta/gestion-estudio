@@ -51,8 +51,22 @@ class SisfeBrowserTests(unittest.TestCase):
     def test_cedula_has_priority_over_both_structural_origins(self):
         self.assertEqual(classify_sisfe_movement("CÉDULA electrónica", "parte"), "cedula")
         self.assertEqual(classify_sisfe_movement("Se libra cedula", "judicial"), "cedula")
+        self.assertEqual(classify_sisfe_movement("Notificación electrónica", "parte"), "cedula")
         self.assertEqual(classify_sisfe_movement("Resolución", "judicial"), "judicial")
         self.assertEqual(classify_sisfe_movement("Contestación", "parte"), "parte")
+
+    def test_explicit_titles_correct_ambiguous_structural_classification(self):
+        self.assertEqual(
+            classify_sisfe_movement(
+                "PRIMER DECRETO DE TRÁMITE JUICIO ORDINARIO", "parte"
+            ),
+            "judicial",
+        )
+        self.assertEqual(classify_sisfe_movement("DECRETOS VARIOS", "parte"), "judicial")
+        self.assertEqual(classify_sisfe_movement("CONTESTA DEMANDA", "judicial"), "parte")
+        self.assertEqual(
+            classify_sisfe_movement("CONTESTACIÓN DE DEMANDA", "judicial"), "parte"
+        )
 
     def test_validation_uses_sisfe_bearer_token_only_inside_browser(self):
         script = browser_validation_script()

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from gestor_documental.case_registry import open_case_database
+from gestor_documental.models import Case
 from gestor_documental.services import create_case
 from gestor_documental.study_database import study_database_path
 
@@ -13,6 +14,20 @@ DIRECT_CASE_OPEN = re.compile(r"StudyDatabase\(\s*study_database_path\([^)]*\.pa
 
 
 class CaseRegistryTests(unittest.TestCase):
+    def test_linked_case_uses_its_owning_study_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            study = root / "Estudio"
+            study.mkdir()
+            external = root / "Caso externo"
+            external.mkdir()
+            case = Case(external, study_root=study)
+
+            with open_case_database(case) as database:
+                self.assertEqual(database.path, study_database_path(study))
+                expediente = database.import_case(case)
+                self.assertEqual(expediente.folder_path, external)
+
     def test_opens_the_study_database_of_the_case_and_closes_it(self):
         with tempfile.TemporaryDirectory() as directory:
             study = Path(directory) / "Estudio"

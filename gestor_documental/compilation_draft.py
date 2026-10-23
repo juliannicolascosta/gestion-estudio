@@ -37,6 +37,7 @@ class CompilationDraft:
     current_writing: Path | None = None
     last_compiled: Path | None = None
     last_signed: Path | None = None
+    signing_files: tuple[Path, ...] = ()
     profile: str = DEFAULT_PROFILE
 
 
@@ -116,6 +117,11 @@ def load_compilation_draft(case: Case) -> CompilationDraft:
         current_writing=current_writing,
         last_compiled=_case_path(case, payload.get("last_compiled")),
         last_signed=_case_path(case, payload.get("last_signed")),
+        signing_files=tuple(
+            path
+            for value in payload.get("signing_files", [])
+            if (path := _case_path(case, value)) is not None
+        ),
         profile=profile,
     )
 
@@ -127,6 +133,7 @@ def save_compilation_draft(
     current_writing: Path | None = None,
     last_compiled: Path | None = None,
     last_signed: Path | None = None,
+    signing_files: Iterable[Path] = (),
     profile: str = DEFAULT_PROFILE,
 ) -> Path:
     serialized_items = []
@@ -145,6 +152,11 @@ def save_compilation_draft(
         "current_writing": _relative_path(case, current_writing),
         "last_compiled": _relative_path(case, last_compiled),
         "last_signed": _relative_path(case, last_signed),
+        "signing_files": [
+            relative
+            for path in signing_files
+            if (relative := _relative_path(case, path)) is not None
+        ],
         "profile": profile if profile in PRESENTATION_PROFILES else DEFAULT_PROFILE,
     }
     target = compilation_draft_path(case)

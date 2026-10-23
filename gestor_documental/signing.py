@@ -48,6 +48,82 @@ class VisibleSignature:
     position: str = "bottom_right"
 
 
+@dataclass(frozen=True)
+class PdfSignatureInspection:
+    signature_count: int = 0
+
+
+def inspect_pdf_for_signing(
+    source: Path,
+    *,
+    new_field_name: str = "Firma_FORO_Nueva",
+) -> PdfSignatureInspection:
+    """Valida firmas existentes y decide si puede agregarse otra incrementalmente."""
+    source = Path(source)
+    if not source.is_file() or source.suffix.casefold() != ".pdf":
+        raise SigningError("Elegí un archivo PDF existente para firmar.")
+    try:
+        from pyhanko.pdf_utils.reader import PdfFileReader
+        from pyhanko.sign.fields import MDPPerm
+        from pyhanko.sign.validation import validate_pdf_signature
+        from pyhanko.sign.validation.status import SignatureCoverageLevel
+        from pyhanko_certvalidator import ValidationContext
+
+        with source.open("rb") as stream:
+            reader = PdfFileReader(stream)
+            if reader.encrypted:
+                raise SigningError(
+                    "El PDF está cifrado. No puede garantizarse una firma adicional compatible."
+                )
+            signatures = list(reader.embedded_signatures)
+            if not signatures:
+                return PdfSignatureInspection()
+            validation_context = ValidationContext(
+                trust_roots=[signature.signer_cert for signature in signatures],
+                allow_fetching=False,
+                revocation_mode="soft-fail",
+            )
+            acceptable_coverage = {
+                SignatureCoverageLevel.ENTIRE_FILE,
+                SignatureCoverageLevel.ENTIRE_REVISION,
+            }
+            for index, signature in enumerate(signatures, start=1):
+                status = validate_pdf_signature(
+                    signature,
+                    signer_validation_context=validation_context,
+                    skip_diff=False,
+                )
+                if not status.intact or not status.valid:
+                    raise SigningError(
+                        f"La firma preexistente {index} no supera la validación de integridad."
+                    )
+                if status.coverage not in acceptable_coverage:
+                    raise SigningError(
+                        f"La firma preexistente {index} no cubre una revisión PDF estándar."
+                    )
+                if status.docmdp_ok is False:
+                    raise SigningError(
+                        f"El PDF contiene cambios incompatibles con la firma preexistente {index}."
+                    )
+                if signature.docmdp_level == MDPPerm.NO_CHANGES:
+                    raise SigningError(
+                        "El PDF está certificado para no admitir cambios adicionales (DocMDP)."
+                    )
+                field_policy = signature.fieldmdp
+                if field_policy is not None and field_policy.is_locked(new_field_name):
+                    raise SigningError(
+                        "Una firma existente bloquea la creación de otro campo de firma (FieldMDP)."
+                    )
+            return PdfSignatureInspection(len(signatures))
+    except SigningError:
+        raise
+    except Exception as error:
+        raise SigningError(
+            "No se pudieron comprobar las firmas y restricciones existentes; "
+            "el PDF no será modificado."
+        ) from error
+
+
 def visible_signature_box(
     page_width: float,
     page_height: float,
@@ -276,9 +352,10 @@ class DigitalSignatureSession:
             from pyhanko_certvalidator import ValidationContext
             from pyhanko.stamp import TextStampStyle
 
+            field_name = f"Firma_FORO_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+            existing = inspect_pdf_for_signing(source, new_field_name=field_name)
             with source.open("rb") as input_stream, temporary.open("wb") as output_stream:
                 writer = IncrementalPdfFileWriter(input_stream)
-                field_name = f"Firma_Gestor_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
                 metadata = signers.PdfSignatureMetadata(
                     field_name=field_name,
                     md_algorithm="sha256",
@@ -321,23 +398,33 @@ class DigitalSignatureSession:
 
             with temporary.open("rb") as validation_stream:
                 reader = PdfFileReader(validation_stream)
-                if not reader.embedded_signatures:
+                if len(reader.embedded_signatures) != existing.signature_count + 1:
                     raise SigningError("El PDF resultante no contiene una firma digital.")
                 # This is an immediate integrity check, not a legal trust-chain
-                # determination. Treat the signing certificate as the local
-                # trust anchor to avoid network and Windows-store dependencies.
+                # determination. Treat every embedded signing certificate as a
+                # local trust anchor to avoid network and Windows-store dependencies.
                 validation_context = ValidationContext(
-                    trust_roots=[self._signer.signing_cert],
+                    trust_roots=[
+                        embedded.signer_cert for embedded in reader.embedded_signatures
+                    ],
                     allow_fetching=False,
                     revocation_mode="soft-fail",
                 )
-                status = validate_pdf_signature(
-                    reader.embedded_signatures[-1],
-                    signer_validation_context=validation_context,
-                    skip_diff=True,
-                )
-                if not status.intact or not status.valid:
-                    raise SigningError("La firma fue generada, pero no superó la validación de integridad.")
+                for index, embedded in enumerate(reader.embedded_signatures, start=1):
+                    status = validate_pdf_signature(
+                        embedded,
+                        signer_validation_context=validation_context,
+                        skip_diff=False,
+                    )
+                    if (
+                        not status.intact
+                        or not status.valid
+                        or status.docmdp_ok is False
+                    ):
+                        label = "nueva" if index > existing.signature_count else f"preexistente {index}"
+                        raise SigningError(
+                            f"La firma {label} no superó la validación posterior de integridad."
+                        )
             os.replace(temporary, target)
             return target
         except SigningError:

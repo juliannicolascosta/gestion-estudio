@@ -152,6 +152,7 @@ from .signing import (
     SigningUnavailable,
     VisibleSignature,
     discover_signing_certificates,
+    inspect_pdf_for_signing,
     select_current_certificates,
     signed_output_path,
     visible_signature_box,
@@ -180,6 +181,7 @@ from .services import (
     normalize_filename,
     normalize_naming_pattern,
     open_file,
+    physical_path_key,
     read_case_metadata,
     rank_models_for_document,
     rename_case,
@@ -200,7 +202,7 @@ from .study_backup import (
     StudyBackupError,
     inspect_study_backup,
 )
-from .ui.compilation import CompilationHistoryDialog, CompilationList
+from .ui.compilation import CompilationHistoryDialog, CompilationList, SigningQueueList
 from .ui.case_files import (
     DATE_COLUMN_WIDTH,
     SIZE_COLUMN_WIDTH,
@@ -218,6 +220,8 @@ from .ui.case_spreadsheet_import import CaseSpreadsheetImportDialog
 from .ui.operation_status import OperationState, OperationStatusIndicator
 from .ui.roles import (
     ACTIVITY_ROLE,
+    CASE_ROOT_ROLE,
+    LINKED_CASE_ROLE,
     MODIFIED_ROLE,
     MOVEMENT_ROLE,
     PATH_ROLE,
@@ -1890,9 +1894,14 @@ class MainWindow(QMainWindow):
         locations_header.addStretch()
         self.add_location_button = icon_button(
             "plus",
-            "Agregar una ubicación del Estudio (carpeta local, de red o sincronizada)",
-            self.choose_study_root,
+            "Agregar una ubicación o vincular una carpeta existente",
+            self.show_cases_add_menu,
         )
+        # El menú se abre manualmente: setMenu() agrega un indicador nativo
+        # pegado al "+" que, a este tamaño, se percibe como un ícono roto.
+        self.cases_add_menu = QMenu(self.add_location_button)
+        self.cases_add_menu.addAction("Agregar ubicación del Estudio…", self.choose_study_root)
+        self.cases_add_menu.addAction("Vincular carpeta existente…", self.link_external_case)
         locations_header.addWidget(self.add_location_button)
         layout.addLayout(locations_header)
 
@@ -2392,7 +2401,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Panel Presentación
     # ------------------------------------------------------------------
-    def _build_presentation_panel(self) -> QSplitter:
+    def _build_presentation_panel(self) -> QWidget:
         preparation_card, preparation_layout = make_card()
         header = QHBoxLayout()
         title = QLabel("Presentación")
@@ -2456,7 +2465,7 @@ class MainWindow(QMainWindow):
         prep_actions.addWidget(move_down)
         preparation_layout.addLayout(prep_actions)
 
-        actions_card, actions_layout = make_card("actionCard")
+        actions_layout = preparation_layout
         limit_label = QLabel("LÍMITE DE TAMAÑO FINAL")
         limit_label.setObjectName("eyebrow")
         actions_layout.addWidget(limit_label)
@@ -2471,10 +2480,11 @@ class MainWindow(QMainWindow):
         self.limit_combo.hide()
         actions_layout.addWidget(self.limit_combo)
 
-        limits_row = QHBoxLayout()
-        limits_row.setSpacing(5)
+        limits_grid = QGridLayout()
+        limits_grid.setHorizontalSpacing(5)
+        limits_grid.setVerticalSpacing(5)
         self.limit_buttons: dict[int, QPushButton] = {}
-        for text, value in PRESENTATION_LIMITS:
+        for index, (text, value) in enumerate(PRESENTATION_LIMITS):
             button = QPushButton(text)
             button.setObjectName("limit")
             button.setCheckable(True)
@@ -2485,9 +2495,9 @@ class MainWindow(QMainWindow):
             button.clicked.connect(
                 lambda _checked=False, limit=value: self.choose_presentation_limit(limit)
             )
-            limits_row.addWidget(button)
+            limits_grid.addWidget(button, index // 2, index % 2)
             self.limit_buttons[value] = button
-        actions_layout.addLayout(limits_row)
+        actions_layout.addLayout(limits_grid)
 
         self.limit_hint = QLabel("Sin límite elegido: se compila al tamaño natural.")
         self.limit_hint.setObjectName("actionMuted")
@@ -2511,11 +2521,49 @@ class MainWindow(QMainWindow):
         self.compile_button.clicked.connect(self.compile_pdf)
         actions_layout.addWidget(self.compile_button)
 
+        queue_card, queue_layout = make_card()
+        queue_header = QHBoxLayout()
+        queue_title = QLabel("ARCHIVOS A FIRMAR")
+        queue_title.setObjectName("sectionTitle")
+        queue_header.addWidget(queue_title)
+        queue_header.addStretch()
+        self.signing_queue_count = QLabel("0 archivos")
+        self.signing_queue_count.setObjectName("muted")
+        queue_header.addWidget(self.signing_queue_count)
+        add_signing_files = icon_button(
+            "plus", "Agregar archivos PDF para firmar", self.pick_signing_files,
+            bordered=True,
+        )
+        queue_header.addWidget(add_signing_files)
+        queue_layout.addLayout(queue_header)
+
+        self.signing_queue = SigningQueueList()
+        self.signing_queue.filesDropped.connect(self.handle_signing_drop)
+        self.signing_queue.dropRejected.connect(self.notify_unsupported_file_drop)
+        self.signing_queue.removeRequested.connect(self.remove_from_signing_queue)
+        self.signing_queue.openRequested.connect(open_file)
+        self.signing_queue.itemSelectionChanged.connect(self.update_signing_actions)
+        queue_layout.addWidget(self.signing_queue, 1)
+
+        queue_actions = QHBoxLayout()
+        remove_signing = icon_button(
+            "trash", "Retirar de ARCHIVOS A FIRMAR sin borrar el PDF",
+            self.remove_from_signing_queue,
+        )
+        queue_actions.addWidget(remove_signing)
+        queue_actions.addStretch()
+        queue_layout.addLayout(queue_actions)
+
+        signature_card, signature_layout = make_card("actionCard")
+        signature_title = QLabel("FIRMA")
+        signature_title.setObjectName("sectionTitle")
+        signature_layout.addWidget(signature_title)
+
         sign_row = QHBoxLayout()
         sign_row.setSpacing(5)
         self.sign_button = QPushButton("Firmar")
         decorate_button(self.sign_button, "signature")
-        self.sign_button.setToolTip("Firmar el PDF seleccionado o el último compilado")
+        self.sign_button.setToolTip("Firmar los PDF de ARCHIVOS A FIRMAR")
         self.sign_button.clicked.connect(self.sign_current_pdf)
         sign_row.addWidget(self.sign_button, 1)
         self.sign_options_button = QPushButton()
@@ -2525,15 +2573,15 @@ class MainWindow(QMainWindow):
         self.sign_options_button.setAccessibleName("Otras opciones de firma")
         self.sign_options_button.clicked.connect(self.show_sign_menu)
         sign_row.addWidget(self.sign_options_button)
-        actions_layout.addLayout(sign_row)
+        signature_layout.addLayout(sign_row)
 
         last_label = QLabel("ÚLTIMO RESULTADO")
         last_label.setObjectName("eyebrow")
-        actions_layout.addWidget(last_label)
+        signature_layout.addWidget(last_label)
         self.last_output = QLabel("Aún no compilaste")
         self.last_output.setObjectName("actionMuted")
         self.last_output.setWordWrap(True)
-        actions_layout.addWidget(self.last_output)
+        signature_layout.addWidget(self.last_output)
 
         self.compilation_card = preparation_card
         self.presentation_column = QSplitter(Qt.Orientation.Vertical)
@@ -2542,10 +2590,24 @@ class MainWindow(QMainWindow):
         self.presentation_column.setHandleWidth(6)
         self.presentation_column.setMinimumWidth(250)
         self.presentation_column.setMaximumWidth(560)
+        self.presentation_column.setMinimumHeight(790)
         self.presentation_column.addWidget(self.compilation_card)
-        self.presentation_column.addWidget(actions_card)
-        self.presentation_column.setSizes([520, 300])
-        return self.presentation_column
+        self.presentation_column.addWidget(queue_card)
+        self.presentation_column.addWidget(signature_card)
+        self.presentation_column.setSizes([470, 210, 180])
+        # En ventanas bajas no se comprimen los tres bloques hasta ocultar sus
+        # textos y acciones: se conserva su alto útil y se desplaza la columna.
+        self.presentation_scroll = QScrollArea()
+        self.presentation_scroll.setObjectName("presentationScroll")
+        self.presentation_scroll.setWidgetResizable(True)
+        self.presentation_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.presentation_scroll.setMinimumWidth(250)
+        self.presentation_scroll.setMaximumWidth(560)
+        self.presentation_scroll.setWidget(self.presentation_column)
+        self.update_signing_actions()
+        return self.presentation_scroll
 
     # ------------------------------------------------------------------
     # Barra inferior de estado
@@ -2655,7 +2717,7 @@ class MainWindow(QMainWindow):
             state.get("workspace"), 2, self._visible_workspace_sizes
         )
         presentation_sizes = self._valid_layout_sizes(
-            state.get("presentation"), 2, [520, 300]
+            state.get("presentation"), 3, [470, 210, 180]
         )
         self._visible_workspace_sizes = workspace_sizes
         self.body_splitter.setSizes(body_sizes)
@@ -2742,6 +2804,7 @@ class MainWindow(QMainWindow):
             if len(sizes) == 2 and sizes[1] > 0:
                 self._visible_workspace_sizes = sizes
         self.presentation_column.setVisible(visible)
+        self.presentation_scroll.setVisible(visible)
         self.compilation_toggle_button.setIcon(
             ui_icon("arrow-right" if visible else "arrow-left")
         )
@@ -2759,7 +2822,7 @@ class MainWindow(QMainWindow):
         self._visible_workspace_sizes = [780, 440]
         self.body_splitter.setSizes([250, 1200])
         self.workspace_splitter.setSizes(self._visible_workspace_sizes)
-        self.presentation_column.setSizes([520, 300])
+        self.presentation_column.setSizes([470, 210, 180])
         self.set_compilation_panel_visible(True)
         self.save_layout_state()
         self.statusBar().showMessage("Distribución restablecida", 4000)
@@ -2930,9 +2993,9 @@ class MainWindow(QMainWindow):
     def cases_by_radicacion(self) -> dict[str, list[Case]]:
         grouped: dict[str, list[Case]] = {}
         for root in self.store.settings.study_roots:
-            if not root.is_dir():
-                continue
-            for case in list_cases(root):
+            for case in self.cases_for_root(root):
+                if not case.path.is_dir():
+                    continue
                 value = str(read_case_metadata(case).get("Radicación", "")).strip()
                 if value:
                     grouped.setdefault(value, []).append(case)
@@ -2990,6 +3053,13 @@ class MainWindow(QMainWindow):
         self.reload_cases(self.case.path if self.case else None)
         self.statusBar().showMessage("Radicación actualizada en todos los casos vinculados", 5000)
 
+    def show_cases_add_menu(self):
+        self.cases_add_menu.popup(
+            self.add_location_button.mapToGlobal(
+                self.add_location_button.rect().bottomLeft()
+            )
+        )
+
     def choose_study_root(self):
         initial = str(self.store.settings.study_root or Path.home())
         folder = QFileDialog.getExistingDirectory(
@@ -3001,6 +3071,50 @@ class MainWindow(QMainWindow):
             self.store.add_study_root(Path(folder))
             self.case = None
             self.reload_cases()
+
+    def link_external_case(self, study_root: Path | None = None):
+        root = Path(study_root) if study_root else self.store.settings.study_root
+        if root is None:
+            QMessageBox.information(
+                self,
+                "Agregá una ubicación del Estudio",
+                "Primero agregá la ubicación bajo la cual querés mostrar la carpeta vinculada.",
+            )
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Vincular carpeta existente",
+            str(root.parent),
+        )
+        if not folder:
+            return
+        try:
+            case = self.store.add_linked_case(root, Path(folder))
+        except (FileExistsError, NotADirectoryError, OSError, ValueError) as error:
+            QMessageBox.warning(self, "No pudimos vincular la carpeta", str(error))
+            return
+        self.reload_cases(case.path)
+        self.statusBar().showMessage(
+            f"Carpeta vinculada: {case.name} · permanece en su ubicación original",
+            6000,
+        )
+
+    def unlink_external_case(self, path: Path):
+        answer = QMessageBox.question(
+            self,
+            "Desvincular carpeta",
+            f"¿Querés dejar de mostrar {path.name} en CASOS?\n\n"
+            "La carpeta y todos sus archivos permanecerán intactos en su ubicación original.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self.case and physical_path_key(self.case.path) == physical_path_key(path):
+            self.set_case(None)
+        if self.store.remove_linked_case(path):
+            self.reload_cases()
+            self.statusBar().showMessage("Carpeta desvinculada; no se modificaron sus archivos", 5000)
 
     def create_active_study_backup(self):
         root = self.store.settings.study_root
@@ -3209,6 +3323,14 @@ class MainWindow(QMainWindow):
         self._study_backup_thread = None
         self._study_backup_worker = None
 
+    def cases_for_root(self, root: Path) -> list[Case]:
+        cases = list_cases(root) if root.is_dir() else []
+        cases.extend(self.store.linked_cases_for_root(root))
+        unique: dict[str, Case] = {}
+        for case in cases:
+            unique.setdefault(physical_path_key(case.path), case)
+        return sorted(unique.values(), key=lambda case: case.name.casefold())
+
     def reload_cases(self, select_path: Path | None = None):
         roots = self.store.settings.study_roots
         active_root = self.store.settings.study_root
@@ -3229,6 +3351,7 @@ class MainWindow(QMainWindow):
         selected_item = None
         active_item = None
         radicaciones: dict[str, str] = {}
+        policy = normalized_activity_settings(self.store.settings.activity_settings)
         for root_path in roots:
             root_item = QTreeWidgetItem([root_path.name or str(root_path)])
             root_item.setIcon(0, ui_icon("building", "#2774A6"))
@@ -3241,86 +3364,93 @@ class MainWindow(QMainWindow):
             if root_path == active_root:
                 active_item = root_item
 
-            if root_path.is_dir():
-                cases = list_cases(root_path)
-                policy = normalized_activity_settings(self.store.settings.activity_settings)
-                activities = case_activities(cases, policy)
-                visible_cases = []
-                for case in cases:
-                    if not case_matches(case, query):
-                        continue
-                    activity = activities[case.path]
-                    if activity.archived and not policy["show_archived"]:
-                        continue
-                    if activity.status == "green" and not policy["show_recent"]:
-                        continue
-                    metadata = read_case_metadata(case)
-                    radicacion = str(metadata.get("Radicación", "")).strip()
-                    if radicacion:
-                        # La uniformidad nace del uso real del Estudio: se
-                        # evitan duplicados por mayúsculas, acentos o espacios.
-                        radicaciones.setdefault(
-                            _comparable_text(radicacion), radicacion
-                        )
-                    client_label, client_key = self.case_client_identity(metadata)
-                    visible_cases.append((case, activity, client_label, client_key, metadata))
+            cases = self.cases_for_root(root_path)
+            available_cases = [case for case in cases if case.path.is_dir()]
+            activities = case_activities(available_cases, policy)
+            visible_cases = []
+            for case in available_cases:
+                if not case_matches(case, query):
+                    continue
+                activity = activities[case.path]
+                if activity.archived and not policy["show_archived"]:
+                    continue
+                if activity.status == "green" and not policy["show_recent"]:
+                    continue
+                metadata = read_case_metadata(case)
+                radicacion = str(metadata.get("Radicación", "")).strip()
+                if radicacion:
+                    radicaciones.setdefault(_comparable_text(radicacion), radicacion)
+                client_label, client_key = self.case_client_identity(metadata)
+                visible_cases.append((case, activity, client_label, client_key, metadata))
 
-                grouped: dict[str, list[tuple[Case, object, str, str, dict[str, str]]]] = {}
-                for entry in visible_cases:
-                    if entry[3]:
-                        grouped.setdefault(entry[3], []).append(entry)
-                client_parents: dict[str, QTreeWidgetItem] = {}
-                for client_key, entries in grouped.items():
-                    if len(entries) < 2:
-                        continue
-                    label = entries[0][2]
-                    parent = QTreeWidgetItem([f"{label} — {len(entries)} casos"])
-                    parent.setIcon(0, ui_icon("person", "#2774A6"))
-                    parent.setToolTip(0, "Cliente con varios casos. Las carpetas y documentos siguen separados.")
-                    font = parent.font(0)
-                    font.setBold(True)
-                    parent.setFont(0, font)
-                    root_item.addChild(parent)
-                    parent.setExpanded(True)
-                    client_parents[client_key] = parent
-                for case, activity, _client_label, client_key, metadata in visible_cases:
-                    item = QTreeWidgetItem([case.name])
-                    color_key = {
-                        "green": "green_color",
-                        "yellow": "yellow_color",
-                        "red": "red_color",
-                        "archived": "archived_color",
-                    }[activity.status]
-                    try:
-                        unseen = len(unread_case_novedades(case))
-                    except (OSError, RuntimeError, sqlite3.Error):
-                        unseen = 0
-                    item.setIcon(0, badged_icon("folder", str(policy[color_key]), unseen))
-                    item.setData(0, PATH_ROLE, str(case.path))
-                    state_label = {
-                        "green": "Actividad normal",
-                        "yellow": "Requiere atención",
-                        "red": "Inactivo",
-                        "archived": "Archivado",
-                    }[activity.status]
-                    item.setToolTip(
-                        0,
-                        f"{state_label} · última actividad: "
-                        f"{activity.latest_at.astimezone().strftime('%d/%m/%Y')} "
-                        f"({activity.inactive_days} días)\n{case.path}",
-                    )
-                    client_parents.get(client_key, root_item).addChild(item)
-                    if select_path and case.path == select_path:
-                        selected_item = item
-                    elif self.case and case.path == self.case.path:
-                        selected_item = item
-            else:
+            grouped: dict[str, list[tuple[Case, object, str, str, dict[str, str]]]] = {}
+            for entry in visible_cases:
+                if entry[3]:
+                    grouped.setdefault(entry[3], []).append(entry)
+            client_parents: dict[str, QTreeWidgetItem] = {}
+            for client_key, entries in grouped.items():
+                if len(entries) < 2:
+                    continue
+                label = entries[0][2]
+                parent = QTreeWidgetItem([f"{label} — {len(entries)} casos"])
+                parent.setIcon(0, ui_icon("person", "#2774A6"))
+                parent.setToolTip(0, "Cliente con varios casos. Las carpetas y documentos siguen separados.")
+                font = parent.font(0)
+                font.setBold(True)
+                parent.setFont(0, font)
+                root_item.addChild(parent)
+                parent.setExpanded(True)
+                client_parents[client_key] = parent
+
+            for case, activity, _client_label, client_key, _metadata in visible_cases:
+                linked = self.store.linked_case_owner(case.path) is not None
+                item = QTreeWidgetItem([case.name])
+                color_key = {
+                    "green": "green_color", "yellow": "yellow_color",
+                    "red": "red_color", "archived": "archived_color",
+                }[activity.status]
+                try:
+                    unseen = len(unread_case_novedades(case))
+                except (OSError, RuntimeError, sqlite3.Error):
+                    unseen = 0
+                item.setIcon(0, badged_icon("folder", str(policy[color_key]), unseen))
+                item.setData(0, PATH_ROLE, str(case.path))
+                item.setData(0, CASE_ROOT_ROLE, str(case.database_root))
+                item.setData(0, LINKED_CASE_ROLE, linked)
+                state_label = {
+                    "green": "Actividad normal", "yellow": "Requiere atención",
+                    "red": "Inactivo", "archived": "Archivado",
+                }[activity.status]
+                linked_line = "Carpeta vinculada · " if linked else ""
+                item.setToolTip(
+                    0,
+                    f"{linked_line}{state_label} · última actividad: "
+                    f"{activity.latest_at.astimezone().strftime('%d/%m/%Y')} "
+                    f"({activity.inactive_days} días)\n{case.path}",
+                )
+                client_parents.get(client_key, root_item).addChild(item)
+                if select_path and physical_path_key(case.path) == physical_path_key(select_path):
+                    selected_item = item
+                elif self.case and physical_path_key(case.path) == physical_path_key(self.case.path):
+                    selected_item = item
+
+            for case in cases:
+                if case.path.is_dir() or self.store.linked_case_owner(case.path) is None:
+                    continue
+                if query and query.casefold() not in case.name.casefold():
+                    continue
+                item = QTreeWidgetItem([f"{case.name} · No disponible"])
+                item.setIcon(0, ui_icon("warning", "#B36A24"))
+                item.setData(0, PATH_ROLE, str(case.path))
+                item.setData(0, CASE_ROOT_ROLE, str(case.database_root))
+                item.setData(0, LINKED_CASE_ROLE, True)
+                item.setToolTip(0, f"Carpeta vinculada no accesible\n{case.path}")
+                root_item.addChild(item)
+
+            if not root_path.is_dir():
                 unavailable = QTreeWidgetItem(["Ubicación no disponible"])
                 unavailable.setDisabled(True)
-                unavailable.setIcon(
-                    0,
-                    ui_icon("warning", "#B36A24"),
-                )
+                unavailable.setIcon(0, ui_icon("warning", "#B36A24"))
                 root_item.addChild(unavailable)
             root_item.setExpanded(True)
 
@@ -3335,7 +3465,12 @@ class MainWindow(QMainWindow):
             )
         self.reload_quick_access()
         if selected_item:
-            self.set_case(Case(Path(selected_item.data(0, PATH_ROLE))))
+            self.set_case(
+                Case(
+                    Path(selected_item.data(0, PATH_ROLE)),
+                    study_root=Path(selected_item.data(0, CASE_ROOT_ROLE)),
+                )
+            )
         elif not self.case or not self.case.path.is_dir():
             self.set_case(None)
 
@@ -3361,6 +3496,7 @@ class MainWindow(QMainWindow):
         item = self.case_tree.currentItem()
         path = item.data(0, PATH_ROLE) if item else None
         root = item.data(0, ROOT_ROLE) if item else None
+        case_root = item.data(0, CASE_ROOT_ROLE) if item else None
         selected_path = Path(path) if path else None
         if (
             self.case
@@ -3369,12 +3505,14 @@ class MainWindow(QMainWindow):
         ):
             self.restore_case_tree_selection()
             return
-        if path:
-            case = Case(selected_path)
-            self.store.set_active_study_root(case.path.parent)
+        if path and selected_path.is_dir():
+            case = Case(selected_path, study_root=Path(case_root) if case_root else None)
+            self.store.set_active_study_root(case.database_root)
             self.update_study_summary()
             self.reload_quick_access()
             self.set_case(case)
+        elif path:
+            self.set_case(None)
         elif root:
             self.activate_study_root(Path(root))
 
@@ -3389,21 +3527,35 @@ class MainWindow(QMainWindow):
         item = self.case_tree.itemAt(point)
         path = item.data(0, PATH_ROLE) if item else None
         root = item.data(0, ROOT_ROLE) if item else None
+        linked = bool(item.data(0, LINKED_CASE_ROLE)) if item else False
+        case_root = item.data(0, CASE_ROOT_ROLE) if item else None
         if not path and not root:
             return
         self.case_tree.setCurrentItem(item)
         menu = QMenu(self)
         if path:
-            menu.addAction("Abrir carpeta", lambda: open_file(Path(path)))
-            menu.addAction("Renombrar caso…", lambda: self.rename_case_folder(Case(Path(path))))
-            target_case = Case(Path(path))
-            archived = read_case_metadata(target_case).get("Archivado", "").casefold() in {
-                "1", "si", "sí", "true", "yes",
-            }
-            menu.addAction(
-                "Reactivar caso" if archived else "Archivar caso",
-                lambda: self.toggle_case_archived(target_case, not archived),
+            target_path = Path(path)
+            target_case = Case(
+                target_path,
+                study_root=Path(case_root) if case_root else None,
             )
+            open_action = menu.addAction("Abrir carpeta", lambda: open_file(target_path))
+            open_action.setEnabled(target_path.is_dir())
+            if linked:
+                menu.addAction(
+                    "Desvincular carpeta…",
+                    lambda: self.unlink_external_case(target_path),
+                )
+            elif target_path.is_dir():
+                menu.addAction("Renombrar caso…", lambda: self.rename_case_folder(target_case))
+            if target_path.is_dir():
+                archived = read_case_metadata(target_case).get("Archivado", "").casefold() in {
+                    "1", "si", "sí", "true", "yes",
+                }
+                menu.addAction(
+                    "Reactivar caso" if archived else "Archivar caso",
+                    lambda: self.toggle_case_archived(target_case, not archived),
+                )
         else:
             root_path = Path(root)
             open_action = menu.addAction("Abrir ubicación", lambda: open_file(root_path))
@@ -3415,6 +3567,10 @@ class MainWindow(QMainWindow):
                 lambda: self.import_external_case(root_path),
             )
             incorporate.setEnabled(root_path.is_dir())
+            menu.addAction(
+                "Vincular carpeta existente…",
+                lambda: self.link_external_case(root_path),
+            )
             menu.addSeparator()
             menu.addAction(
                 "Quitar del Gestor…",
@@ -3430,9 +3586,9 @@ class MainWindow(QMainWindow):
     def mark_all_sisfe_news_read(self):
         changed = 0
         for root in self.store.settings.study_roots:
-            if not root.is_dir():
-                continue
-            for case in list_cases(root):
+            for case in self.cases_for_root(root):
+                if not case.path.is_dir():
+                    continue
                 try:
                     changed += mark_case_novedades_read(case)
                 except (OSError, RuntimeError, sqlite3.Error):
@@ -3486,7 +3642,7 @@ class MainWindow(QMainWindow):
 
     def activate_study_root(self, root: Path):
         self.store.set_active_study_root(root)
-        if self.case and self.case.path.parent != root:
+        if self.case and self.case.database_root != root:
             self.set_case(None)
         self.update_study_summary()
         self.reload_quick_access()
@@ -3503,7 +3659,7 @@ class MainWindow(QMainWindow):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        if self.case and self.case.path.parent == root:
+        if self.case and self.case.database_root == root:
             self.set_case(None)
         self.store.remove_study_root(root)
         self.reload_cases()
@@ -3551,6 +3707,8 @@ class MainWindow(QMainWindow):
         self.last_compiled = None
         self.last_signed = None
         self.compilation.clear()
+        self.signing_queue.clear()
+        self.update_signing_actions()
         self.last_output.setText("Aún no compilaste")
         self.workspace.setEnabled(case is not None)
         self.open_case_button.setEnabled(case is not None)
@@ -3609,7 +3767,7 @@ class MainWindow(QMainWindow):
         if not identity:
             return indexed
         return [
-            candidate for candidate in list_cases(self.case.path.parent)
+            candidate for candidate in self.cases_for_root(self.case.database_root)
             if self.case_client_identity(read_case_metadata(candidate))[1] == identity
         ]
 
@@ -3671,6 +3829,8 @@ class MainWindow(QMainWindow):
         )
         for draft_item in draft.items:
             self.add_compilation_path(draft_item.path, draft_item.kind)
+        for path in draft.signing_files:
+            self.add_signing_path(path)
         self.update_last_output_label()
 
     def save_compilation_draft(self):
@@ -3690,6 +3850,7 @@ class MainWindow(QMainWindow):
                 current_writing=self.current_writing,
                 last_compiled=self.last_compiled,
                 last_signed=self.last_signed,
+                signing_files=self.signing_queue_paths(),
                 profile=self.limit_combo.currentText(),
             )
         except (OSError, ValueError) as error:
@@ -4019,9 +4180,9 @@ class MainWindow(QMainWindow):
     def expedientes_with_identifier(self) -> list[Case]:
         cases: list[Case] = []
         for root in self.store.settings.study_roots:
-            if not root.is_dir():
-                continue
-            for candidate in list_cases(root):
+            for candidate in self.cases_for_root(root):
+                if not candidate.path.is_dir():
+                    continue
                 if str(read_case_metadata(candidate).get("CUIJ", "")).strip():
                     cases.append(candidate)
         return cases
@@ -4343,9 +4504,9 @@ class MainWindow(QMainWindow):
     def study_activity_entries(self) -> list[tuple[Case, object]]:
         entries = []
         for root in self.store.settings.study_roots:
-            if not root.is_dir():
-                continue
-            for case in list_cases(root):
+            for case in self.cases_for_root(root):
+                if not case.path.is_dir():
+                    continue
                 try:
                     entries.extend((case, item) for item in self.case_activity_items(case))
                 except (OSError, RuntimeError, sqlite3.Error):
@@ -4781,7 +4942,9 @@ class MainWindow(QMainWindow):
             icon_name = (
                 "notification" if kind == "cedula"
                 else "judicial" if judicial
-                else "party-filing" if kind == "parte"
+                else (
+                    "party-filing" if available or local_documents else "party-missing"
+                ) if kind == "parte"
                 else "file"
             )
             item = QListWidgetItem(
@@ -6088,7 +6251,6 @@ class MainWindow(QMainWindow):
             return path.name
         description = self.case_file_description(path)
         labels = {
-            "Documento editable en Word": "EDITABLE",
             "PDF final para firmar o presentar": "PARA FIRMAR",
             "PDF firmado": "FIRMADO",
         }
@@ -6264,6 +6426,14 @@ class MainWindow(QMainWindow):
                 item.setData(PATH_ROLE, str(new_path))
                 kind = item.data(TYPE_ROLE)
                 item.setText(self.compilation_text(new_path, kind))
+        for index in range(self.signing_queue.count()):
+            item = self.signing_queue.item(index)
+            old_path = Path(item.data(PATH_ROLE))
+            new_path = moved(old_path)
+            if new_path != old_path:
+                item.setData(PATH_ROLE, str(new_path))
+                item.setText(new_path.name)
+                item.setToolTip(str(new_path))
         self.update_writing_label()
         self.save_compilation_draft()
 
@@ -6295,6 +6465,12 @@ class MainWindow(QMainWindow):
                 "Agregar contenido a Presentación" if path.is_dir() else "Agregar a Presentación",
                 self.add_selected_to_compilation,
             )
+            selected_paths = self.selected_case_paths()
+            if selected_paths and all(
+                candidate.is_file() and candidate.suffix.casefold() == ".pdf"
+                for candidate in selected_paths
+            ):
+                menu.addAction("Preparar para firmar", self.prepare_selected_for_signing)
             if path.is_file() and path.suffix.lower() in {".doc", ".docx", ".odt", ".rtf"}:
                 menu.addAction("Usar como escrito", lambda: self.set_current_writing(path))
             if path.is_file() and can_convert_to_pdf(path):
@@ -6602,9 +6778,14 @@ class MainWindow(QMainWindow):
                 path = Path(self.compilation.item(index).data(PATH_ROLE))
                 if was_removed(path):
                     self.compilation.takeItem(index)
+            for index in range(self.signing_queue.count() - 1, -1, -1):
+                path = Path(self.signing_queue.item(index).data(PATH_ROLE))
+                if was_removed(path):
+                    self.signing_queue.takeItem(index)
             self.reload_case_files()
             self.update_writing_label()
             self.update_compilation_count()
+            self.update_signing_actions()
             self.statusBar().showMessage("Elemento enviado a la Papelera" if len(paths) == 1 else "Elementos enviados a la Papelera", 4500)
         except Exception as error:
             QMessageBox.warning(self, "No pudimos quitar los archivos", str(error))
@@ -6622,6 +6803,102 @@ class MainWindow(QMainWindow):
         self.add_paths_to_compilation(self.selected_case_paths())
         if self.compilation.count() > before:
             self.open_preparation_dialog()
+
+    def prepare_selected_for_signing(self):
+        self.add_paths_to_signing_queue(self.selected_case_paths())
+
+    def pick_signing_files(self):
+        initial = str(self.case.path) if self.case else ""
+        files = QFileDialog.getOpenFileNames(
+            self,
+            "Agregar PDF a ARCHIVOS A FIRMAR",
+            initial,
+            "Documentos PDF (*.pdf)",
+        )[0]
+        if files:
+            self.add_paths_to_signing_queue([Path(path) for path in files])
+
+    def handle_signing_drop(self, paths: list[Path]):
+        self.add_paths_to_signing_queue(paths)
+
+    def add_paths_to_signing_queue(self, paths: list[Path]):
+        rejected = 0
+        added = 0
+        for path in paths:
+            if not path.is_file() or path.suffix.casefold() != ".pdf":
+                rejected += 1
+                continue
+            before = self.signing_queue.count()
+            self.add_signing_path(path)
+            added += int(self.signing_queue.count() > before)
+        if rejected:
+            self.statusBar().showMessage(
+                "ARCHIVOS A FIRMAR sólo admite documentos PDF; no se modificó ningún archivo.",
+                6000,
+            )
+        elif added:
+            self.statusBar().showMessage(
+                f"{added} PDF agregado{'s' if added != 1 else ''} a ARCHIVOS A FIRMAR",
+                4000,
+            )
+
+    def add_signing_path(self, path: Path):
+        try:
+            candidate = Path(path).resolve(strict=True)
+        except (OSError, RuntimeError):
+            return
+        if not candidate.is_file() or candidate.suffix.casefold() != ".pdf":
+            return
+        candidate_key = str(candidate).casefold()
+        for index in range(self.signing_queue.count()):
+            existing = Path(self.signing_queue.item(index).data(PATH_ROLE))
+            try:
+                existing_key = str(existing.resolve(strict=True)).casefold()
+            except (OSError, RuntimeError):
+                existing_key = str(existing).casefold()
+            if existing_key == candidate_key:
+                self.signing_queue.setCurrentRow(index)
+                return
+        item = QListWidgetItem(candidate.name)
+        item.setData(PATH_ROLE, str(candidate))
+        item.setToolTip(str(candidate))
+        item.setIcon(self.icon_for_path(candidate))
+        self.signing_queue.addItem(item)
+        self.update_signing_actions()
+        self.save_compilation_draft()
+
+    def signing_queue_paths(self) -> list[Path]:
+        return [
+            Path(self.signing_queue.item(index).data(PATH_ROLE))
+            for index in range(self.signing_queue.count())
+        ]
+
+    def remove_from_signing_queue(self):
+        for item in self.signing_queue.selectedItems():
+            self.signing_queue.takeItem(self.signing_queue.row(item))
+        self.update_signing_actions()
+        self.save_compilation_draft()
+
+    def remove_signing_path(self, path: Path):
+        target = str(Path(path).resolve()).casefold()
+        for index in range(self.signing_queue.count() - 1, -1, -1):
+            existing = Path(self.signing_queue.item(index).data(PATH_ROLE))
+            if str(existing.resolve()).casefold() == target:
+                self.signing_queue.takeItem(index)
+        self.update_signing_actions()
+        self.save_compilation_draft()
+
+    def update_signing_actions(self):
+        if not hasattr(self, "signing_queue"):
+            return
+        count = self.signing_queue.count()
+        self.signing_queue_count.setText(
+            f"{count} archivo" if count == 1 else f"{count} archivos"
+        )
+        if hasattr(self, "sign_button"):
+            self.sign_button.setEnabled(count > 0)
+        if hasattr(self, "sign_options_button"):
+            self.sign_options_button.setEnabled(count > 0 or self.case is not None)
 
     def compilable_files(self, paths: list[Path]) -> list[Path]:
         result: list[Path] = []
@@ -7143,6 +7420,7 @@ class MainWindow(QMainWindow):
         # referencias internas; los originales y el PDF resultante permanecen
         # en el expediente y el último resultado sigue disponible para firmar.
         self.clear_compilation()
+        self.add_signing_path(result.output)
         self.update_last_output_label()
         self.case_directory = result.output.parent
         self.work_tabs.setCurrentIndex(self.files_tab_index)
@@ -7281,37 +7559,51 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def current_pdf_for_signing(self) -> Path | None:
-        for path in self.selected_case_paths():
-            if path.is_file() and path.suffix.casefold() == ".pdf":
+        selected = self.signing_queue.currentItem()
+        if selected:
+            path = Path(selected.data(PATH_ROLE))
+            if path.is_file():
                 return path
-        if self.last_compiled and self.last_compiled.exists():
-            return self.last_compiled
-        return None
+        paths = self.signing_queue_paths()
+        return paths[0] if paths and paths[0].is_file() else None
 
     def sign_current_pdf(self):
-        pdf = self.current_pdf_for_signing()
-        if pdf is None:
+        pdfs = self.signing_queue_paths()
+        if not pdfs:
             QMessageBox.information(
                 self,
-                "Falta el PDF",
-                "Seleccioná un PDF del expediente o compilá la presentación primero.",
+                "ARCHIVOS A FIRMAR está vacío",
+                "Agregá uno o varios PDF a ARCHIVOS A FIRMAR antes de iniciar la firma.",
             )
             return
-        self.sign_with_token(pdf)
+        try:
+            for pdf in pdfs:
+                inspect_pdf_for_signing(pdf)
+        except SigningError as error:
+            QMessageBox.critical(
+                self,
+                "No es posible firmar la cola",
+                f"{error}\n\nNo se modificó ningún archivo.",
+            )
+            return
+        for pdf in pdfs:
+            signed = self.sign_with_token(pdf)
+            if signed is None:
+                break
+            self.remove_signing_path(pdf)
 
     def show_sign_menu(self):
         pdf = self.current_pdf_for_signing()
         menu = QMenu(self)
         certificate = self.digital_signer.certificate
         internal_label = (
-            f"Firmar dentro del Gestor · sesión abierta"
+            f"Firmar cola dentro de FORO · sesión abierta"
             if self.digital_signer.active
-            else "Firmar dentro del Gestor…"
+            else "Firmar cola dentro de FORO…"
         )
         internal_action = menu.addAction(ui_icon("signature", "#2B7564"), internal_label)
-        internal_action.setEnabled(pdf is not None)
-        if pdf:
-            internal_action.triggered.connect(lambda: self.sign_with_token(pdf))
+        internal_action.setEnabled(self.signing_queue.count() > 0)
+        internal_action.triggered.connect(self.sign_current_pdf)
         if certificate:
             internal_action.setToolTip(certificate.summary)
             menu.addAction("Cerrar sesión de firma", self.close_digital_signature_session)
@@ -7344,7 +7636,7 @@ class MainWindow(QMainWindow):
         dialog = CertificatePickerDialog(certificates, self)
         return dialog.selected_certificate if dialog.exec() else None
 
-    def sign_with_token(self, pdf: Path):
+    def sign_with_token(self, pdf: Path) -> Path | None:
         try:
             certificate = self.digital_signer.certificate or self.choose_signing_certificate()
             if not certificate:
@@ -7404,12 +7696,14 @@ class MainWindow(QMainWindow):
                     "La sesión del token seguirá abierta para los próximos documentos.",
                 )
             self.statusBar().showMessage("Firma digital terminada · sesión abierta", 6000)
+            return signed
         except (SigningUnavailable, SigningError, FileExistsError) as error:
             QMessageBox.critical(
                 self,
                 "No pudimos firmar dentro del Gestor",
                 f"{error}\n\nPodés continuar con Xólido desde este mismo menú.",
             )
+            return None
         except Exception as error:
             self.digital_signer.close()
             QMessageBox.critical(
@@ -7417,6 +7711,7 @@ class MainWindow(QMainWindow):
                 "No pudimos firmar dentro del Gestor",
                 f"Ocurrió un problema inesperado.\n\nDetalle: {error}",
             )
+            return None
 
     def close_digital_signature_session(self):
         self.digital_signer.close()
@@ -7496,6 +7791,7 @@ class MainWindow(QMainWindow):
                 return
         self._signer_output_timer.stop()
         self._external_sign_source = None
+        self.remove_signing_path(source)
         self.last_signed = recovered
         self.case_directory = recovered.parent
         self.reload_case_files(recovered)

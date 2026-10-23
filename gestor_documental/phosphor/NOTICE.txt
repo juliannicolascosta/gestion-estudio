@@ -1,0 +1,4 @@
+Phosphor Icons Core 2.1.1
+Selected Duotone SVG assets bundled locally for FORO.
+Source package: @phosphor-icons/core@2.1.1
+License: MIT (see LICENSE.txt).

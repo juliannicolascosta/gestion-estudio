@@ -125,9 +125,9 @@ class ExplorerColumnsDelegate(QStyledItemDelegate):
                     break
                 chip = QRect(chip_x, name_rect.center().y() - 10, chip_width, 20)
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor("#E5F1EC" if tag != "FIRMADO" else "#DDEFE4"))
+                painter.setBrush(QColor("#E5F1EC" if tag != "FIRMADO" else "#FCE8E6"))
                 painter.drawRoundedRect(chip, 7, 7)
-                painter.setPen(QColor("#285E4C"))
+                painter.setPen(QColor("#C23B32" if tag == "FIRMADO" else "#285E4C"))
                 painter.drawText(chip, int(Qt.AlignmentFlag.AlignCenter), tag)
                 chip_x += chip_width + 5
         painter.setPen(QColor("#6B7A6E" if not selected else "#3E5A4B"))

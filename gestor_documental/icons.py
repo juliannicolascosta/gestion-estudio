@@ -2,10 +2,63 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+import re
 
 from PyQt6.QtCore import QByteArray, Qt
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
+
+
+_PHOSPHOR_DUOTONE_DIR = Path(__file__).with_name("phosphor") / "duotone"
+
+# Nombres estables usados por FORO, vinculados a los recursos oficiales de
+# Phosphor Icons 2.1.1 que se distribuyen localmente con la aplicación.
+_PHOSPHOR_ASSETS = {
+    "plus": "plus",
+    "user-plus": "user-plus",
+    "location-plus": "map-pin-plus",
+    "folder": "folder",
+    "folder-plus": "folder-plus",
+    "folder-open": "folder-open",
+    "building": "buildings",
+    "file": "file",
+    "file-plus": "file-plus",
+    "file-text": "file-text",
+    "file-pdf": "file-pdf",
+    "file-word": "file-doc",
+    "file-image": "file-image",
+    "file-sheet": "file-xls",
+    "paperclip": "paperclip",
+    "arrow-left": "arrow-left",
+    "arrow-right": "arrow-right",
+    "arrow-up": "arrow-up",
+    "arrow-down": "arrow-down",
+    "trash": "trash",
+    "clear": "broom",
+    "layers": "stack",
+    "signature": "signature",
+    "external": "arrow-square-out",
+    "template": "files",
+    "copy": "copy",
+    "settings": "gear",
+    "warning": "warning",
+    "edit": "pencil-simple",
+    "check": "check",
+    "refresh": "arrows-clockwise",
+    "download": "download-simple",
+    "notification": "envelope",
+    "search": "magnifying-glass",
+    "sort": "arrows-down-up",
+    "dot": "circle",
+    "books": "books",
+    "history": "clock-counter-clockwise",
+    "person": "user",
+    "bell": "bell",
+    "judicial": "gavel",
+    "party-filing": "file-dashed",
+    "party-missing": "file-dashed",
+    "stop": "stop",
+}
 
 
 _SHAPES = {
@@ -60,26 +113,38 @@ _SHAPES = {
 }
 
 
-@lru_cache(maxsize=128)
-def ui_icon(name: str, color: str = "#2B7564", size: int = 24) -> QIcon:
-    """Return a crisp vector icon in the product palette."""
-    shape = _SHAPES.get(name, _SHAPES["file"])
-    svg = f"""
-    <svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24"
-         fill="none" stroke="{color}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <style>.soft {{ fill: {color}; fill-opacity: .12; }} .solid {{ fill: {color}; }}</style>
-      {shape}
-    </svg>
-    """.encode("utf-8")
-    scale = 2
-    pixmap = QPixmap(size * scale, size * scale)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    renderer = QSvgRenderer(QByteArray(svg))
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    pixmap.setDevicePixelRatio(scale)
-    return QIcon(pixmap)
+# Geometrías originales de Phosphor Icons 2.1.1 (Regular), descargadas para
+# la cronología del Expediente. Se mantienen separadas del juego de íconos
+# general de FORO para no alterar ningún otro módulo.
+_MOVEMENT_SHAPES = {
+    "judicial": "M243.32,116.69l-16-16a16,16,0,0,0-20.84-1.53L156.84,49.52a16,16,0,0,0-1.52-20.84l-16-16a16,16,0,0,0-22.63,0l-64,64a16,16,0,0,0,0,22.63l16,16a16,16,0,0,0,20.83,1.52L96.69,124,31.31,189.38A25,25,0,0,0,66.63,224.7L132,159.32l7.17,7.16a16,16,0,0,0,1.52,20.84l16,16a16,16,0,0,0,22.63,0l64-64A16,16,0,0,0,243.32,116.69ZM80,104,64,88l64-64,16,16ZM55.32,213.38a9,9,0,0,1-12.69,0,9,9,0,0,1,0-12.68L108,135.32,120.69,148ZM101,105.66,145.66,61,195,110.34,150.35,155ZM168,192l-16-16,4-4h0l56-56h0l4-4,16,16Z",
+    "notification": "M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48Zm-96,85.15L52.57,64H203.43ZM98.71,128,40,181.81V74.19Zm11.84,10.85,12,11.05a8,8,0,0,0,10.82,0l12-11.05,58,53.15H52.57ZM157.29,128,216,74.18V181.82Z",
+    "party-filing": "M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-32-80a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,136Zm0,32a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,168Z",
+    "party-missing": "M80,224a8,8,0,0,1-8,8H56a16,16,0,0,1-16-16V184a8,8,0,0,1,16,0v32H72A8,8,0,0,1,80,224ZM216,88v48a8,8,0,0,1-16,0V96H152a8,8,0,0,1-8-8V40H120a8,8,0,0,1,0-16h32a8,8,0,0,1,5.66,2.34l56,56A8,8,0,0,1,216,88Zm-56-8h28.69L160,51.31ZM80,24H56A16,16,0,0,0,40,40V64a8,8,0,0,0,16,0V40H80a8,8,0,0,0,0-16ZM208,168a8,8,0,0,0-8,8v40h-8a8,8,0,0,0,0,16h8a16,16,0,0,0,16-16V176A8,8,0,0,0,208,168ZM48,152a8,8,0,0,0,8-8V104a8,8,0,0,0-16,0v40A8,8,0,0,0,48,152Zm104,64H112a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Z",
+    "file": "M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z",
+}
+
+
+@lru_cache(maxsize=192)
+def ui_icon(
+    name: str,
+    color: str = "#2B7564",
+    size: int = 24,
+    soft_fill: bool = True,
+) -> QIcon:
+    """Render an official local Phosphor Duotone asset in FORO's palette."""
+    del soft_fill  # Se conserva el argumento para compatibilidad con llamadas previas.
+    asset_name = _PHOSPHOR_ASSETS.get(name, _PHOSPHOR_ASSETS["file"])
+    asset_path = _PHOSPHOR_DUOTONE_DIR / f"{asset_name}-duotone.svg"
+    try:
+        svg = asset_path.read_text(encoding="utf-8")
+    except OSError:
+        svg = (_PHOSPHOR_DUOTONE_DIR / "file-duotone.svg").read_text(encoding="utf-8")
+    # Los recursos Duotone incluyen una primera superficie al 20% que, en los
+    # tamaños compactos de FORO, se percibe como un fondo gris. Conservamos el
+    # dibujo oficial y retiramos únicamente esa superficie secundaria.
+    svg = re.sub(r'<path\b[^>]*\bopacity="0\.2"[^>]*/>', "", svg)
+    return _render_svg(svg.replace("currentColor", color).encode("utf-8"), size)
 
 
 def badged_icon(name: str, color: str, count: int, size: int = 24) -> QIcon:
@@ -110,10 +175,18 @@ def badged_icon(name: str, color: str, count: int, size: int = 24) -> QIcon:
 
 def movement_icon(name: str, color: str, unread: bool, size: int = 24) -> QIcon:
     """Tipo por forma, estado documental por color y no leído por punto rojo."""
+    shape = _MOVEMENT_SHAPES.get(name, _MOVEMENT_SHAPES["file"])
+    svg = f"""
+    <svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}"
+         viewBox="0 0 256 256" fill="{color}">
+      <path d="{shape}"/>
+    </svg>
+    """.encode("utf-8")
+    icon = _render_svg(svg, size)
     if not unread:
-        return ui_icon(name, color, size)
+        return icon
     scale = 2
-    canvas = ui_icon(name, color, size).pixmap(size * scale, size * scale)
+    canvas = icon.pixmap(size * scale, size * scale)
     canvas.setDevicePixelRatio(1)
     painter = QPainter(canvas)
     diameter = 6 * scale
