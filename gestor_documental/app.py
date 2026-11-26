@@ -333,8 +333,9 @@ QPushButton#iconQuiet { min-width: 30px; max-width: 30px; min-height: 30px; max-
 QPushButton#iconQuiet:hover { background: #EDEAE0; }
 QPushButton#topIcon { min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; padding: 0; border: 0; background: transparent; }
 QPushButton#topIcon:hover { background: #3A6455; }
-QPushButton#limit { padding: 6px 2px; color: #3A4735; font-weight: 600; }
-QPushButton#limit:checked { background: #2B5748; color: #F9F4E9; border-color: #2B5748; }
+QPushButton#writingAction { padding: 4px 8px; color: #2B5748; }
+QPushButton#limit { padding: 2px 2px; background: transparent; color: #3A4735; font-weight: 600; }
+QPushButton#limit:checked { background: #E2EBDC; color: #1F4034; border-color: #9CB8A5; }
 QPushButton#columnHeaderButton { background: transparent; border: 0; border-bottom: 1px solid #EDE8DB; border-radius: 0; color: #7C8B7E; font-size: 10px; font-weight: 700; padding: 4px 2px; text-align: left; }
 QPushButton#columnHeaderButton:hover { color: #2B5748; background: #F7F5EC; }
 QTreeWidget, QListWidget { background: transparent; border: 0; outline: 0; }
@@ -2403,6 +2404,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _build_presentation_panel(self) -> QWidget:
         preparation_card, preparation_layout = make_card()
+        preparation_layout.setContentsMargins(14, 10, 14, 10)
+        preparation_layout.setSpacing(6)
         header = QHBoxLayout()
         title = QLabel("Presentación")
         title.setObjectName("sectionTitle")
@@ -2413,36 +2416,34 @@ class MainWindow(QMainWindow):
         header.addWidget(self.compilation_count)
         add_presentation = icon_button(
             "plus", "Agregar archivos a la presentación", self.pick_presentation_files,
-            bordered=True,
         )
-        header.addWidget(add_presentation)
         self.compilation_toggle_button = icon_button(
             "arrow-right", "Ocultar el panel Presentación", self.toggle_compilation_panel,
-            bordered=True,
         )
-        header.addWidget(self.compilation_toggle_button)
         preparation_layout.addLayout(header)
 
         writing_row = QHBoxLayout()
         writing_row.setSpacing(5)
         self.writing_button = QPushButton("Nuevo escrito")
-        self.writing_button.setObjectName("primary")
-        decorate_button(self.writing_button, "file-plus", "#F9F4E9")
+        self.writing_button.setObjectName("writingAction")
+        self.writing_button.setFixedHeight(30)
+        decorate_button(self.writing_button, "file-plus")
         self.writing_button.setToolTip("Elegir un modelo y crear el escrito del caso (Ctrl+N)")
         self.writing_button.clicked.connect(self.new_writing_from_model)
-        writing_row.addWidget(self.writing_button, 1)
-        preparation_layout.addLayout(writing_row)
+        writing_row.addWidget(self.writing_button)
 
         self.writing_name = QLabel("Todavía no elegiste un escrito")
         self.writing_name.setObjectName("muted")
-        self.writing_name.setWordWrap(True)
-        preparation_layout.addWidget(self.writing_name)
+        self.writing_name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        writing_row.addWidget(self.writing_name, 1)
+        preparation_layout.addLayout(writing_row)
 
         files_label = QLabel("ARCHIVOS EN LA PRESENTACIÓN")
         files_label.setObjectName("eyebrow")
         preparation_layout.addWidget(files_label)
 
         self.compilation = CompilationList()
+        self.compilation.setMinimumHeight(100)
         self.compilation.filesDropped.connect(self.handle_compilation_drop)
         self.compilation.dropRejected.connect(self.notify_unsupported_file_drop)
         self.compilation.removeRequested.connect(self.remove_from_compilation)
@@ -2460,6 +2461,8 @@ class MainWindow(QMainWindow):
         prep_actions.addWidget(remove)
         prep_actions.addWidget(clear)
         prep_actions.addWidget(history)
+        prep_actions.addWidget(add_presentation)
+        prep_actions.addWidget(self.compilation_toggle_button)
         prep_actions.addStretch()
         prep_actions.addWidget(move_up)
         prep_actions.addWidget(move_down)
@@ -2480,11 +2483,10 @@ class MainWindow(QMainWindow):
         self.limit_combo.hide()
         actions_layout.addWidget(self.limit_combo)
 
-        limits_grid = QGridLayout()
-        limits_grid.setHorizontalSpacing(5)
-        limits_grid.setVerticalSpacing(5)
+        limits_row = QHBoxLayout()
+        limits_row.setSpacing(5)
         self.limit_buttons: dict[int, QPushButton] = {}
-        for index, (text, value) in enumerate(PRESENTATION_LIMITS):
+        for text, value in PRESENTATION_LIMITS:
             button = QPushButton(text)
             button.setObjectName("limit")
             button.setCheckable(True)
@@ -2495,9 +2497,9 @@ class MainWindow(QMainWindow):
             button.clicked.connect(
                 lambda _checked=False, limit=value: self.choose_presentation_limit(limit)
             )
-            limits_grid.addWidget(button, index // 2, index % 2)
+            limits_row.addWidget(button)
             self.limit_buttons[value] = button
-        actions_layout.addLayout(limits_grid)
+        actions_layout.addLayout(limits_row)
 
         self.limit_hint = QLabel("Sin límite elegido: se compila al tamaño natural.")
         self.limit_hint.setObjectName("actionMuted")
@@ -2516,12 +2518,15 @@ class MainWindow(QMainWindow):
         actions_layout.addSpacing(4)
         self.compile_button = QPushButton("Compilar PDF")
         self.compile_button.setObjectName("primary")
+        self.compile_button.setFixedHeight(36)
         decorate_button(self.compile_button, "layers", "#F9F4E9")
         self.compile_button.setToolTip("Unir la presentación en un único PDF (Ctrl+P)")
         self.compile_button.clicked.connect(self.compile_pdf)
         actions_layout.addWidget(self.compile_button)
 
         queue_card, queue_layout = make_card()
+        queue_layout.setContentsMargins(14, 10, 14, 10)
+        queue_layout.setSpacing(6)
         queue_header = QHBoxLayout()
         queue_title = QLabel("ARCHIVOS A FIRMAR")
         queue_title.setObjectName("sectionTitle")
@@ -2555,6 +2560,8 @@ class MainWindow(QMainWindow):
         queue_layout.addLayout(queue_actions)
 
         signature_card, signature_layout = make_card("actionCard")
+        signature_layout.setContentsMargins(14, 10, 14, 10)
+        signature_layout.setSpacing(6)
         signature_title = QLabel("FIRMA")
         signature_title.setObjectName("sectionTitle")
         signature_layout.addWidget(signature_title)
@@ -2590,13 +2597,13 @@ class MainWindow(QMainWindow):
         self.presentation_column.setHandleWidth(6)
         self.presentation_column.setMinimumWidth(250)
         self.presentation_column.setMaximumWidth(560)
-        self.presentation_column.setMinimumHeight(790)
+        self.presentation_column.setMinimumHeight(620)
         self.presentation_column.addWidget(self.compilation_card)
         self.presentation_column.addWidget(queue_card)
         self.presentation_column.addWidget(signature_card)
-        self.presentation_column.setSizes([470, 210, 180])
-        # En ventanas bajas no se comprimen los tres bloques hasta ocultar sus
-        # textos y acciones: se conserva su alto útil y se desplaza la columna.
+        self.presentation_column.setSizes([345, 140, 123])
+        # La altura compacta entra en la ventana estándar. Si el espacio baja
+        # de ese umbral, la columna conserva sus controles y pasa a desplazarse.
         self.presentation_scroll = QScrollArea()
         self.presentation_scroll.setObjectName("presentationScroll")
         self.presentation_scroll.setWidgetResizable(True)
@@ -2717,7 +2724,7 @@ class MainWindow(QMainWindow):
             state.get("workspace"), 2, self._visible_workspace_sizes
         )
         presentation_sizes = self._valid_layout_sizes(
-            state.get("presentation"), 3, [470, 210, 180]
+            state.get("presentation"), 3, [345, 140, 123]
         )
         self._visible_workspace_sizes = workspace_sizes
         self.body_splitter.setSizes(body_sizes)
@@ -2822,7 +2829,7 @@ class MainWindow(QMainWindow):
         self._visible_workspace_sizes = [780, 440]
         self.body_splitter.setSizes([250, 1200])
         self.workspace_splitter.setSizes(self._visible_workspace_sizes)
-        self.presentation_column.setSizes([470, 210, 180])
+        self.presentation_column.setSizes([345, 140, 123])
         self.set_compilation_panel_visible(True)
         self.save_layout_state()
         self.statusBar().showMessage("Distribución restablecida", 4000)

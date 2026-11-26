@@ -73,6 +73,8 @@ class CompilationList(QListWidget):
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.setSpacing(2)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -110,10 +112,9 @@ class CompilationList(QListWidget):
         font.setPointSize(10)
         painter.setFont(font)
         painter.drawText(
-            self.viewport().rect().adjusted(24, 24, -24, -24),
-            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-            "Arrastrá archivos aquí\n"
-            "También podés agregarlos desde Archivos del caso",
+            self.viewport().rect().adjusted(12, 8, -12, -8),
+            Qt.AlignmentFlag.AlignCenter,
+            "Arrastrá archivos aquí",
         )
 
     def keyPressEvent(self, event):
